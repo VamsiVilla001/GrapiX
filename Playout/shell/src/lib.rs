@@ -547,6 +547,14 @@ fn scheduled(frame: Option<u64>) -> TakeAt {
     }
 }
 
+/// 2.13: the front end's own record of what it did and what went wrong in it,
+/// written to this shell's log. Only what `gx_telemetry::ui` accepts is written;
+/// an entry of another kind, or with another field, is refused.
+#[tauri::command]
+fn cmd_log(entry: gx_telemetry::ui::UiEntry) -> Result<(), String> {
+    gx_telemetry::ui::record(entry).map_err(|refusal| refusal.to_string())
+}
+
 /// Build and run the Playout window.
 pub fn run() {
     // 2.12: Playout's log, from here until the window closes.
@@ -554,7 +562,9 @@ pub fn run() {
     tracing::info!(event = "playout.start", version = env!("CARGO_PKG_VERSION"));
     let built = tauri::Builder::default()
         .manage(Connection::default())
-        .invoke_handler(tauri::generate_handler![
+        // 2.13: each command runs inside the scope of its call's correlation id.
+        .invoke_handler(gx_shell_log::scoped(tauri::generate_handler![
+            cmd_log,
             cmd_connect,
             cmd_status,
             cmd_cue,
@@ -563,7 +573,7 @@ pub fn run() {
             cmd_phase,
             cmd_configure_output,
             cmd_default_endpoint,
-        ])
+        ]))
         .build(tauri::generate_context!());
     let app = match built {
         Ok(app) => app,

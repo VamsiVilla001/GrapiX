@@ -26,6 +26,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 gx-telemetry = { workspace = true }
+gx-shell-log = { workspace = true }
 tracing = "0.1"
 gx-contracts = { workspace = true }
 gx-asset-plane = { workspace = true }

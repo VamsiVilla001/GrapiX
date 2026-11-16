@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 gx-contracts = { workspace = true }
 gx-fs = { workspace = true }
+gx-telemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

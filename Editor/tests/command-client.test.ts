@@ -52,7 +52,9 @@ describe("execute", () => {
     };
 
     await expect(execute(command)).resolves.toBe(outcome);
-    expect(calls).toEqual([
+    // The bridge also reports the call's end through `cmd_log` (2.13); the
+    // shell-bridge tests cover that.
+    expect(calls.filter(([name]) => name !== "cmd_log")).toEqual([
       [
         "cmd_execute",
         {

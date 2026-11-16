@@ -296,6 +296,16 @@ fn handle_connection<P: EnginePeer>(
         };
         let envelope: Envelope<ClientRequest> = decode_body(&body)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        // 2.13: everything this request causes, here and in the engine it
+        // reaches, is written under the id it arrived with. An id that does not
+        // pass the check is not entered and its text is not kept.
+        let presented = envelope.id.correlation();
+        let _correlation = presented
+            .filter(|id| gx_telemetry::corr::is_valid(id))
+            .map(gx_telemetry::corr::enter);
+        if presented.is_some() && _correlation.is_none() {
+            tracing::warn!(event = "corr.rejected", origin = "control");
+        }
         match inbound.admit(envelope.seq) {
             Admission::Accepted => {}
             // A duplicate must receive the acknowledgement it lost, while its
@@ -452,8 +462,10 @@ mod log_tests {
             Token::mint("cue-operator", Role::Playout, vec![Scope::Cue], SECRET).expect("mint");
         let (wrong_text, cue_text) = (wrong.as_str().to_owned(), cue_only.as_str().to_owned());
 
-        // Three clients, one after another: no credential, a credential made
-        // with another secret, and a valid one that may cue but not take.
+        // Four clients, one after another: no credential, a credential made
+        // with another secret, a valid one that may cue but not take (its take
+        // made inside a correlation scope, as a shell does), and a raw peer
+        // that presents a request id whose correlation part is not valid.
         let clients = std::thread::spawn(move || {
             assert!(Client::connect(addr).is_err(), "no credential is refused");
             assert!(
@@ -461,7 +473,10 @@ mod log_tests {
                 "a credential from another secret is refused"
             );
             let mut operator = Client::connect_with_token(addr, cue_only).expect("authenticated");
-            let refused = operator.handle(take());
+            let refused = {
+                let _scope = gx_telemetry::corr::enter("po-take-7");
+                operator.handle(take())
+            };
             assert!(
                 matches!(
                     refused,
@@ -469,6 +484,22 @@ mod log_tests {
                 ),
                 "{refused:?}"
             );
+            drop(operator);
+            // A request id whose correlation part carries a dot and spaces: a
+            // peer that is not one of ours, or a front end gone wrong.
+            use std::io::{Read as _, Write as _};
+            let mut raw = std::net::TcpStream::connect(addr).expect("connect");
+            let hostile = Envelope::new(
+                MessageId("req.1.not a valid.id".into()),
+                Sequence(1),
+                ClientRequest::Capability,
+            );
+            raw.write_all(&encode(&hostile).expect("encode"))
+                .expect("write");
+            let mut prefix = [0u8; LENGTH_PREFIX];
+            raw.read_exact(&mut prefix).expect("a reply arrives");
+            let mut body = vec![0u8; decode_length(prefix).expect("a length")];
+            raw.read_exact(&mut body).expect("the reply body");
         });
 
         let nanos = std::time::SystemTime::now()
@@ -487,7 +518,7 @@ mod log_tests {
         let (done, finished) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             tracing::dispatcher::with_default(&dispatch, || {
-                for _ in 0..3 {
+                for _ in 0..4 {
                     let stream = server.listener.accept().expect("accept");
                     serve_connection(stream, Arc::clone(&server.peer), server.secret.clone());
                 }
@@ -513,8 +544,18 @@ mod log_tests {
             records.iter().filter(|r| r["event"] == event).collect()
         };
         let connected = of("control.connected");
-        assert_eq!(connected.len(), 3, "{records:#?}");
+        assert_eq!(connected.len(), 4, "{records:#?}");
         assert!(connected.iter().all(|r| r["fields"]["protected"] == true));
+        // Outside a scope, nothing carries an id.
+        assert!(
+            records
+                .iter()
+                .filter(
+                    |r| r["event"] == "control.connected" || r["event"] == "control.authenticated"
+                )
+                .all(|r| r["corr"].is_null()),
+            "{records:#?}"
+        );
         assert!(connected[0]["fields"]["peer"]
             .as_str()
             .is_some_and(|peer| peer.starts_with("127.0.0.1:")));
@@ -545,6 +586,9 @@ mod log_tests {
             .find(|r| r["fields"]["request"] == "take")
             .unwrap_or_else(|| panic!("no take refusal in {refused:#?}"));
         assert_eq!(scope["refusal"], "scopeNotGranted");
+        // 2.13: the request was made inside a scope, so the refusal the
+        // transport wrote for it carries that scope's id.
+        assert_eq!(scope["corr"], "po-take-7", "{scope}");
         assert_eq!(scope["fields"]["subject"], "cue-operator");
         assert_eq!(scope["fields"]["role"], "Playout");
 
@@ -554,10 +598,22 @@ mod log_tests {
         assert_eq!(authenticated[0]["fields"]["scopes"], "[Cue]");
 
         let closed = of("control.disconnected");
-        assert_eq!(closed.len(), 3, "{records:#?}");
-        // authenticate, capability, take: three requests on the last one.
+        assert_eq!(closed.len(), 4, "{records:#?}");
+        // authenticate, capability, take: three requests on the operator's.
         assert_eq!(closed[2]["fields"]["requests"], 3);
         assert_eq!(closed[2]["fields"]["reason"], "closed by the client");
+
+        // 2.13: an id that does not pass the check is rejected, by name and
+        // without its text, and the request is answered without one.
+        let rejected = of("corr.rejected");
+        assert_eq!(rejected.len(), 1, "{records:#?}");
+        assert_eq!(rejected[0]["fields"]["origin"], "control");
+        assert!(!text.contains("not a valid"), "the rejected id was kept");
+        let hostile = refused
+            .iter()
+            .find(|r| r["fields"]["request"] == "capability" && r["fields"]["subject"].is_null())
+            .and_then(|r| r["corr"].as_null());
+        assert!(hostile.is_some(), "a rejected id was entered: {refused:#?}");
 
         for secret in [SECRET, wrong_text.as_str(), cue_text.as_str()] {
             assert!(!text.contains(secret), "a credential reached the log");

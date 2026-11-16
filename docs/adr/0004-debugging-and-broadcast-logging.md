@@ -194,6 +194,16 @@ code of ours, and catching Ctrl+C needs a console handler (the `ctrlc` crate, a 
 its predecessor's log as unfinished, so a killed process is never mistaken for a running one. Evidence:
 `docs/evidence/2.12/README.md`.
 
+## As built, row 2.13 (16 November 2026)
+
+A correlation id is minted per shell call by each front end and per MCP `tools/call` at the gate, validated wherever it
+enters a process (1 to 64 of `A-Za-z0-9_:-`; anything else is replaced and its text is not kept), carried in a thread-local
+scope that the sink writes on every record the thread produces, and sent to the engine inside the control envelope's request
+id (`req.<n>.<id>`, no wire change) and as a `corr` member of the asset-plane request header. Front-end errors, unhandled
+rejections and `console.error` reach the shell's file through `cmd_log` with ids of their own. **An id is one shell call, not
+one operator gesture:** an Editor edit and the publish that carries it to the engine have two ids; row `2.17` is proposed
+for one id across both. Evidence: `docs/evidence/2.13/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

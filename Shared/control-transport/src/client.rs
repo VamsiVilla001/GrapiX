@@ -186,7 +186,8 @@ impl Client {
         self.seq = self.seq.next();
         self.request_count += 1;
         let envelope = Envelope::new(
-            MessageId(format!("req.{}", self.request_count)),
+            // 2.13: a request made inside a correlation scope carries its id.
+            MessageId::request(self.request_count, gx_telemetry::corr::current().as_deref()),
             self.seq,
             request,
         );

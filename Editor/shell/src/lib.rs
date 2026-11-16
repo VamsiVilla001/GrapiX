@@ -1054,6 +1054,14 @@ fn cmd_asset_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// 2.13: the front end's own record of what it did and what went wrong in it,
+/// written to this shell's log. Only what `gx_telemetry::ui` accepts is written;
+/// an entry of another kind, or with another field, is refused.
+#[tauri::command]
+fn cmd_log(entry: gx_telemetry::ui::UiEntry) -> Result<(), String> {
+    gx_telemetry::ui::record(entry).map_err(|refusal| refusal.to_string())
+}
+
 /// Build and run the Editor window.
 pub fn run() {
     // 2.12: the Editor's log, from here until the window closes.
@@ -1063,7 +1071,9 @@ pub fn run() {
     let built = tauri::Builder::default()
         .manage(ShellState::new(workspace))
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![
+        // 2.13: each command runs inside the scope of its call's correlation id.
+        .invoke_handler(gx_shell_log::scoped(tauri::generate_handler![
+            cmd_log,
             cmd_execute,
             cmd_import_file,
             cmd_session_view,
@@ -1087,7 +1097,7 @@ pub fn run() {
             cmd_project_assets_adopt,
             cmd_project_assets,
             cmd_asset_bytes,
-        ])
+        ]))
         .build(tauri::generate_context!());
     let app = match built {
         Ok(app) => app,

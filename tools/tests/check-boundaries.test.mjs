@@ -32,6 +32,12 @@ const cases = [
   ["a non-literal TS invoke is refused", "Editor/web/main.ts",
     "const name = \"cmd_execute\";\nawait tauri.core.invoke(name, { command });",
     /invoke first argument must be a literal command name, got `name` \(R4\)/],
+  ["the bridge's exemption is that one file only", "Editor/src/command-client.ts",
+    "const name = \"cmd_execute\";\nawait tauri.core.invoke(name, { command });",
+    /invoke first argument must be a literal command name, got `name` \(R4\)/],
+  ["a log command that takes a document is refused", "Editor/shell/src/lib.rs",
+    "#[tauri::command]\nfn cmd_log(scene: SceneDocument) {}\n\ntauri::generate_handler![cmd_log];",
+    /read command cmd_log accepts an authoring document/],
   ["a scene document cannot cross TS invoke", "Editor/web/main.ts",
     "await invoke(\"cmd_execute\", { scene });",
     /invoke arguments may not carry scene\/document data \(R4\)/],
@@ -101,6 +107,23 @@ test("the allowed surface passes", () => {
     + "await invoke<readonly [string, ControlField[\"kind\"]][]>(\"cmd_control_properties\", { kind });\n"
     + "await tauri.core.invoke<CommandOutcome>(\"cmd_execute\", { command: { command: \"saveScene\", sceneId } });";
   assert.deepEqual(violations("Editor/src/command-client.ts", ts), []);
+});
+
+test("the log command and the one bridge file are allowed", () => {
+  const shell = [
+    "#[tauri::command]",
+    "fn cmd_log(entry: gx_telemetry::ui::UiEntry) -> Result<(), String> { Ok(()) }",
+    "tauri::generate_handler![cmd_log]",
+  ].join("\n");
+  assert.deepEqual(violations("Editor/shell/src/lib.rs", shell), []);
+  assert.deepEqual(violations("Playout/shell/src/lib.rs", shell), []);
+  // The bridge calls the shell with the name it was handed; nowhere else may.
+  const bridge = "export function call(core, command, args) { return core.invoke(command, args, { headers }); }";
+  assert.deepEqual(violations("Editor/src/shell-bridge.ts", bridge), []);
+  assert.deepEqual(
+    violations("Editor/web/main.ts", "await shell().invoke<void>(\"cmd_log\", { entry });"),
+    [],
+  );
 });
 
 test("the real tree has zero boundary violations", () => {

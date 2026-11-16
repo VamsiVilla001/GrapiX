@@ -9,6 +9,7 @@ members = [
   "Shared/media-plane",
   "Shared/control-transport",
   "Shared/telemetry",
+  "Shared/shell-log",
   "Shared/fs",
   "Shared/decklink",
   "services/render-engine/host",
@@ -42,6 +43,7 @@ gx-control-plane = { path = "Shared/control-plane" }
 gx-asset-plane   = { path = "Shared/asset-plane" }
 gx-media-plane   = { path = "Shared/media-plane" }
 gx-telemetry     = { path = "Shared/telemetry" }
+gx-shell-log     = { path = "Shared/shell-log" }
 gx-fs            = { path = "Shared/fs" }
 gx-write-semantics = { path = "Shared/write-semantics" }
 gx-editor        = { path = "services/editor" }

@@ -39,6 +39,25 @@ pub const REPLY_PREFIX: &str = "reply.";
 pub struct MessageId(pub String);
 
 impl MessageId {
+    /// A request's id: `req.<n>`, or `req.<n>.<id>` when the request is part of
+    /// a correlated action (2.13, ADR-0004 §2). The id travels in the id string,
+    /// which is opaque to every peer: no wire version changes, and a peer that
+    /// knows nothing of correlation reads `req.<n>.<id>` as it reads any id.
+    pub fn request(count: u64, correlation: Option<&str>) -> Self {
+        match correlation {
+            Some(id) => Self(format!("req.{count}.{id}")),
+            None => Self(format!("req.{count}")),
+        }
+    }
+
+    /// The correlation id a request id carries, if it carries one. Not checked
+    /// here: the receiver checks what it is about to write to a log.
+    pub fn correlation(&self) -> Option<&str> {
+        let (count, id) = self.0.strip_prefix("req.")?.split_once('.')?;
+        (!count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()) && !id.is_empty())
+            .then_some(id)
+    }
+
     /// Whether this is a reply, by prefix (invariant 34).
     pub fn is_reply(&self) -> bool {
         self.0.starts_with(REPLY_PREFIX)
@@ -234,6 +253,29 @@ mod tests {
         let unheard_of = MessageId("reply.something.invented.tomorrow".to_string());
         assert!(unheard_of.is_reply());
         assert_eq!(unheard_of.kind(), MessageKind::Reply);
+    }
+
+    #[test]
+    fn a_request_id_carries_a_correlation_id_after_its_count_and_nothing_else_does() {
+        assert_eq!(MessageId::request(7, None).0, "req.7");
+        let correlated = MessageId::request(7, Some("po-1a2b-3"));
+        assert_eq!(correlated.0, "req.7.po-1a2b-3");
+        assert_eq!(correlated.correlation(), Some("po-1a2b-3"));
+        // A reply to it quotes its id; that is a reply's, not a request's.
+        let reply = MessageId(format!("reply.{correlated}"));
+        assert_eq!(reply.correlation(), None);
+        assert!(reply.is_reply());
+        for plain in [
+            "req.7",
+            "req.",
+            "req.x.po-1",
+            "req..po-1",
+            "req.7.",
+            "event.7.po-1",
+            "",
+        ] {
+            assert_eq!(MessageId(plain.into()).correlation(), None, "{plain:?}");
+        }
     }
 
     #[test]

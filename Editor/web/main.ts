@@ -157,7 +157,8 @@ import {
   sessionFor,
   type SceneSession,
 } from "../src/workspace";
-import { execute, shell, wireFrame } from "../src/command-client";
+import { execute, installShellCapture, shell, wireFrame } from "../src/command-client";
+import { quoteCorr } from "../src/shell-bridge";
 import { sizeCanvasForRatio, watchDevicePixelRatio } from "../src/dpi";
 import { probeWebGpu, summariseGpuReport, type GpuReport } from "../src/gpu-probe";
 import {
@@ -545,6 +546,11 @@ function log(message: string, outcome: Outcome = "plain"): void {
  *  an author can only act differently on them if the message says which it
  *  was (invariant 17). A refusal is shown by its contract name. */
 function describe(error: unknown): string {
+  // The id of the call that failed follows the text, so the author can quote it (2.13).
+  return quoteCorr(describeFailure(error), error);
+}
+
+function describeFailure(error: unknown): string {
   if (typeof error === "object" && error !== null && "error" in error) {
     const failure = error as ShellError;
     switch (failure.error) {
@@ -4891,6 +4897,9 @@ async function publish(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function start(): Promise<void> {
+  // 2.13: from here, an uncaught error, a rejection nobody handled and a
+  // console.error are on record in the shell's log, each with an id.
+  installShellCapture();
   // The curtain is visible in the markup, so this is the only place it comes
   // down: no shell, no Editor. Everything below this line can assume the
   // shell bridge actually reaches Rust.

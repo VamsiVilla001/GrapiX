@@ -1,0 +1,151 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 19599,
+    "output_tokens": 0,
+    "state_tokens": 3856,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.13 correlation ids: the code only",
+    "what_it_does": "A front end sends an id as an invoke header; the shell validates it (1-64 chars of letters, digits, _ : -) and enters it in a thread-local scope; the sink writes the scope id on every record the thread writes; the control client puts it in the request id as req.<n>.<id>, the control server and the asset-plane server read it, validate it, enter it for the request or connection and leave it again. A bad id is replaced by a minted one.",
+    "code": "--- Shared/telemetry/src/corr.rs\nuse std::cell::RefCell;\nuse std::marker::PhantomData;\nuse std::sync::atomic::{AtomicU64, Ordering};\nuse std::sync::OnceLock;\nuse std::time::{SystemTime, UNIX_EPOCH};\npub const MAX_LEN: usize = 64;\npub fn is_valid(id: &str) -> bool {\n    !id.is_empty()\n        && id.len() <= MAX_LEN\n        && id\n            .bytes()\n            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'-'))\n}\npub fn mint(prefix: &str) -> String {\n    static SEED: OnceLock<String> = OnceLock::new();\n    static COUNT: AtomicU64 = AtomicU64::new(0);\n    let seed = SEED.get_or_init(|| {\n        let nanos = SystemTime::now()\n            .duration_since(UNIX_EPOCH)\n            .map_or(0, |since| since.as_nanos());\n        format!(\"{:x}{:x}\", std::process::id(), (nanos & 0xffff_ffff) as u32)\n    });\n    let count = COUNT.fetch_add(1, Ordering::Relaxed) + 1;\n    let id = format!(\"{prefix}-{seed}-{count}\");\n    if is_valid(&id) {\n        id\n    } else {\n        format!(\"x-{seed}-{count}\")\n    }\n}\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum Adopted {\n    Kept(String),\n    Minted(String),\n    Replaced(String),\n}\nimpl Adopted {\n    pub fn id(&self) -> &str {\n        match self {\n            Self::Kept(id) | Self::Minted(id) | Self::Replaced(id) => id,\n        }\n    }\n    pub fn was_replaced(&self) -> bool {\n        matches!(self, Self::Replaced(_))\n    }\n}\npub fn adopt(presented: Option<&str>, prefix: &str) -> Adopted {\n    match presented {\n        Some(id) if is_valid(id) => Adopted::Kept(id.to_owned()),\n        Some(_) => Adopted::Replaced(mint(prefix)),\n        None => Adopted::Minted(mint(prefix)),\n    }\n}\nthread_local! {\n    static STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };\n}\npub fn current() -> Option<String> {\n    STACK.with(|stack| stack.borrow().last().cloned())\n}\n#[must_use = \"the scope ends when this is dropped\"]\npub struct Scope {\n    depth: usize,\n    _thread: PhantomData<*const ()>,\n}\npub fn enter(id: &str) -> Scope {\n    let id = if is_valid(id) {\n        id.to_owned()\n    } else {\n        mint(\"bad\")\n    };\n    STACK.with(|stack| {\n        let mut stack = stack.borrow_mut();\n        stack.push(id);\n        Scope {\n            depth: stack.len(),\n            _thread: PhantomData,\n        }\n    })\n}\nimpl Drop for Scope {\n    fn drop(&mut self) {\n        STACK.with(|stack| stack.borrow_mut().truncate(self.depth - 1));\n    }\n}\n--- Shared/shell-log/src/lib.rs\n#![forbid(unsafe_code)]\nuse tauri::ipc::Invoke;\nuse tauri::Runtime;\npub fn scoped<R: Runtime>(\n    handler: impl Fn(Invoke<R>) -> bool + Send + Sync + 'static,\n) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {\n    move |invoke| {\n        let header = invoke\n            .message\n            .headers()\n            .get(gx_telemetry::ui::CORR_HEADER)\n            .and_then(|value| value.to_str().ok())\n            .map(str::to_owned);\n        let _scope = gx_telemetry::ui::enter_call(header.as_deref(), invoke.message.command());\n        handler(invoke)\n    }\n}\n--- Shared/control-transport/src/server.rs (diff)\ndiff --git a/Shared/control-transport/src/server.rs b/Shared/control-transport/src/server.rs\nindex da724cb..ca924e3 100644\n--- a/Shared/control-transport/src/server.rs\n+++ b/Shared/control-transport/src/server.rs\n@@ -297,4 +297,14 @@ fn handle_connection<P: EnginePeer>(\n         let envelope: Envelope<ClientRequest> = decode_body(&body)\n             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;\n+        // 2.13: everything this request causes, here and in the engine it\n+        // reaches, is written under the id it arrived with. An id that does not\n+        // pass the check is not entered and its text is not kept.\n+        let presented = envelope.id.correlation();\n+        let _correlation = presented\n+            .filter(|id| gx_telemetry::corr::is_valid(id))\n+            .map(gx_telemetry::corr::enter);\n+        if presented.is_some() && _correlation.is_none() {\n+            tracing::warn!(event = \"corr.rejected\", origin = \"control\");\n+        }\n         match inbound.admit(envelope.seq) {\n             Admission::Accepted => {}\n@@ -453,6 +463,8 @@ mod log_tests {\n         let (wrong_text, cue_text) = (wrong.as_str().to_owned(), cue_only.as_str().to_owned());\n \n-        // Three clients, one after another: no credential, a credential made\n-        // with another secret, and a valid one that may cue but not take.\n+        // Four clients, one after another: no credential, a credential made\n+        // with another secret, a valid one that may cue but not take (its take\n+        // made inside a correlation scope, as a shell does), and a raw peer\n+        // that presents a request id whose correlation part is not valid.\n         let clients = s\n--- Shared/control-plane/src/sequence.rs (diff)\ndiff --git a/Shared/control-plane/src/sequence.rs b/Shared/control-plane/src/sequence.rs\nindex af7a859..cb36247 100644\n--- a/Shared/control-plane/src/sequence.rs\n+++ b/Shared/control-plane/src/sequence.rs\n@@ -40,4 +40,23 @@ pub struct MessageId(pub String);\n \n impl MessageId {\n+    /// A request's id: `req.<n>`, or `req.<n>.<id>` when the request is part of\n+    /// a correlated action (2.13, ADR-0004 \u00a72). The id travels in the id string,\n+    /// which is opaque to every peer: no wire version changes, and a peer that\n+    /// knows nothing of correlation reads `req.<n>.<id>` as it reads any id.\n+    pub fn request(count: u64, correlation: Option<&str>) -> Self {\n+        match correlation {\n+            Some(id) => Self(format!(\"req.{count}.{id}\")),\n+            None => Self(format!(\"req.{count}\")),\n+        }\n+    }\n+\n+    /// The correlation id a request id carries, if it carries one.\n--- Shared/asset-plane/src/publish.rs (diff)\ndiff --git a/Shared/asset-plane/src/publish.rs b/Shared/asset-plane/src/publish.rs\nindex ac0ad72..1a8165b 100644\n--- a/Shared/asset-plane/src/publish.rs\n+++ b/Shared/asset-plane/src/publish.rs\n@@ -405,7 +405,8 @@ fn exchange(\n ) -> Result<(TcpStream, Vec<u8>), PublishClientError> {\n     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;\n+    let request = with_correlation(request, gx_telemetry::corr::current().as_deref());\n     stream\n         .write_all(&(request.len() as u32).to_be_bytes())\n-        .and_then(|()| stream.write_all(request))\n+        .and_then(|()| stream.write_all(&request))\n         .and_then(|()| stream.flush())\n         .map_err(PublishClientError::Transport)?;\n@@ -426,4 +427,30 @@ fn exchange(\n }\n \n+/// The key a request header carries its correlation id under (2.13).\n+pub(crate) const CORRELATION_KEY: &str = \"corr\";\n+\n+/// `request`, a JSON object, with `\"corr\":\"<id>\"` added as its first member when\n+/// the caller is working for a correlated action. An id passes the shape check\n+/// (letters, digits, `_`, `:`, `-`), so it needs no escaping. The server reads and\n+/// removes the key before it checks the request has exactly one member.\n+pub(crate) fn with_correlation(request: &[u8], correlation: Option<&str>) -> Vec<u8> {\n+    match (correlation, request.first(), request.get(1)) {\n+        (Some(id), Some(b'{'), Some(next)) if gx_telemetry::corr::is_valid(id) => {\n+            let mut out = Vec::with_capacity(request.len() + id.len() + 10);\n+            out.extend_from_slice(b\"{\\\"\");\n+            out.extend_from_slice(CORRELATION_KEY.as_bytes());\n+            out.extend_from_slice(b\"\\\":\\\"\");\n+            out.extend_from_slice(id.as_bytes());\n+            out.push(b'\"');\n+            if *next != b'}' {\n+             \n--- Shared/telemetry/src/sink.rs (diff)\ndiff --git a/Shared/telemetry/src/sink.rs b/Shared/telemetry/src/sink.rs\nindex 31a04b8..52ecff8 100644\n--- a/Shared/telemetry/src/sink.rs\n+++ b/Shared/telemetry/src/sink.rs\n@@ -318,4 +318,11 @@ impl JsonLayer {\n             }\n         }\n+        // A record that does not name its own action belongs to the one this\n+        // thread is working for, if a scope is entered (2.13).\n+        if !line.contains_key(\"corr\") {\n+            if let Some(id) = crate::corr::current() {\n+                line.insert(\"corr\".into(), Value::from(id));\n+            }\n+        }\n         line.insert(\"fields\".into(), Value::Object(fields));\n         let json = Value::Object(line).to_string();\n@@ -711,4 +718,40 @@ mod tests {\n     }\n \n+    #[test]\n+    fn a_record_carries_the_entered_correlation_scope_unless_it_names_its_own() {\n+        let dir = scratch(\"corr\");\n+        let guard = start(LogConfig::new(\"playout\", \"shell\", &dir)).unwrap();\n+        let subscriber = tracing_subscriber::registry().with(guard.layer());\n+        tracing::subscriber::with_default(subscriber, || {\n+            tracing::info!("
+  },
+  "questions": {
+    "invalid_text_reaches_log": {
+      "type": "noul",
+      "instructions": "Can text that is not a valid id (a line break, a quote, a token, an over-long string) from the front end, the control envelope or the asset-plane header reach a log line as an id?",
+      "criteria": {
+        "true": "Yes, a path writes an unvalidated id.",
+        "false": "No, every path validates before writing."
+      }
+    },
+    "scope_leaks": {
+      "type": "noul",
+      "instructions": "Can one request's id remain in the thread-local scope after its request or connection has ended, so that a later request on the same thread is logged under it?",
+      "criteria": {
+        "true": "Yes, a scope can leak to a later request.",
+        "false": "No, scopes are restored when the request or connection ends."
+      }
+    },
+    "asset_connection_scope": {
+      "type": "noul",
+      "instructions": "Is the asset-plane id, taken from the first frame of a connection, entered for the right span: the whole connection, and not entered again or left entered by a later frame?",
+      "criteria": {
+        "true": "Yes, the span is right.",
+        "false": "No, the span is wrong."
+      }
+    },
+    "compat_old_peer": {
+      "type": "noul",
+      "instructions": "Can a peer that sends the old request id (req.<n>, no id) or an old asset-plane header (no corr member) still be served unchanged?",
+      "criteria": {
+        "true": "Yes, old peers still work.",
+        "false": "No, an old peer would break."
+      }
+    },
+    "defect": {
+      "type": "noul",
+      "instructions": "Does this code contain a defect that should be fixed before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "invalid_text_reaches_log",
+      "jev": 0.31,
+      "laya": 0.9398,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.31
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9398,
+        "confidence": 0.9398,
+        "answer_confidence": 0.9398,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "scope_leaks",
+      "jev": 0.24,
+      "laya": 0.9426,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.24
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9426,
+        "confidence": 0.9426,
+        "answer_confidence": 0.9426,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "asset_connection_scope",
+      "jev": 0.62,
+      "laya": 0.9453,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.62
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9453,
+        "confidence": 0.9453,
+        "answer_confidence": 0.9453,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "compat_old_peer",
+      "jev": 0.89,
+      "laya": 0.9503,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.89
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9503,
+        "confidence": 0.9503,
+        "answer_confidence": 0.9503,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "defect",
+      "jev": 0.7,
+      "laya": 0.9008,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.7
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9008,
+        "confidence": 0.9008,
+        "answer_confidence": 0.9008,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

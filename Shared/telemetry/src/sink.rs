@@ -317,6 +317,13 @@ impl JsonLayer {
                 line.insert(key.into(), value);
             }
         }
+        // A record that does not name its own action belongs to the one this
+        // thread is working for, if a scope is entered (2.13).
+        if !line.contains_key("corr") {
+            if let Some(id) = crate::corr::current() {
+                line.insert("corr".into(), Value::from(id));
+            }
+        }
         line.insert("fields".into(), Value::Object(fields));
         let json = Value::Object(line).to_string();
         match self.sender.try_send(Msg::Line(Line { seq, json })) {
@@ -707,6 +714,42 @@ mod tests {
         assert!(lost > 0, "the flood was meant to overflow a 32-event queue");
         assert_eq!(written + lost, max, "every number accounted for");
         assert_eq!(max, 5_001, "log.start plus 5,000 events");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_record_carries_the_entered_correlation_scope_unless_it_names_its_own() {
+        let dir = scratch("corr");
+        let guard = start(LogConfig::new("playout", "shell", &dir)).unwrap();
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(event = "before.scope");
+            {
+                let _scope = crate::corr::enter("po-9");
+                tracing::info!(event = "inside.scope");
+                tracing::info!(event = "own.corr", corr = "other-1");
+            }
+            tracing::info!(event = "after.scope");
+        });
+        guard.finish().unwrap();
+        let records = lines(&dir.join("playout"));
+        let named = |event: &str| {
+            records
+                .iter()
+                .find(|r| r["event"] == event)
+                .unwrap_or_else(|| panic!("no {event} in {records:#?}"))
+        };
+        assert!(named("before.scope")["corr"].is_null());
+        assert_eq!(named("inside.scope")["corr"], "po-9");
+        assert_eq!(
+            named("own.corr")["corr"],
+            "other-1",
+            "an event's own id wins"
+        );
+        assert!(
+            named("after.scope")["corr"].is_null(),
+            "the scope ended with its guard"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

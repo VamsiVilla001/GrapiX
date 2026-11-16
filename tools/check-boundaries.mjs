@@ -58,8 +58,17 @@ const SHELL_READ = [
  *  one `addFonts` or `addAssets` edit. Held to the read rule: no authoring
  *  document or command parameter. */
 const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link", "cmd_asset_prepare_files", "cmd_project_assets_adopt"];
-const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE]);
-const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE]);
+/** The front end's own log (2.13): one command that writes a bounded, sanitised
+ *  entry of one of four kinds to the shell's log (`gx_telemetry::ui`). It takes
+ *  no document, and held to the read rule. */
+const SHELL_LOG = ["cmd_log"];
+const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG]);
+const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG]);
+/** The one TypeScript file that calls the shell with a command name it was
+ *  handed rather than a literal: the bridge that gives every call a correlation
+ *  id and reports its end (2.13). Every call site elsewhere still names its
+ *  command literally (R4). */
+const INVOKE_CHOKEPOINTS = new Set(["Editor/src/shell-bridge.ts"]);
 
 const DOCUMENT_TYPES = /\b(?:SceneDocument|TakePage|TextStyle|ControlField|SceneKeyframe|TimelinePhase|DataContext|EditorCommand|SceneEdit)\b/;
 const STORE_WRITES = /\.(?:write_scene|delete_scene|create_project|write_take_page|confirm)\s*\(|\breplace_asset_bytes\s*\(|\bgx_fs::write_atomic\s*\(|\bfs::write\s*\(/;
@@ -303,6 +312,7 @@ function checkTauriSurface(path, { code }, add, shell) {
 }
 
 function checkInvokes(path, raw, add) {
+  if (INVOKE_CHOKEPOINTS.has(path)) return;
   const text = scrub(raw, "ts");
   const code = scrub(raw, "ts", { blankStrings: true });
   for (const match of code.matchAll(INVOKE)) {

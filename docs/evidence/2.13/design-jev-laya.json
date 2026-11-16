@@ -1,0 +1,277 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 12594,
+    "output_tokens": 0,
+    "state_tokens": 1510,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.13 correlation ids end to end (design, before building)",
+    "done_when": "One Editor edit and one Playout take, driven from each front end, can each be followed by one correlation id from the front end through the shell, the MCP server or control plane, and the engine; an uncaught front-end error reaches the shell log with its id",
+    "design": "# 2.13 design: correlation ids end to end, and front-end capture\n\nRow `2.13` (ADR-0004 \u00a72, \u00a76, \u00a79). Done when: one Editor edit and one Playout take,\ndriven from each front end, can each be followed by one correlation id from the\nfront end through the shell, the MCP server or control plane, and the engine; an\nuncaught front-end error reaches the shell log with its id.\n\nWritten 16 Nov 2026, from reading the code, before building.\n\n## What exists\n\n- The sink lifts an event's `corr` field to the record's top level (2.11). Nothing\n  sets it.\n- Both front ends reach their shell through one bridge: the Editor's `shell()`\n  (`Editor/src/command-client.ts`, 30 call sites in `Editor/web/main.ts`) and\n  Playout's `invoke()` (`Playout/web/main.js`, 13 call sites).\n- Every `cmd_*` in both shells is a synchronous function, so a command runs on the\n  thread that received it.\n- Tauri passes a command's request headers to the shell\n  (`Invoke::message.headers()`), and the JS `invoke` accepts `{ headers }`.\n- The control plane's envelope carries a free-form `MessageId` string\n  (`req.<n>`); the server reads it for every request; ids starting `reply.` or\n  `event.` mean replies and events, nothing else is reserved.\n- The asset plane (the Editor's publish) sends one framed JSON header per request,\n  parsed with serde; an unknown key is ignored.\n- `mcp.call` is logged at the one gate every MCP request passes through, on a\n  single driver thread.\n\n## Design\n\n1. **Minted at the front end, once per shell call.** The front end's bridge makes\n   an id (`ed-` or `po-`, a random part, a count) for each call to its shell and\n   sends it as the header `x-gx-corr`. One id is one call, not one operator\n   gesture: a gesture that makes three calls has three ids. The three are\n   related by time and by the front end's own start/end records, which carry the\n   same ids, not by a fourth id. (A gesture id is a later refinement, not needed\n   by the done-when.)\n2. **The shell scopes it.** One wrapper around each shell's invoke handler reads\n   `x-gx-corr`, validates it (1 to 64 characters of `A-Z a-z 0-9 . _ : -`; anything\n   else is replaced by a fresh shell-minted id and the replacement is logged as\n   `corr.rejected`, so a front end cannot smuggle text, a token, or a line break\n   into a log), and runs the command inside a correlation scope.\n3. **The scope is a thread-local** (`gx_telemetry::corr`). While it is entered,\n   every log record the thread writes without its own `corr` carries the scope's\n   id. No function signature changes. It works because the commands, the control\n   client, the transport's per-connection handler and the MCP gate each do their\n   work on one thread. An id that must cross a thread is passed explicitly and\n   entered again on the other side.\n4. **To the engine, in the control envelope's `MessageId`.** The client builds the\n   request id from the scope: `req.<n>` becomes `req.<n>.<corr>` when a scope is\n   entered. The transport's handler reads the id, enters the same scope around the\n   engine's handling, and every engine record that request causes carries it. No\n   wire-version change: ids are opaque strings and an old peer that sends or reads\n   `req.<n>` is unaffected.\n5. **To the engine over the asset plane**, the same way: the publish client adds a\n   `corr` key to the request header from the scope; the asset-plane server reads it\n   before parsing the request and enters the scope around the publish.\n6. **MCP.** The gate mints an id for each `tools/call` (`mcp-` and a count) and\n   enters it around the call, so `mcp.call` and everything the call writes carry\n   it; an MCP tool that talks to an engine (Playout's) therefore sends it in the\n   envelope. The gate does not accept an id from the caller: an MCP client is\n   untrusted input to the log, and its idempotency key already names a retry.\n7. **Front-end capture through one shell command, `cmd_log`.** The bridge reports\n   each call's end (command name, id, duration, ok or the error's code), never its\n   arguments, because a connect call carries a token. Handlers for\n   `window.onerror`, `unhandledrejection` and `console.error` report the error\n   with an id of its own. `cmd_log` validates level and event name against a short\n   list (`ui.call`, `ui.error`, `ui.rejection`, `ui.console`), bounds the text to\n   2 000 characters, and writes it to the shell's log as `ui.*` events with the id.\n   An error that comes back from a shell call carries the call's id, and the\n   front end shows it, so an operator can quote it.\n8. **Not in this row:** a gesture id, correlation through the MCP *client's* own\n   request id, and the as-run record's use of the id (12.11).\n\n## Questions put to Jev and Laya\n\nSee `design-jev-laya.json`.\n"
+  },
+  "questions": {
+    "carrier_to_shell": {
+      "type": "choice",
+      "instructions": "How should the front end hand its correlation id to the shell command it calls?",
+      "criteria": {
+        "invoke_header": "As a request header on the call, read once by a wrapper around the whole invoke handler.",
+        "command_argument": "As an extra argument added to every shell command.",
+        "shared_state": "Through shared state the shell reads, set before the call."
+      }
+    },
+    "carrier_to_engine": {
+      "type": "choice",
+      "instructions": "How should the id reach the engine over the control plane?",
+      "criteria": {
+        "message_id": "Inside the envelope id string, with no wire change.",
+        "envelope_field": "As a new field on the envelope, with a protocol version change.",
+        "separate_message": "As a separate message before the request."
+      }
+    },
+    "engine_association": {
+      "type": "choice",
+      "instructions": "How should the engine and transport records learn the id of the request that caused them?",
+      "criteria": {
+        "thread_local_scope": "A thread-local scope entered around the handling, read by the log layer.",
+        "tracing_span": "A tracing span with a corr field that the log layer reads from the span stack.",
+        "explicit_parameter": "An explicit parameter on every function that logs."
+      }
+    },
+    "who_mints": {
+      "type": "choice",
+      "instructions": "Who should mint the id for a front-end action?",
+      "criteria": {
+        "front_end": "The front end, once per shell call, validated by the shell.",
+        "shell": "The shell, when it receives the call.",
+        "engine": "The engine, when the request arrives."
+      }
+    },
+    "per_call_enough": {
+      "type": "noul",
+      "instructions": "Is one id per shell call (not per operator gesture) enough for the done-when, given that the front end writes start and end records with the same ids?",
+      "criteria": {
+        "true": "Yes, one id per call is enough.",
+        "false": "No, a gesture id is needed for the done-when."
+      }
+    },
+    "validate_front_end_id": {
+      "type": "noul",
+      "instructions": "Must the shell validate the id it receives from the front end (length and characters) and replace an invalid one, because the front end is untrusted input to the log?",
+      "criteria": {
+        "true": "Yes, validate and replace.",
+        "false": "No, the front end is trusted."
+      }
+    },
+    "mcp_accepts_caller_id": {
+      "type": "noul",
+      "instructions": "Should the MCP gate accept a correlation id supplied by the MCP client?",
+      "criteria": {
+        "true": "Yes, accept the caller's id.",
+        "false": "No, mint one at the gate."
+      }
+    },
+    "must_user_decide": {
+      "type": "noul",
+      "instructions": "Does this design contain a decision the user must make before it is built?",
+      "criteria": {
+        "true": "Yes, a user decision is needed first.",
+        "false": "No, the design can be built."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "carrier_to_shell",
+      "jev": "invoke_header",
+      "laya": "shared_state",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "invoke_header",
+        "confidence": 1,
+        "probabilities": {
+          "invoke_header": 1,
+          "command_argument": 0,
+          "shared_state": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "shared_state",
+        "probabilities": {
+          "invoke_header": 0.3527,
+          "command_argument": 0.276,
+          "shared_state": 0.3714
+        },
+        "confidence": 0.0072,
+        "answer_confidence": 0.3714,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "carrier_to_engine",
+      "jev": "message_id",
+      "laya": "envelope_field",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "message_id",
+        "confidence": 1,
+        "probabilities": {
+          "message_id": 1,
+          "envelope_field": 0,
+          "separate_message": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "envelope_field",
+        "probabilities": {
+          "message_id": 0.2894,
+          "envelope_field": 0.3734,
+          "separate_message": 0.3372
+        },
+        "confidence": 0.0049,
+        "answer_confidence": 0.3734,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "engine_association",
+      "jev": "thread_local_scope",
+      "laya": "thread_local_scope",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "thread_local_scope",
+        "confidence": 1,
+        "probabilities": {
+          "thread_local_scope": 1,
+          "tracing_span": 0,
+          "explicit_parameter": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "thread_local_scope",
+        "probabilities": {
+          "thread_local_scope": 0.4179,
+          "tracing_span": 0.2875,
+          "explicit_parameter": 0.2946
+        },
+        "confidence": 0.0142,
+        "answer_confidence": 0.4179,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "who_mints",
+      "jev": "front_end",
+      "laya": "front_end",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "front_end",
+        "confidence": 1,
+        "probabilities": {
+          "front_end": 1,
+          "shell": 0,
+          "engine": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "front_end",
+        "probabilities": {
+          "front_end": 0.5566,
+          "shell": 0.1822,
+          "engine": 0.2612
+        },
+        "confidence": 0.1016,
+        "answer_confidence": 0.5566,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "per_call_enough",
+      "jev": 0.93,
+      "laya": 0.9779,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9779,
+        "confidence": 0.9779,
+        "answer_confidence": 0.9779,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "validate_front_end_id",
+      "jev": 0.92,
+      "laya": 0.9607,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.92
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9607,
+        "confidence": 0.9607,
+        "answer_confidence": 0.9607,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mcp_accepts_caller_id",
+      "jev": 0.12,
+      "laya": 0.969,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.12
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.969,
+        "confidence": 0.969,
+        "answer_confidence": 0.969,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_user_decide",
+      "jev": 0.43,
+      "laya": 0.9647,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.43
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9647,
+        "confidence": 0.9647,
+        "answer_confidence": 0.9647,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

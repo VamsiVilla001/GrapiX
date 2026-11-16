@@ -1,0 +1,15 @@
+[package]
+name = "gx-shell-log"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "What the Editor and Playout shells share of correlation: the invoke wrapper that scopes each command to its call's id (row 2.13)."
+
+[dependencies]
+gx-telemetry = { workspace = true }
+tauri = { workspace = true }
+
+[dev-dependencies]
+tauri = { workspace = true, features = ["test"] }
+serde_json = { workspace = true }

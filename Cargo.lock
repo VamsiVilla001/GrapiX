@@ -1880,6 +1880,7 @@ dependencies = [
  "allsorts",
  "gx-contracts",
  "gx-fs",
+ "gx-telemetry",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2012,6 +2013,7 @@ dependencies = [
  "gx-contracts",
  "gx-editor",
  "gx-project-store",
+ "gx-shell-log",
  "gx-telemetry",
  "serde",
  "serde_json",
@@ -2141,6 +2143,7 @@ dependencies = [
  "gx-control-plane",
  "gx-control-transport",
  "gx-mock-engine",
+ "gx-shell-log",
  "gx-telemetry",
  "serde",
  "serde_json",
@@ -2189,10 +2192,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-shell-log"
+version = "0.1.0"
+dependencies = [
+ "gx-telemetry",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
 name = "gx-telemetry"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",

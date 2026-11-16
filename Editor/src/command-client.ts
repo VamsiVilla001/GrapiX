@@ -8,9 +8,15 @@
 
 import type { CommandOutcome, EditorCommand } from "@grapix/contracts";
 
+import { createBridge, installCapture, type Bridge } from "./shell-bridge";
+
 /** The slice of Tauri's core bridge this layer uses. */
 export interface TauriCore {
-  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  invoke<T>(
+    command: string,
+    args?: Record<string, unknown>,
+    options?: { headers?: Record<string, string> },
+  ): Promise<T>;
 }
 
 /** Tauri v2's global bridge. Typed narrowly: core invoke and the file
@@ -29,11 +35,32 @@ declare global {
   }
 }
 
+const bridges = new WeakMap<object, Bridge>();
+
+/** The one instrumented bridge over Tauri's core: every call has a correlation
+ *  id and its end is on record (2.13). */
+function bridgeFor(core: TauriCore): Bridge {
+  let bridge = bridges.get(core);
+  if (bridge === undefined) {
+    bridge = createBridge(core, { prefix: "ed" });
+    bridges.set(core, bridge);
+  }
+  return bridge;
+}
+
 /** The shell's core bridge, or a named failure outside the Editor shell. */
 export function shell(): TauriCore {
   const tauri = typeof window === "undefined" ? undefined : window.__TAURI__;
   if (!tauri) throw new Error("not running inside the Editor shell");
-  return tauri.core;
+  return bridgeFor(tauri.core);
+}
+
+/** Report uncaught errors, unhandled rejections and `console.error` to the
+ *  shell's log. Called once, at start; nothing outside the shell to report to. */
+export function installShellCapture(): void {
+  const tauri = typeof window === "undefined" ? undefined : window.__TAURI__;
+  if (!tauri) return;
+  installCapture(window, console, bridgeFor(tauri.core));
 }
 
 /** Execute one command through the single authoring mutation surface. */

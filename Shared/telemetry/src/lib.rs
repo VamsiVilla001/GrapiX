@@ -21,7 +21,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod corr;
 pub mod sink;
+pub mod ui;
 
 use std::fmt;
 

@@ -250,6 +250,12 @@ impl Server {
         // gate: the tool, its effect, its revision and retry key, how large
         // its arguments were, how long it took and what came of it. Never
         // the arguments themselves: a batch or an SVG is the store's to keep.
+        // 2.13: the call is one action and has one id. It is minted here, not
+        // taken from the caller (an MCP client is untrusted input to a log, and
+        // its idempotency key already names a retry), and entered for the whole
+        // call: `mcp.call`, whatever the tool writes, and any control-plane
+        // request the tool makes carry it.
+        let _correlation = gx_telemetry::corr::enter(&gx_telemetry::corr::mint("mcp"));
         let started = std::time::Instant::now();
         let args_bytes = args.to_string().len();
         let if_revision = args.get("ifRevision").and_then(serde_json::Value::as_u64);

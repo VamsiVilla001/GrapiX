@@ -404,9 +404,10 @@ fn exchange(
     request: &[u8],
 ) -> Result<(TcpStream, Vec<u8>), PublishClientError> {
     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;
+    let request = with_correlation(request, gx_telemetry::corr::current().as_deref());
     stream
         .write_all(&(request.len() as u32).to_be_bytes())
-        .and_then(|()| stream.write_all(request))
+        .and_then(|()| stream.write_all(&request))
         .and_then(|()| stream.flush())
         .map_err(PublishClientError::Transport)?;
 
@@ -423,6 +424,32 @@ fn exchange(
         .read_exact(&mut header)
         .map_err(PublishClientError::Transport)?;
     Ok((stream, header))
+}
+
+/// The key a request header carries its correlation id under (2.13).
+pub(crate) const CORRELATION_KEY: &str = "corr";
+
+/// `request`, a JSON object, with `"corr":"<id>"` added as its first member when
+/// the caller is working for a correlated action. An id passes the shape check
+/// (letters, digits, `_`, `:`, `-`), so it needs no escaping. The server reads and
+/// removes the key before it checks the request has exactly one member.
+pub(crate) fn with_correlation(request: &[u8], correlation: Option<&str>) -> Vec<u8> {
+    match (correlation, request.first(), request.get(1)) {
+        (Some(id), Some(b'{'), Some(next)) if gx_telemetry::corr::is_valid(id) => {
+            let mut out = Vec::with_capacity(request.len() + id.len() + 10);
+            out.extend_from_slice(b"{\"");
+            out.extend_from_slice(CORRELATION_KEY.as_bytes());
+            out.extend_from_slice(b"\":\"");
+            out.extend_from_slice(id.as_bytes());
+            out.push(b'"');
+            if *next != b'}' {
+                out.push(b',');
+            }
+            out.extend_from_slice(&request[1..]);
+            out
+        }
+        _ => request.to_vec(),
+    }
 }
 
 /// One parsed asset-plane request.
@@ -449,6 +476,7 @@ fn handle_publish<P: AssetPublishPeer>(
     let mut prefix = [0_u8; 4];
     stream.read_exact(&mut prefix)?;
     let length = u32::from_be_bytes(prefix) as usize;
+    let mut correlation: Option<String> = None;
     let request = if length > MAX_PUBLISH_FRAME_BYTES {
         AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest {
             detail: format!(
@@ -458,8 +486,17 @@ fn handle_publish<P: AssetPublishPeer>(
     } else {
         let mut bytes = vec![0; length];
         stream.read_exact(&mut bytes)?;
-        parse_request(&bytes)
+        let (request, presented) = parse_request(&bytes);
+        correlation = presented;
+        request
     };
+    // 2.13: everything this connection causes, the publish the engine logs
+    // among it, is written under the id the request arrived with. An id that
+    // does not pass the shape check is not entered.
+    let _scope = correlation
+        .as_deref()
+        .filter(|id| gx_telemetry::corr::is_valid(id))
+        .map(gx_telemetry::corr::enter);
     let locked = || {
         peer.lock()
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))
@@ -578,15 +615,32 @@ fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<
     stream.flush()
 }
 
-fn parse_request(bytes: &[u8]) -> AssetRequest {
-    let invalid = |detail: String| {
-        AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest { detail }))
-    };
+/// The request, and the correlation id it carried if it carried one (removed
+/// first: a request must contain exactly one of its own members).
+fn parse_request(bytes: &[u8]) -> (AssetRequest, Option<String>) {
     let mut request =
         match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes) {
             Ok(request) => request,
-            Err(error) => return invalid(error.to_string()),
+            Err(error) => {
+                return (
+                    AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest {
+                        detail: error.to_string(),
+                    })),
+                    None,
+                )
+            }
         };
+    let correlation = match request.remove(CORRELATION_KEY) {
+        Some(serde_json::Value::String(id)) => Some(id),
+        _ => None,
+    };
+    (parse_members(request), correlation)
+}
+
+fn parse_members(mut request: serde_json::Map<String, serde_json::Value>) -> AssetRequest {
+    let invalid = |detail: String| {
+        AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest { detail }))
+    };
     // The transfer dialect's frames carry a `request` tag (preflight, begin,
     // chunk); a publication carries `scene`, a fetch `fetch` and a package
     // offered by local path `package` (5.8).
@@ -660,6 +714,9 @@ mod tests {
     struct Peer {
         published: Vec<SceneDocument>,
         locality: Locality,
+        /// The correlation scope the server had entered when each scene was
+        /// published (2.13).
+        scopes: Vec<Option<String>>,
     }
 
     impl Default for Peer {
@@ -667,6 +724,7 @@ mod tests {
             Self {
                 published: Vec::new(),
                 locality: Locality::CoLocated,
+                scopes: Vec::new(),
             }
         }
     }
@@ -679,6 +737,7 @@ mod tests {
         fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
             let take_id = TakeId(scene.id.clone());
             let content_hash = scene.content_hash();
+            self.scopes.push(gx_telemetry::corr::current());
             self.published.push(scene);
             PublishReply::Published {
                 take_id,
@@ -810,6 +869,73 @@ mod tests {
         let mut reply = vec![0; u32::from_be_bytes(prefix) as usize];
         stream.read_exact(&mut reply).expect("reply reads");
         serde_json::from_slice(&reply).expect("reply deserializes")
+    }
+
+    #[test]
+    fn a_request_header_carries_the_callers_correlation_id_as_its_first_member() {
+        let with = |request: &[u8], id: Option<&str>| with_correlation(request, id);
+        let parsed = |bytes: &[u8]| -> serde_json::Value { serde_json::from_slice(bytes).unwrap() };
+        assert_eq!(
+            parsed(&with(br#"{"scene":{"id":"s"}}"#, Some("ed-1a-2"))),
+            serde_json::json!({"corr": "ed-1a-2", "scene": {"id": "s"}})
+        );
+        assert_eq!(with(br#"{}"#, Some("ed-1a-2")), br#"{"corr":"ed-1a-2"}"#);
+        // No scope, an id that fails the shape check, or a body that is not an
+        // object: the bytes go out exactly as they were.
+        assert_eq!(with(br#"{"locality":{}}"#, None), br#"{"locality":{}}"#);
+        for bad in ["has space", "gx1.a.b", "quo\"te", ""] {
+            assert_eq!(
+                with(br#"{"locality":{}}"#, Some(bad)),
+                br#"{"locality":{}}"#,
+                "{bad}"
+            );
+        }
+        assert_eq!(with(b"[1]", Some("ed-1")), b"[1]");
+    }
+
+    #[test]
+    fn the_server_enters_the_requests_correlation_scope_around_the_publish() {
+        let (server, peer) = server();
+        let address = server.local_addr().expect("address is known");
+        let _listener = server.serve_in_background();
+
+        // Through the client's own `exchange`, which is what adds the id.
+        let send = |address: SocketAddr| -> PublishReply {
+            let bytes = serde_json::to_vec(&serde_json::json!({"scene": scene_json()})).unwrap();
+            let (_, header) = exchange(address, &bytes).expect("the exchange completes");
+            serde_json::from_slice(&header).expect("a reply")
+        };
+        // From a client working for a correlated action (the call a shell makes).
+        {
+            let _scope = gx_telemetry::corr::enter("ed-pub-5");
+            let reply = send(address);
+            assert!(matches!(reply, PublishReply::Published { .. }), "{reply:?}");
+        }
+        // With no scope, nothing is added and nothing is entered.
+        let reply = send(address);
+        assert!(matches!(reply, PublishReply::Published { .. }), "{reply:?}");
+        // A header whose id fails the shape check is not entered, and the
+        // request is still served: the id is not the request.
+        let reply = request(
+            address,
+            serde_json::json!({"corr": "gx1.pretend.credential", "scene": scene_json()}),
+        );
+        assert!(matches!(reply, PublishReply::Published { .. }), "{reply:?}");
+        // And a request with the key and nothing else is still the one-member rule's
+        // refusal, not a pass.
+        let reply = request(address, serde_json::json!({"corr": "ed-1"}));
+        assert!(
+            matches!(
+                reply,
+                PublishReply::Refused(PublishRefusal::InvalidPublishRequest { .. })
+            ),
+            "{reply:?}"
+        );
+
+        assert_eq!(
+            peer.lock().expect("peer lock").scopes,
+            [Some("ed-pub-5".to_owned()), None, None]
+        );
     }
 
     #[test]

@@ -1,0 +1,251 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 62327,
+    "output_tokens": 0,
+    "state_tokens": 7716,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.13: correlation ids end to end; front-end errors, rejections and shell calls captured through cmd_log",
+    "done_when": "One Editor edit and one Playout take, driven from each front end, can each be followed by one correlation id from the front end through the shell, the MCP server or control plane, and the engine; an uncaught front-end error reaches the shell log with its id",
+    "evidence": "# 2.13 \u2014 Correlation ids end to end; front-end errors, rejections and shell calls captured through `cmd_log`\n\nBuild-plan row `2.13` (ADR-0004 \u00a72, \u00a76, \u00a79), 16 Nov 2026. Done when: one Editor\nedit and one Playout take, driven from each front end, can each be followed by\none correlation id from the front end through the shell, the MCP server or\ncontrol plane, and the engine; an uncaught front-end error reaches the shell log\nwith its id.\n\nThe design, written before building, is `design.md`; the questions put to Jev\nand Laya about it are `design-jev-laya.json`.\n\n## What was built\n\n- **The id.** `gx_telemetry::corr` (new): an id is 1 to 64 characters of\n  `A-Z a-z 0-9 _ : -`; `mint(prefix)` makes `ed-\u2026`, `po-\u2026` or `mcp-\u2026`; `enter(id)`\n  puts one in a thread-local scope that nests, restores on drop (also out of\n  order) and is per thread; the sink writes the scope's id as `corr` on every\n  record the thread writes that does not name its own. The dot is not allowed,\n  so a `gx1.` token is never a valid id: the first draft allowed it and the unit\n  test that offers a token as an id failed it.\n- **Front end to shell.** Each front end has one bridge (Editor\n  `Editor/src/shell-bridge.ts`, Playout `Playout/web/shell-bridge.js`). It mints\n  an id per shell call, sends it as the invoke header `x-gx-corr`, and reports\n  the call's end (`ui.call`: command, id, duration, result code) through the new\n  shell command `cmd_log`. It never reports a call's arguments, because a connect\n  call carries a token. A failure remembers its call's id, and the line an\n  operator reads quotes it (`\u2026 [po-ef46b859-11]`). `window.onerror`,\n  `unhandledrejection` and `console.error` are reported under ids of their own\n  (`ui.error`, `ui.rejection`, `ui.console`); `console.error` still prints; at\n  most 60 reports in 10 seconds, and the next window says how many were dropped.\n- **The shell.** `gx_shell_log::scoped` (new crate `Shared/shell-log`) wraps each\n  shell's invoke handler: it reads the header, validates it (an invalid or absent\n  id is replaced by a shell-minted one and `corr.rejected` is written without the\n  presented text), and runs the command inside the scope. `cmd_log` accepts only\n  the four `ui.*` kinds and a fixed set of fields, bounds the text, and replaces\n  anything shaped like a credential before it is written\n  (`gx_telemetry::ui`, `deny_unknown_fields`).\n- **To the engine.** The control client builds the request's `MessageId` as\n  `req.<n>.<corr>` from the scope; the transport's handler reads it, validates it\n  and enters it around the engine's handling, so every engine record a request\n  causes carries it. No protocol bump: an old peer reads `req.<n>`. The asset\n  plane (the Editor's publish) puts a `corr` member in the request header JSON,\n  on the first frame of a connection only; the listener enters it for the\n  connection.\n- **MCP.** The gate mints `mcp-\u2026` for each `tools/call` and enters it; it never\n  accepts the caller's id (the caller is untrusted input to the log).\n- **The boundary guard** (`tools/check-boundaries.mjs`, R1/R4): the literal\n  command list gains `cmd_log`, and `Editor/src/shell-bridge.ts` is the one file\n  allowed to call the shell with a variable command name.\n\n## Executed\n\n**Live, on the real windows** (`live-check.mjs`, result in `live-check-result.json`):\na real `gx-render-worker`, then the real Playout window, then the real Editor\nwindow, each started with `GX_LOG_DIR` in a scratch folder and a WebView2\nremote-debugging port, driven through the DevTools protocol as an operator would\n(clicks, typed fields, the Editor's `window.prompt` answered), closed with\n`CloseMainWindow`, and the three files read back. 17 of 17 checks pass:\n\n- One Playout take. Its id (`po-6312a22c-9` in the recorded run) is on exactly\n  three records: the front end's `ui.call` (`cmd_take`, ok), the shell's\n  `operator.take` (committed) and the engine's `program.take` (committed); the\n  shell and the engine name the same committed frame (208).\n- One refused take (`live/not-published`). The engine's `program.take` (refused,\n  `unknownTake`), the shell's `operator.take` and the front end's `ui.call`\n  (`refused:unknownTake`) carry the id the front end gave the call; the operator\n  can read the id in the line that shows the refusal.\n- An uncaught error and an unhandled rejection thrown in the Playout page are in\n  the shell's file as `ui.error` (with source and stack) and `ui.rejection`, each\n  with a `po-\u2026` id.\n- One Editor edit (a rectangle added from the front end): `ui.call cmd_execute`\n  and the shell's `editor.command editScene (applied)` carry one `ed-\u2026` id.\n- One Editor publish: `ui.call cmd_publish`, the shell's `editor.publish\n  (published)` and the engine's `publish.accepted` carry one `ed-\u2026` id, over the\n  asset plane.\n- Both windows closed gracefully (exit 0, `playout.stop` / `editor.stop`, then\n  `log.stop`), and no token or credential text is in any of the files.\n\nThe first runs of this script failed for reasons in the script, not the product:\nPlayout ignores a click while its start-up attach is running; a hung DevTools\ncall (the Editor asks for an object's name with `window.prompt`, which holds the\npage until answered) had no timeout; the \"refusal\" it waited for was Playout's\nfirst attempt at its default endpoint; and a check counted files instead of\nrecords. The script now times each call out, accepts dialogs, runs under a\n4-minute watchdog and names its last step.\n\n**Unit and integration tests added.**\n`gx-telemetry` `corr` (6), `ui` (6), `sink` (1: a record carries the entered\nscope unless it names its own); control plane `MessageId` (1); control transport\n(the connection test reads the id from the request and writes the refusal\nrecords with it); asset plane (4: the header carries the id as its first member,\nthe listener enters it around a publish, a frame with an id reads as the same\nrequest, and **the real client puts the id on its first frame and no other**);\n`gx-shell-log` (1: a command runs inside the scope of its call's id); the engine\nworker over a real connection (`log_corr`: every record a request causes carries\nits id); the Editor MCP server (`log_file`: every tool call has an `mcp-\u2026` id);\nEditor front end (12, vitest) and Playout front end (11, node:test); the\nboundary guard (the log command and the one bridge file are allowed; nothing\nelse).\n\n**Mutations** (`mutate_213.py`, one at a time, restored byte-identical, each\nmust fail a named check): 19 of 19 caught.\n\n| | Mutation | Failing check |\n|---|---|---|\n| A1 | the sink ignores the scope | `sink::tests::a_record_carries_the_entered_correlation_scope_unless_it_names_its_own` |\n| A2 | a dot is a valid id character | `corr::tests::only_a_short_plain_id_is_valid` and 2 more |\n| A3 | a front-end credential written as it came | `ui::tests::what_is_not_plain_is_replaced_cut_or_dropped_and_no_credential_is_written` |\n| A4 | any kind of front-end entry accepted | `ui::tests::an_entry_of_another_kind_or_with_another_field_is_refused` |\n| B1 | the control client sends no id | `log_corr::the_engine_writes_a_requests_correlation_id_on_every_record_the_request_causes` |\n| B2 | the control server does not enter the id | the same test |\n| B3 | the control server enters an id unchecked | `server::log_tests::connections_credentials_and_refusals_are_on_record_without_a_credential` |\n| C1 | the asset-plane client adds no id | `publish::tests::the_server_enters_the_requests_correlation_scope_around_the_publish` |\n| C2 | the asset-plane server does not enter it | the same test |\n| C3 | the transfer client does not tag its first frame | **survived** (no test drove the client); fixed with `preflight::tests::the_client_names_its_action_in_its_first_frame_and_in_no_other`, which now fails it |\n| D1 | the MCP gate enters no id | `log_file::every_tool_call_is_on_record_and_stdout_carries_only_the_protocol` |\n| E1 | the shell wrapper enters no scope | `gx-shell-log::tests::a_command_runs_inside_the_scope_of_the_id_its_call_carried` |\n| F1 | the Editor bridge sends no header | 3 tests in `Editor/tests/shell-bridge.test.ts` |\n| F2 | the Editor bridge forgets which call an error came from | 2 tests there |\n| F3 | the Editor does not capture rejections | 1 test there |\n| F4 | the Editor reports a call with its arguments | 2 tests there (the secret is in the log) |\n| G1 | Playout sends no header | 2 tests in `Playout/tests/shell-bridge.test.mjs` |\n| G2 | Playout forgets which call an error came from | 1 test there |\n| H1 | the boundary guard exempts a second file | `the bridge's exemption is that one file only` |\n\n**Gate.** `cargo fmt --all --check` and `cargo clippy --workspace --all-targets\n-D warnings` clean; `npm run check` exit 0: boundaries and codegen current, 60\nNode tests, 424 Editor tests, 944 Rust tests, conformance 610 passed, 0 failed,\n9 skipped (as at 2.12: the conformance run reads every process's file and was\nnot changed by this row).\n\n## Jev and Laya\n\nOn the design (`design-jev-laya.json`): both classifiers agreed on where the id\nis minted (the front end), how the engine's records get it (a thread-local scope),\nthat per-call ids are enough, and that the shell must validate the front end's\nid. They split on two carriers, and their splits were decided by hand:\n\n- *Carrier to the shell.* Jev: the invoke header (1.0). Laya: shared state, with\n  probabilities 0.37 / 0.35 / 0.28, which is no signal (confidence 0.007). Built\n  as a header, which is the one carrier that is the call's own and cannot be\n  attached to the wrong call.\n- *Carrier to the engine.* Jev: the `MessageId` (1.0). Laya: an envelope field,\n  0.37 / 0.34 / 0.29 (confidence 0.005). Built in `MessageId`, because a new\n  envelope field is a wire-version change and `MessageId` is already a free-form\n  string the server reads for every request.\n- Laya's four yes/no answers on the design were 0.96 to 0.98 and contradict each\n  other (it says to accept the MCP caller's id and to replace the front end's;\n  that the design needs a user decision and that it is enough), so I read them\n  as no signal. Jev's were consistent (0.12 for accepting a caller's MCP id, 0.93\n  that per-call is enough, 0.92 that the shell must validate). The MCP gate does\n  not accept the caller's id.\n\nOn the slice and the row's acceptance: `jev-laya-slice.json`.\n\n## Named readings and gaps\n\n1. **\"One Editor edit \u2026 through \u2026 the engine\" is read as two chains.** An Editor\n   edit is followed from the front end to the shell (`cmd_execute`, then the\n   shell's `editor.command`); it does not reach the engine, because the Editor's\n   scene is local until it is published. What reaches the engine is the\n   **publish**, which carries its own id (`ed-\u2026`, `cmd_publish` \u2192\n   `editor.publish` \u2192 `publish.accepted`). The edit's id and the publish's id are\n   two ids. One id across a gesture (an edit, then the publish of it) is the\n   *gesture id* of design item 8, not built. If the row's done-when means one id\n   from an edit to the engine, this is the gap to close.\n2. **An id is one shell call, not one operator gesture** (design item 1).\n3. A successful `cmd_status` poll is written at debug by the front end (its\n   failure at info), so it is not in a default-level file.\n4. The MCP gate's id reaches an engine only through a tool that talks to one\n   (Playout's); that path is covered by the control-plane test and the MCP\n   gate's own test separately, not by a run that drives an MCP tool to an engine.\n5. Not in this row: a gesture id, the MCP *client's* own request id, the\n   as-run record's use of the id (12.11).\n6. **Observed in the hung live run, not a 2.13 matter:** the engine (a debug\n   build) was late on every frame (render about 51 ms against a 20 ms interval)\n   and wrote a `frame.missed` and a `frame.late` record for each one: 207 255\n   lines in about 90 minutes (38 a second). Each is a true\n   anomaly under ADR-0004, but a continuous stream of them buries the rest of the\n   file. A coalescing rule for a run of late frames is worth deciding\n   (open question for the user; it is a change to 2.12's catalogue).\n",
+    "code": "--- Shared/telemetry/src/corr.rs (new)\n//! Correlation ids (ADR-0004 \u00a72, build-plan row 2.13).\n//!\n//! An id names one action. It is minted where the action starts (a front-end\n//! call, an MCP `tools/call`), carried with the action across every process it\n//! reaches, and written on every log record the action causes, so one search\n//! for it follows the action from the window to the engine.\n//!\n//! **A scope, not a parameter.** While a [`Scope`] is entered, every record the\n//! *thread* writes without a `corr` of its own carries the scope's id (the sink\n//! reads [`current`]). No function that logs has to be given the id. It holds\n//! because each place an action's work happens does it on one thread: a Tauri\n//! command (all are synchronous), the control client's request, the transport's\n//! per-connection handler, and the MCP gate. An id that has to cross a thread is\n//! passed explicitly and entered again on the other side.\n//!\n//! **An id is untrusted input to a log.** The front end mints its own, so an id\n//! that arrives from outside is checked ([`is_valid`]: 1 to 64 characters of\n//! `A-Z a-z 0-9 _ : -`) and replaced by a freshly minted one if it is not\n//! ([`adopt`]). A line break, a quotation mark, a space and a `gx1.` credential\n//! (which always contains dots) cannot reach a log through an id. The check is of\n//! shape, not meaning: a credential that happened to be 64 plain characters would\n//! pass it, which is why credentials are also kept out at their source\n//! (`Redacted`, invariant 54) and why no caller puts one where an id goes.\n\nuse std::cell::RefCell;\nuse std::marker::PhantomData;\nuse std::sync::atomic::{AtomicU64, Ordering};\nuse std::sync::OnceLock;\nuse std::time::{SystemTime, UNIX_EPOCH};\n\n/// The longest id accepted.\npub const MAX_LEN: usize = 64;\n\n/// Whether `id` is an acceptable c\n--- Shared/shell-log/src/lib.rs (new)\n//! The invoke wrapper both shells use (build-plan row 2.13, ADR-0004 \u00a72, \u00a76).\n//!\n//! A front end sends its correlation id as the request header\n//! [`gx_telemetry::ui::CORR_HEADER`]. [`scoped`] wraps a shell's whole invoke\n//! handler, reads that header for every command, and runs the command inside a\n//! correlation scope, so each record the command writes (and each control-plane\n//! or asset-plane request it makes) carries the call's id with no change to any\n//! command. A call with no header, or one whose id is not plain, still gets an\n//! id: the shell mints one.\n//!\n//! **Synchronous commands only.** The scope belongs to the thread the call\n//! arrived on, and a synchronous command runs on it. An `async` command would\n//! run elsewhere and write without the id; both shells' commands are all\n//! synchronous, and a test here fails if a command ran outside its scope.\n\n#![forbid(unsafe_code)]\n\nuse tauri::ipc::Invoke;\nuse tauri::Runtime;\n\n/// Wrap `handler` (the value of `tauri::generate_handler!`) so each command\n/// runs inside the scope of the correlation id its call carried.\npub fn scoped<R: Runtime>(\n    handler: impl Fn(Invoke<R>) -> bool + Send + Sync + 'static,\n) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {\n    move |invoke| {\n        let header = invoke\n            .message\n            .headers()\n            .get(gx_telemetry::ui::CORR_HEADER)\n            .and_then(|value| value.to_str().ok())\n            .map(str::to_owned);\n        let _scope = gx_telemetry::ui::enter_call(header.as_deref(), invoke.message.command());\n        handler(invoke)\n    }\n}\n\n\n--- Editor/src/shell-bridge.ts (new)\n// The one place the Editor's web layer calls its shell from (build-plan 2.13,\n// ADR-0004 \u00a72, \u00a76).\n//\n// Every call gets a correlation id, minted here and sent as a request header,\n// so the shell scopes the command to it and every record the command causes,\n// in the shell, the asset plane and the engine, carries it. The call's end (its\n// command, its id, how long it took, `ok` or the error's code) is reported to\n// the shell's log through `cmd_log`. Never its arguments: a call can carry a\n// path, a document or a credential, and the shell already records what it did\n// with them.\n//\n// An error that comes back from the shell is remembered with the id of the call\n// that caused it (`corrOf`), so the line the author reads can quote it. Uncaught\n// errors, unhandled promise rejections and `console.error` are reported too,\n// each with an id of its own.\n//\n// This file is the one place a command name is passed as a variable: every\n// other call site names its command literally (the boundary guard, R4).\n\n/** The request header a call's id travels in. Must match `gx_telemetry::ui`. */\nexport const CORR_HEADER = \"x-gx-corr\";\n\n/** The slice of Tauri's core bridge this layer uses. */\nexport interface RawCore {\n  invoke<T>(\n    command: string,\n    args?: Record<string, unknown>,\n    options?: { headers?: Record<string, string> },\n  ): Promise<T>;\n}\n\n/** One entry for the shell's log (`gx_telemetry::ui::UiEntry`). */\nexport interface UiEntry {\n  readonly kind: \"ui.call\" | \"ui.error\" | \"ui.rejection\" | \"ui.console\";\n  readonly level?: \"debug\" | \"info\";\n  readonly corr?: string;\n  readonly command?: string;\n  readonly result?: string;\n  readonly durationMs?: number;\n  readonly message?: string;\n  readonly source?: string;\n  readonly stack?: string;\n}\n\nexport interface Bridge {\n\n--- Shared/control-plane/src/sequence.rs (changed)\ndiff --git a/Shared/control-plane/src/sequence.rs b/Shared/control-plane/src/sequence.rs\nindex af7a859..cb36247 100644\n--- a/Shared/control-plane/src/sequence.rs\n+++ b/Shared/control-plane/src/sequence.rs\n@@ -41,2 +41,21 @@ pub struct MessageId(pub String);\n impl MessageId {\n+    /// A request's id: `req.<n>`, or `req.<n>.<id>` when the request is part of\n+    /// a correlated action (2.13, ADR-0004 \u00a72). The id travels in the id string,\n+    /// which is opaque to every peer: no wire version changes, and a peer that\n+    /// knows nothing of correlation reads `req.<n>.<id>` as it reads any id.\n+    pub fn request(count: u64, correlation: Option<&str>) -> Self {\n+        match correlation {\n+            Some(id) => Self(format!(\"req.{count}.{id}\")),\n+            None => Self(format!(\"req.{count}\")),\n+        }\n+    }\n+\n+    /// The correlation id a request id carries, if it carries one. Not checked\n+    /// here: the receiver checks what it is about to write to a log.\n+    pub fn correlation(&self) -> Option<&str> {\n+        let (count, id) = self.0.strip_prefix(\"req.\")?.split_once('.')?;\n+        (!count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()) && !id.is_empty())\n+            .then_some(id)\n+    }\n+\n     /// Whether this is a reply, by prefix (invariant 34).\n@@ -238,2 +257,25 @@ mod tests {\n \n+    #[test]\n+    fn a_request_id_carries_a_correlation_id_after_its_count_and_nothing_else_does() {\n+        assert_eq!(MessageId::request(7, None).0, \"req.7\");\n+        \n--- Shared/control-transport/src/server.rs (changed)\ndiff --git a/Shared/control-transport/src/server.rs b/Shared/control-transport/src/server.rs\nindex da724cb..ca924e3 100644\n--- a/Shared/control-transport/src/server.rs\n+++ b/Shared/control-transport/src/server.rs\n@@ -298,2 +298,12 @@ fn handle_connection<P: EnginePeer>(\n             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;\n+        // 2.13: everything this request causes, here and in the engine it\n+        // reaches, is written under the id it arrived with. An id that does not\n+        // pass the check is not entered and its text is not kept.\n+        let presented = envelope.id.correlation();\n+        let _correlation = presented\n+            .filter(|id| gx_telemetry::corr::is_valid(id))\n+            .map(gx_telemetry::corr::enter);\n+        if presented.is_some() && _correlation.is_none() {\n+            tracing::warn!(event = \"corr.rejected\", origin = \"control\");\n+        }\n         match inbound.admit(envelope.seq) {\n@@ -454,4 +464,6 @@ mod log_tests {\n \n-        // Three clients, one after another: no credential, a credential made\n-        // with another secret, and a valid one that may cue but not take.\n+        // Four clients, one after another: no credential, a credential made\n+        // with another secret, a valid one that may cue but not take (its take\n+        // made inside a correlation scope, as a shell does), and a raw peer\n+        // that presents a request id whose correlation part is not valid.\n         let clients = std::\n--- Shared/asset-plane/src/publish.rs (changed)\ndiff --git a/Shared/asset-plane/src/publish.rs b/Shared/asset-plane/src/publish.rs\nindex ac0ad72..1a8165b 100644\n--- a/Shared/asset-plane/src/publish.rs\n+++ b/Shared/asset-plane/src/publish.rs\n@@ -406,5 +406,6 @@ fn exchange(\n     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;\n+    let request = with_correlation(request, gx_telemetry::corr::current().as_deref());\n     stream\n         .write_all(&(request.len() as u32).to_be_bytes())\n-        .and_then(|()| stream.write_all(request))\n+        .and_then(|()| stream.write_all(&request))\n         .and_then(|()| stream.flush())\n@@ -427,2 +428,28 @@ fn exchange(\n \n+/// The key a request header carries its correlation id under (2.13).\n+pub(crate) const CORRELATION_KEY: &str = \"corr\";\n+\n+/// `request`, a JSON object, with `\"corr\":\"<id>\"` added as its first member when\n+/// the caller is working for a correlated action. An id passes the shape check\n+/// (letters, digits, `_`, `:`, `-`), so it needs no escaping. The server reads and\n+/// removes the key before it checks the request has exactly one member.\n+pub(crate) fn with_correlation(request: &[u8], correlation: Option<&str>) -> Vec<u8> {\n+    match (correlation, request.first(), request.get(1)) {\n+        (Some(id), Some(b'{'), Some(next)) if gx_telemetry::corr::is_valid(id) => {\n+            let mut out = Vec::with_capacity(request.len() + id.len() + 10);\n+            out.extend_from_slice(b\"{\\\"\");\n+            out.extend_from_slice(CORRELATION_\n--- services/mcp-server/src/lib.rs (changed)\ndiff --git a/services/mcp-server/src/lib.rs b/services/mcp-server/src/lib.rs\nindex 11d6497..f789936 100644\n--- a/services/mcp-server/src/lib.rs\n+++ b/services/mcp-server/src/lib.rs\n@@ -252,2 +252,8 @@ impl Server {\n         // the arguments themselves: a batch or an SVG is the store's to keep.\n+        // 2.13: the call is one action and has one id. It is minted here, not\n+        // taken from the caller (an MCP client is untrusted input to a log, and\n+        // its idempotency key already names a retry), and entered for the whole\n+        // call: `mcp.call`, whatever the tool writes, and any control-plane\n+        // request the tool makes carry it.\n+        let _correlation = gx_telemetry::corr::enter(&gx_telemetry::corr::mint(\"mcp\"));\n         let started = std::time::Instant::now();\n"
+  },
+  "questions": {
+    "playout_take_followed": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from a run of the real Playout window and the real engine, that one Playout take can be followed by one correlation id from the front end through the shell and the control plane to the engine, with the committed frame named on both sides?",
+      "criteria": {
+        "true": "Yes, executed on the real windows and engine.",
+        "false": "No, only claimed or only unit-tested."
+      }
+    },
+    "front_end_error_in_log": {
+      "type": "noul",
+      "instructions": "Does the evidence show that an uncaught front-end error (and an unhandled rejection) reaches the shell log with its id, from a run of the real window?",
+      "criteria": {
+        "true": "Yes, executed on the real window.",
+        "false": "No, only claimed or only unit-tested."
+      }
+    },
+    "editor_edit_one_id_to_engine": {
+      "type": "noul",
+      "instructions": "Does the evidence show one Editor edit followed by ONE correlation id from the front end through the shell all the way to the engine?",
+      "criteria": {
+        "true": "Yes, one id covers the edit from the front end to the engine.",
+        "false": "No, the edit and the publish that reaches the engine carry different ids."
+      }
+    },
+    "credential_cannot_reach_log": {
+      "type": "noul",
+      "instructions": "Can a credential (a token, a control-port secret) reach a log file through the correlation id or the front-end capture path in this code?",
+      "criteria": {
+        "true": "Yes, a code path can write a credential.",
+        "false": "No, the code and the checks prevent it."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named in the evidence?",
+      "criteria": {
+        "true": "Yes, something is approximated or skipped silently.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each was run alone, made at least one named check fail, the file was restored identical, and the one that survived was fixed with a new test?",
+      "criteria": {
+        "true": "Each mutation names the failing check and says what happened to the survivor.",
+        "false": "A mutation survived unfixed, or does not name what failed."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "editor_two_ids": "An Editor edit and its publish carry two ids, so one id does not run from the edit to the engine.",
+        "mcp_to_engine": "The MCP gate id reaching an engine is not driven end to end.",
+        "per_call_not_gesture": "An id is per shell call, not per operator gesture.",
+        "stale": "Later changes may have invalidated the evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "playout_take_followed",
+      "jev": 0.9,
+      "laya": 0.9808,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.9
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9808,
+        "confidence": 0.9808,
+        "answer_confidence": 0.9808,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "front_end_error_in_log",
+      "jev": 0.97,
+      "laya": 0.9735,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9735,
+        "confidence": 0.9735,
+        "answer_confidence": 0.9735,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "editor_edit_one_id_to_engine",
+      "jev": 0.07,
+      "laya": 0.9871,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.07
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9871,
+        "confidence": 0.9871,
+        "answer_confidence": 0.9871,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "credential_cannot_reach_log",
+      "jev": 0.24,
+      "laya": 0.9102,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.24
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9102,
+        "confidence": 0.9102,
+        "answer_confidence": 0.9102,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.34,
+      "laya": 0.9744,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.34
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9744,
+        "confidence": 0.9744,
+        "answer_confidence": 0.9744,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.94,
+      "laya": 0.9214,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.94
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9214,
+        "confidence": 0.9214,
+        "answer_confidence": 0.9214,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "editor_two_ids",
+      "laya": "stale",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "editor_two_ids",
+        "confidence": 0.6,
+        "probabilities": {
+          "none": 0,
+          "editor_two_ids": 0.67,
+          "mcp_to_engine": 0.32,
+          "per_call_not_gesture": 0.01,
+          "stale": 0,
+          "vague_record": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "stale",
+        "probabilities": {
+          "none": 0.1901,
+          "editor_two_ids": 0.1008,
+          "mcp_to_engine": 0.0971,
+          "per_call_not_gesture": 0.0939,
+          "stale": 0.2687,
+          "vague_record": 0.2493
+        },
+        "confidence": 0.054,
+        "answer_confidence": 0.2687,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.55,
+      "laya": 0.9265,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.55
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9265,
+        "confidence": 0.9265,
+        "answer_confidence": 0.9265,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

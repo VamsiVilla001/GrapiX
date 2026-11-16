@@ -145,6 +145,9 @@ impl AssetTransferServer {
 pub struct AssetTransferClient {
     stream: TcpStream,
     transferred_bytes: u64,
+    /// Whether this connection's first frame, the one that names the action
+    /// (2.13), has been sent.
+    opened: bool,
 }
 
 impl AssetTransferClient {
@@ -152,6 +155,7 @@ impl AssetTransferClient {
         Ok(Self {
             stream: TcpStream::connect(engine).map_err(AssetTransferClientError::Connect)?,
             transferred_bytes: 0,
+            opened: false,
         })
     }
 
@@ -245,7 +249,15 @@ impl AssetTransferClient {
         &mut self,
         request: AssetTransferRequest,
     ) -> Result<AssetTransferReply, AssetTransferClientError> {
-        write_frame(&mut self.stream, &request).map_err(AssetTransferClientError::Transport)?;
+        // 2.13: the connection's first frame carries the correlation id of the
+        // action it belongs to; the listener enters it for the whole connection.
+        let correlation = if std::mem::replace(&mut self.opened, true) {
+            None
+        } else {
+            gx_telemetry::corr::current()
+        };
+        write_frame_for(&mut self.stream, &request, correlation.as_deref())
+            .map_err(AssetTransferClientError::Transport)?;
         read_frame(&mut self.stream)
             .map_err(AssetTransferClientError::Transport)?
             .ok_or_else(|| {
@@ -451,7 +463,17 @@ fn handle_request<A: VerifiedAssets>(
 }
 
 fn write_frame<W: Write, T: Serialize>(stream: &mut W, value: &T) -> io::Result<()> {
+    write_frame_for(stream, value, None)
+}
+
+/// [`write_frame`], with the frame's correlation id when it has one.
+fn write_frame_for<W: Write, T: Serialize>(
+    stream: &mut W,
+    value: &T,
+    correlation: Option<&str>,
+) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
+    let bytes = crate::publish::with_correlation(&bytes, correlation);
     if bytes.len() > MAX_ASSET_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -497,6 +519,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use std::io::Cursor;
+
     use super::*;
 
     static NEXT_TEMPORARY_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -521,6 +545,71 @@ mod tests {
         let metrics = server.metrics();
         server.serve_in_background();
         (address, metrics, directory)
+    }
+
+    #[test]
+    fn a_first_frame_may_carry_a_correlation_id_and_still_reads_as_the_same_request() {
+        // 2.13: the LAN route's connection names its action in its first frame.
+        let request = AssetTransferRequest::Preflight { hashes: Vec::new() };
+        let mut plain = Vec::new();
+        write_frame(&mut plain, &request).expect("a plain frame writes");
+        let mut tagged = Vec::new();
+        write_frame_for(&mut tagged, &request, Some("ed-1a-2")).expect("a tagged frame writes");
+        assert!(String::from_utf8_lossy(&tagged).contains(r#""corr":"ed-1a-2""#));
+        assert!(!String::from_utf8_lossy(&plain).contains("corr"));
+        let read: Option<AssetTransferRequest> =
+            read_frame(&mut Cursor::new(tagged)).expect("the tagged frame reads");
+        assert!(
+            matches!(read, Some(AssetTransferRequest::Preflight { hashes }) if hashes.is_empty()),
+            "the id does not change what the request is"
+        );
+    }
+
+    #[test]
+    fn the_client_names_its_action_in_its_first_frame_and_in_no_other() {
+        // 2.13: the id travels once per connection, on the frame that opens it. A
+        // raw listener reads what the real client puts on the wire.
+        let listener =
+            std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a listener must bind");
+        let address = listener
+            .local_addr()
+            .expect("a bound listener has an address");
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("the client must connect");
+            let mut frames = Vec::new();
+            for _ in 0..2 {
+                let frame: serde_json::Value = read_frame(&mut stream)
+                    .expect("a frame must read")
+                    .expect("the client must send a frame");
+                frames.push(frame);
+                write_frame(
+                    &mut stream,
+                    &AssetTransferReply::Preflight {
+                        missing: Vec::new(),
+                    },
+                )
+                .expect("the reply must write");
+            }
+            frames
+        });
+
+        let _scope = gx_telemetry::corr::enter("ed-test-1");
+        let mut client = AssetTransferClient::connect(address).expect("client must connect");
+        for _ in 0..2 {
+            client
+                .preflight(PreflightRequest { hashes: Vec::new() })
+                .expect("preflight must reply");
+        }
+
+        let frames = peer.join().expect("the listener thread must finish");
+        assert_eq!(
+            frames[0]["corr"], "ed-test-1",
+            "the first frame names the action it belongs to"
+        );
+        assert!(
+            frames[1].get("corr").is_none(),
+            "a later frame of the same connection does not repeat it"
+        );
     }
 
     #[test]

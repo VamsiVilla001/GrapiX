@@ -29,8 +29,14 @@
 // browser there is no bridge, and the page must say so rather than throw.
 // ---------------------------------------------------------------------------
 
-const bridge = globalThis.__TAURI__ && globalThis.__TAURI__.core;
-const inShell = typeof bridge?.invoke === "function";
+import { createBridge, corrOf, installCapture } from "./shell-bridge.js";
+
+const rawBridge = globalThis.__TAURI__ && globalThis.__TAURI__.core;
+const inShell = typeof rawBridge?.invoke === "function";
+// 2.13: every call to the shell has a correlation id sent as a header, and its end
+// is reported to the shell's log (never its arguments: connect carries a token).
+// The status poll is written at debug when it succeeds.
+const bridge = inShell ? createBridge(rawBridge, { prefix: "po", quiet: new Set(["cmd_status"]) }) : undefined;
 
 /** Every engine call goes through here so the no-bridge case is one branch. */
 function invoke(command, args) {
@@ -157,6 +163,14 @@ function scalar(value) {
  *  "the engine never heard you", the other is "the engine said no, and here is
  *  the condition that failed". */
 function describeError(err) {
+  const described = describeFailure(err);
+  // The id of the call that failed, so the operator can quote it (2.13).
+  const corr = corrOf(err);
+  if (corr === undefined) return described;
+  return { ...described, corr, detail: `${described.detail}${described.detail ? " " : ""}[${corr}]` };
+}
+
+function describeFailure(err) {
   if (err && typeof err === "object" && typeof err.error === "string") {
     if (err.error === "refused") {
       return {
@@ -1103,6 +1117,10 @@ async function boot() {
     );
     return;
   }
+
+  // From here an uncaught error, a rejection nobody handled and a console.error are
+  // on record in the shell's log, each with an id (2.13).
+  installCapture(globalThis, console, bridge);
 
   log("SESSION", "info", "Playout surface ready", "Not connected. Commands are held until connect.");
 

@@ -1,0 +1,203 @@
+{
+  "checks": [
+    {
+      "name": "Playout reported its take call with an id",
+      "ok": true,
+      "detail": "po-6312a22c-9"
+    },
+    {
+      "name": "the shell's own record of the take carries the id",
+      "ok": true,
+      "detail": "engine/worker:program.take, playout/shell:operator.take, playout/shell:ui.call"
+    },
+    {
+      "name": "the engine's record of the take carries the same id, with the frame it committed",
+      "ok": true,
+      "detail": "engine/worker:program.take, playout/shell:operator.take, playout/shell:ui.call"
+    },
+    {
+      "name": "the take's id is on exactly three records: the front end's report of the call, the shell's record and the engine's record",
+      "ok": true,
+      "detail": "engine/worker:program.take, playout/shell:operator.take, playout/shell:ui.call"
+    },
+    {
+      "name": "the shell and the engine name the same frame for the take",
+      "ok": true,
+      "detail": "208 / 208"
+    },
+    {
+      "name": "a refused take is reported with its refusal code",
+      "ok": true,
+      "detail": "refused:unknownTake"
+    },
+    {
+      "name": "the engine's refusal carries the id the front end gave the call",
+      "ok": true,
+      "detail": "engine/worker:program.take, playout/shell:operator.take, playout/shell:ui.call"
+    },
+    {
+      "name": "the operator can read the id in the line that shows the refusal",
+      "ok": true,
+      "detail": "#0005TAKErefused: unknownTake (takeId=live/not-published)unknown take: live/not-published [po-ef46b859-11]"
+    },
+    {
+      "name": "an uncaught front-end error reaches the shell log with an id",
+      "ok": true,
+      "detail": "po-08dddb92-14"
+    },
+    {
+      "name": "an unhandled rejection reaches the shell log with an id",
+      "ok": true,
+      "detail": "po-e1a3e4f4-16"
+    },
+    {
+      "name": "Playout closed gracefully and finished its log",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "no token or credential text in any file",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "an Editor edit from the front end: its call and the shell's record of the command carry one id",
+      "ok": true,
+      "detail": "editor/shell:editor.command, editor/shell:ui.call"
+    },
+    {
+      "name": "the Editor reported its publish call with an id",
+      "ok": true,
+      "detail": "ed-f71b7202-27 ok"
+    },
+    {
+      "name": "the shell's record of the publish carries the id",
+      "ok": true,
+      "detail": "engine/worker:publish.accepted, editor/shell:editor.publish, editor/shell:ui.call"
+    },
+    {
+      "name": "the engine's record of the publish carries the same id",
+      "ok": true,
+      "detail": "engine/worker:publish.accepted, editor/shell:editor.publish, editor/shell:ui.call"
+    },
+    {
+      "name": "the Editor closed gracefully and finished its log",
+      "ok": true,
+      "detail": "exit 0"
+    }
+  ],
+  "publishLine": "untitled revision 1 · hash 591214cf162180715a0dba9abdb943301ffcc945ef8d1e37f93a280c761af4bc · localPath, 0 asset bytes sent",
+  "refusedLine": "#0005TAKErefused: unknownTake (takeId=live/not-published)unknown take: live/not-published [po-ef46b859-11]",
+  "followed": {
+    "take": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "program.take",
+        "corr": "po-6312a22c-9",
+        "frame": 208,
+        "result": "committed",
+        "take_id": "live/lower-third"
+      },
+      {
+        "file": "playout/shell",
+        "level": "info",
+        "event": "operator.take",
+        "corr": "po-6312a22c-9",
+        "frame": 208,
+        "result": "committed",
+        "take_id": "live/lower-third"
+      },
+      {
+        "file": "playout/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "po-6312a22c-9",
+        "result": "ok",
+        "command": "cmd_take"
+      }
+    ],
+    "refusedTake": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "program.take",
+        "corr": "po-ef46b859-11",
+        "refusal": "unknownTake",
+        "result": "refused"
+      },
+      {
+        "file": "playout/shell",
+        "level": "info",
+        "event": "operator.take",
+        "corr": "po-ef46b859-11",
+        "refusal": "unknownTake",
+        "result": "refused"
+      },
+      {
+        "file": "playout/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "po-ef46b859-11",
+        "result": "refused:unknownTake",
+        "command": "cmd_take"
+      }
+    ],
+    "editorEdit": [
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.command",
+        "corr": "ed-3a5732da-24",
+        "command": "editScene",
+        "result": "applied"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "ed-3a5732da-24",
+        "command": "cmd_execute",
+        "result": "ok"
+      }
+    ],
+    "editorPublish": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "publish.accepted",
+        "corr": "ed-f71b7202-27",
+        "take_id": "untitled"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.publish",
+        "corr": "ed-f71b7202-27",
+        "result": "published",
+        "take_id": "untitled"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "ed-f71b7202-27",
+        "command": "cmd_publish",
+        "result": "ok"
+      }
+    ],
+    "uncaughtError": {
+      "file": "playout/shell",
+      "event": "ui.error",
+      "corr": "po-08dddb92-14",
+      "source": "http://tauri.localhost/:1:20",
+      "message": "Uncaught Error: live-check uncaught error"
+    },
+    "rejection": {
+      "file": "playout/shell",
+      "event": "ui.rejection",
+      "corr": "po-e1a3e4f4-16",
+      "message": "Error: live-check unhandled rejection"
+    }
+  }
+}

@@ -118,6 +118,45 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 2.13 done: correlation ids end to end, and front-end capture through `cmd_log` (Claude)
+
+**Resume here.** 2.13 is done, on a named reading (below). Next is **2.16** (engine.stop on Ctrl+C with the `ctrlc` crate the
+user approved on 16 Nov 2026; pin an exact version, report the `Cargo.lock` diff; plus `log.previous_unfinished` on start),
+then **2.14** (diagnostic bundle), **2.15** (named operator login for Playout), **12.11** (as-run record). Row **2.17** is
+proposed by me (one id from an Editor edit to the engine) and needs the user's yes.
+
+How an id flows. Each front end has one bridge (`Editor/src/shell-bridge.ts`, `Playout/web/shell-bridge.js`) that mints an
+id per shell call (`ed-…`, `po-…`) and sends it as the invoke header `x-gx-corr`; it reports each call's end through the new
+shell command `cmd_log` (never the call's arguments; a connect call carries a token) and keeps the id on the error a failed
+call returns, so the line an operator reads can quote it. `gx_shell_log::scoped` (new crate `Shared/shell-log`) wraps each
+shell's invoke handler, validates the header (`gx_telemetry::corr::is_valid`: 1 to 64 of `A-Za-z0-9_:-`, no dot, so a `gx1.`
+token is never an id) and enters it in a thread-local scope that the sink reads for every record the thread writes. To the
+engine: the control client puts it in the request's `MessageId` as `req.<n>.<id>` (no protocol bump) and the transport
+enters it around the engine's handling; the asset plane carries it as a `corr` member of the request header (first frame
+only; `handle_publish` enters it for the connection). The MCP gate mints `mcp-…` per `tools/call` and never accepts the
+caller's id. Front-end errors, unhandled rejections and `console.error` reach the shell's file as `ui.error`,
+`ui.rejection`, `ui.console` (bounded, credential-scrubbed, 60 reports per 10 s).
+
+Verified: live on the real Playout and Editor windows against a real engine (`docs/evidence/2.13/live-check.mjs`, 17 of 17):
+one take is on exactly three records with the same committed frame; a refused take's id is in the operator's row; an
+uncaught error and a rejection are in the shell log with ids. 19 of 19 mutations fail named checks (C3 survived: no test
+drove the transfer client; one was added). `npm run check` exit 0 (60 Node, 424 Editor, 944 Rust, conformance 610/0/9).
+
+**Named gaps and readings.** (1) An Editor *edit* is followed front end to shell only; what reaches the engine is its
+*publish*, under its own id. Jev: one id from an edit to the engine is not shown (0.07). Laya said yes to everything again
+(0.91 to 0.99), so it is no signal. The user decides whether 2.13 stands (row 2.17 is the gap). (2) An id is per shell call,
+not per gesture. (3) A successful `cmd_status` poll is debug in the front end's report. (4) The MCP gate's id reaching an
+engine is covered by two separate tests, not driven end to end. (5) Seen in a long live run: a debug-build engine late on
+every frame wrote a `frame.missed` and a `frame.late` for each, 207 255 lines in 90 minutes; a rule that coalesces a run of
+late frames is worth deciding (it changes 2.12's catalogue; not done). (6) `cargo test -p gx-engine-host --test ensure` still
+fails two tests on this machine because of the user's stale recovery journal; left alone.
+
+**Live-check lessons (also in the memory notes).** The Editor asks for names with `window.prompt`, which holds the page
+(every `Runtime.evaluate`) until answered: enable the DevTools `Page` domain and answer `Page.javascriptDialogOpening` with
+`Page.handleJavaScriptDialog`. Every DevTools call needs a timeout and the script a watchdog: the first run hung 2 hours on
+one unanswered call. Select a row by what is in it (`TAKE` and `refused`), not by the first "refused" (Playout's first
+attempt at its default endpoint is also refused).
+
 ## 2026-11-16 — 2.12 done: every process logs through the sink, and a conformance run reads each file (Claude)
 
 **Resume here.** 2.12 is done; next is **2.13** (correlation ids end to end; front-end capture through `cmd_log`), then

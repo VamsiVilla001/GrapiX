@@ -96,5 +96,23 @@ fn every_tool_call_is_on_record_and_stdout_carries_only_the_protocol() {
         .unwrap_or_else(|| panic!("no refused mcp.call in {found:#?}"));
     assert_eq!(refused["fields"]["tool"], "scenes.create");
     assert_eq!(refused["refusal"], "projectNotFound");
+    // 2.13: each call is one action with its own id, minted at the gate.
+    let ids: Vec<&str> = [ok, refused]
+        .iter()
+        .map(|r| r["corr"].as_str().expect("an mcp.call carries its id"))
+        .collect();
+    assert!(
+        ids.iter()
+            .all(|id| id.starts_with("mcp-") && id.len() <= 64),
+        "{ids:?}"
+    );
+    assert_ne!(ids[0], ids[1], "two calls are two actions");
+    assert!(
+        found
+            .iter()
+            .filter(|r| r["event"] == "mcp.start")
+            .all(|r| r["corr"].is_null()),
+        "the start is not part of a call"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
