@@ -118,6 +118,20 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 2.11 done: the JSON Lines log sink; ADR-0004 accepted (Claude, on the user's decisions)
+
+**Resume here.** The user accepted ADR-0004 and decided: build now; default verbosity every state change and
+anomaly at info plus a 1 s engine heartbeat; if the as-run log cannot be written, warn the operator and keep taking;
+a named operator login (new row 2.15). Rows 2.11 to 2.15 are in the plan and tracker; 12.11 amended (synced,
+hash-chained, names the signed-in operator, depends on 2.11 and 2.15). **Done: 2.11**, `Shared/telemetry/src/sink.rs`:
+the schema, a `tracing` layer that numbers each event and `try_send`s it (never waits), a writer thread that states
+every `seq` gap as `log.lost`, `log.start`/`log.stop`, 50 MB parts, 30-day expiry, `init_logging` with `GX_LOG`
+default info that refuses an already-installed subscriber. The code review found a real defect (the global
+subscriber kept the queue open, so finishing would hang) and the re-check a silent one (an existing subscriber left
+the sink empty); both fixed. 8 tests, 8 of 8 mutations caught (one by hanging the suite). Jev and Laya: Jev 0.49 then
+0.69 met; Laya above 0.95 either way round, so not discriminating. **Next: 2.12** (every process logs through the
+sink), then 2.13, 2.14, 2.15, 12.11.
+
 ## 2026-11-16 — The debugging model and broadcast logging: ADR-0004 proposed, not built (Claude, on the user's instruction)
 
 **Resume here.** User instruction 16 Nov: a debugging model for backend and front end, and a log of everything run,

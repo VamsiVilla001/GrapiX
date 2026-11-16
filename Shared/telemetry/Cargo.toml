@@ -8,4 +8,5 @@ rust-version.workspace = true
 [dependencies]
 gx-contracts = { workspace = true }
 tracing = "0.1"
+serde_json = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

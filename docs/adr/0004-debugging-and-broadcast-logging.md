@@ -1,9 +1,20 @@
 # GrapiX debugging model and broadcast logging
 
-Date: 16 November 2026. Status: **Proposed**. Nothing in this ADR is built yet
-beyond what "Today" lists; `GrapiX-Build-Plan.md` remains the only
-implementation plan, and the rows proposed at the end enter it when the user
-accepts this design.
+Date: 16 November 2026. Status: **Accepted** (user, 16 November 2026) as
+design; the rows are **Planned** (`2.11` to `2.15`, `12.11`). `GrapiX-Build-Plan.md`
+remains the only implementation plan.
+
+## Decisions (user, 16 November 2026)
+
+1. **Build it now**, rows `2.11` to `2.15` and `12.11`, in that order.
+2. **Default verbosity:** every state change and anomaly at `info`, every late
+   or missed frame, and a once-a-second engine heartbeat; per-frame trace is
+   opt-in (Jev's answer).
+3. **If the as-run log cannot be written:** tell the operator at once and
+   keep accepting Program commands; a logging fault never takes a graphic
+   off air.
+4. **Operator identity:** a named operator login (new row `2.15`); the
+   as-run names the person and the credential.
 
 ## The request (user, 16 November 2026)
 

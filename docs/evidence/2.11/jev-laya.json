@@ -1,0 +1,219 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 12077,
+    "output_tokens": 0,
+    "state_tokens": 1684,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.11 Structured JSON Lines log sink (ADR-0004)",
+    "done_when": "A test floods the sink faster than it writes: the caller never waits, every written line parses against the ADR-0004 schema, seq has no gaps except those a log.lost record states, files rotate by size and expire after 30 days, and no credential appears in any line.",
+    "evidence": "# 2.11 \u2014 The structured JSON Lines log sink\n\nBuild-plan row `2.11` (ADR-0004, accepted by the user 16 Nov 2026). Done when:\na test floods the sink faster than it writes: the caller never waits, every\nwritten line parses against the ADR-0004 schema, `seq` has no gaps except those\na `log.lost` record states, files rotate by size and expire after 30 days, and\nno credential appears in any line.\n\n## What it is\n\n`Shared/telemetry/src/sink.rs`:\n\n- **One schema.** Each event is one JSON object per line: `ts` (UTC, RFC 3339,\n  microseconds), `mono` (ns since the sink started), `seq` (per process, from\n  1), `process`, `pid`, `version`, `level`, `target`, `event`, then `corr`,\n  `epoch`, `frame` and `refusal` lifted to the top when the event names them,\n  and every other field under `fields`. An event's name is its `event` field;\n  a dependency's plain message becomes `<target>.message` with the message\n  kept as a field.\n- **The caller never waits.** `JsonLayer` (a `tracing` layer) numbers each\n  event and `try_send`s it to a bounded queue (65,536 by default). A full\n  queue means the line is not written and nothing else happens on the calling\n  thread.\n- **Losses are on record.** The writer thread sees every gap in `seq` and\n  writes a `log.lost` record with `count`, `fromSeq` and `toSeq` (and no `seq`\n  of its own); at shutdown it states any loss after the last written line.\n  Only layers hold senders, so the writer ends when the last layer goes;\n  `LogGuard::finish` (or drop) drains, states, flushes and joins.\n- **Files.** `<log root>/<product>/<process>-<UTC start>-<pid>-<part>.jsonl`,\n  a new part at 50 MB; at start, `.jsonl` files older than 30 days are\n  removed and the sweep is itself recorded (`log.expired`). The first line of\n  every file's run is `log.start`. Other files are never touched; the as-run\n  log (12.11) will live in its own directory.\n- **Filter.** `init_logging` installs the sink with `GX_LOG` (or `RUST_LOG`),\n  default `info` (the user's decision: every state change and anomaly at\n  info).\n- No new dependency: `serde_json` was already in the workspace; the UTC\n  formatting is written out (civil-date algorithm), tested against fixed\n  instants including a leap day.\n\n## Verified by execution\n\n`cargo test -p gx-telemetry`: 7 passed, 0 failed.\n\n- `a_flood_never_makes_the_caller_wait_and_every_loss_is_stated`: a 32-event\n  queue and a writer held to 1 ms a line; 5,000 events are emitted in under\n  1.5 s (writing them would take 5 s), no single event takes 50 ms; every line\n  parses and carries the schema's keys; every number from 1 to 5,001 is either\n  written once or inside exactly one `log.lost` range, never both, and the\n  stated counts match their ranges.\n- `a_line_carries_the_schema_and_never_a_credential`: a token passed as\n  `Redacted` appears only as `<redacted>` and its value nowhere in the file;\n  `corr`, `epoch` and `frame` are at the top; `ts` is RFC 3339 UTC; the first\n  line is `log.start`; a plain message is kept.\n- `files_rotate_by_size_and_the_numbering_runs_on`: 4 KB parts; 401 lines over\n  more than five files, none over its size, `seq` running 1, 2, 3... across\n  parts, nothing lost.\n- `expired_files_are_removed_at_start_and_others_kept`: a 31-day-old log is\n  removed, a recent log and a non-log file of the same age are kept, the sweep\n  is recorded.\n- `utc_time_is_formatted_from_the_epoch`.\n- The two existing audit tests still pass.\n\n**Mutations**, one at a time, files restored byte-identical\n(`mutate_211.py`): the caller waiting for room in the queue; a gap not stated;\na loss at the end not stated; files never rotating; expired files kept; `corr`\nleft inside `fields`; a secret rendered as nothing rather than the marker. 7\nof 7 fail named tests.\n\n## Not in this row\n\n- No process uses the sink yet; that is `2.12` (engine, host, shells,\n  services, MCP servers), with correlation ids and front-end capture in `2.13`.\n- A writer that cannot write (disk full) ends with an error that\n  `LogGuard::finish` returns and drop prints to stderr; telling the operator\n  through the engine's status is `2.12`.\n- The as-run log (synced, hash-chained) is `12.11`.\n",
+    "code": "\nuse std::fs::{File, OpenOptions};\nuse std::io::{self, BufWriter, Write};\nuse std::path::{Path, PathBuf};\nuse std::sync::atomic::{AtomicU64, Ordering};\nuse std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};\nuse std::sync::Arc;\nuse std::thread::JoinHandle;\nuse std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};\n\nuse serde_json::{Map, Value};\nuse tracing::field::{Field as TracingField, Visit};\nuse tracing::{Event, Subscriber};\nuse tracing_subscriber::layer::Context;\nuse tracing_subscriber::Layer;\n\n#[derive(Debug, Clone)]\npub struct LogConfig {\n    pub product: String,\n    pub process: String,\n    pub directory: PathBuf,\n    pub queue: usize,\n    pub max_file_bytes: u64,\n    pub retention: Duration,\n    "
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Is every clause of the done-when shown by an executed test?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, a clause is only claimed."
+      }
+    },
+    "never_blocks": {
+      "type": "noul",
+      "instructions": "In the code, can a caller ever wait for the writer or the disk?",
+      "criteria": {
+        "true": "Yes, a caller can wait.",
+        "false": "No, try_send only."
+      }
+    },
+    "losses_exact": {
+      "type": "noul",
+      "instructions": "Are lost lines stated exactly, including those after the last written line?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "shutdown_drains": {
+      "type": "noul",
+      "instructions": "Does finishing or dropping the guard write everything queued before it returns?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "credential_safe": {
+      "type": "noul",
+      "instructions": "Can a credential reach a line through this sink?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, only through Redacted, which renders the marker."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "Weakest point?",
+      "criteria": {
+        "global_subscriber_holds_sender": "A globally installed subscriber holds a layer, so the writer only ends at process exit.",
+        "disk_full_only_stderr": "A write failure is reported only on stderr until 2.12.",
+        "no_process_uses_it": "No process uses it yet.",
+        "none": "None."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "A defect to fix before committing?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.49,
+      "laya": 0.9779,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.49
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9779,
+        "confidence": 0.9779,
+        "answer_confidence": 0.9779,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "never_blocks",
+      "jev": 0.18,
+      "laya": 0.9605,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.18
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9605,
+        "confidence": 0.9605,
+        "answer_confidence": 0.9605,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "losses_exact",
+      "jev": 0.93,
+      "laya": 0.9703,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9703,
+        "confidence": 0.9703,
+        "answer_confidence": 0.9703,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "shutdown_drains",
+      "jev": 0.86,
+      "laya": 0.9702,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.86
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9702,
+        "confidence": 0.9702,
+        "answer_confidence": 0.9702,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "credential_safe",
+      "jev": 0.18,
+      "laya": 0.8291,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.18
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8291,
+        "confidence": 0.8291,
+        "answer_confidence": 0.8291,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "disk_full_only_stderr",
+      "laya": "no_process_uses_it",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "disk_full_only_stderr",
+        "confidence": 0.61,
+        "probabilities": {
+          "global_subscriber_holds_sender": 0.06,
+          "disk_full_only_stderr": 0.71,
+          "no_process_uses_it": 0.22,
+          "none": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_process_uses_it",
+        "probabilities": {
+          "global_subscriber_holds_sender": 0.0515,
+          "disk_full_only_stderr": 0.2124,
+          "no_process_uses_it": 0.3866,
+          "none": 0.3495
+        },
+        "confidence": 0.1224,
+        "answer_confidence": 0.3866,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.42,
+      "laya": 0.9609,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.42
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9609,
+        "confidence": 0.9609,
+        "answer_confidence": 0.9609,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

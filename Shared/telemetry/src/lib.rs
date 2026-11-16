@@ -21,6 +21,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod sink;
+
 use std::fmt;
 
 use gx_contracts::{Epoch, Refusal};
