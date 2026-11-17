@@ -1,0 +1,60 @@
+# 1. First run (F1 to F17c). F4c and F17c did not run: the live check stopped at its first click.
+F1 the carry scope keeps ids that fail the shape check: exit=101 failing=['corr::tests::a_carry_scope_names_only_valid_distinct_ids_and_counts_the_rest'] restored_identical=True
+F2 the carry scope names a repeated id twice: exit=101 failing=['corr::tests::a_carry_scope_names_only_valid_distinct_ids_and_counts_the_rest'] restored_identical=True
+F3 the carry scope keeps the oldest ids when there are too many: exit=101 failing=['corr::tests::a_carry_scope_keeps_the_newest_ids_when_there_are_too_many'] restored_identical=True
+F4 the asset-plane client does not name the edits in its header: exit=101 failing=['publish::tests::the_server_enters_the_edits_a_publish_names_around_the_publish'] restored_identical=True
+FAILED: the check could not run: Error: timed out waiting for edit 1 to land
+F4c the same, seen by the real engine and the real window: exit=1 failing=[] restored_identical=True
+F5 the header writes ids that fail the shape check: exit=101 failing=['publish::tests::a_request_header_names_the_edits_it_carries_as_a_list'] restored_identical=True
+F6 the publish listener ignores the edits a header names: exit=101 failing=['publish::tests::the_server_enters_the_edits_a_publish_names_around_the_publish'] restored_identical=True
+F7 the listener does not count entries that are not ids: exit=101 failing=['publish::tests::the_server_enters_the_edits_a_publish_names_around_the_publish'] restored_identical=True
+F8 the carries key is left in the request, which then fails its one-member rule: exit=101 failing=['publish::tests::the_server_enters_the_edits_a_publish_names_around_the_publish'] restored_identical=True
+F9 the engine writes no carries on publish.accepted: exit=101 failing=['engine::tests::a_publish_names_the_edits_it_carries_and_one_that_names_none_has_no_field'] restored_identical=True
+F10 the ledger enters the same call twice: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F11 the ledger lets the newest ids go, not the oldest: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F12 a publish forgets the edits made while it ran: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F13 a failed publish forgets its edits: exit=101 failing=['tests::a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try'] restored_identical=True
+F14 a refused edit is noted as carried: exit=101 failing=['tests::an_edit_is_noted_by_the_id_of_the_call_that_made_it_and_nothing_else_is'] restored_identical=True
+F15 the publish does not enter the edits it carries: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+F16 the shell's own publish record leaves out the edits: exit=101 failing=['tests::a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try'] restored_identical=True
+F17 a publish looks up the edits of another target than the one edited: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+FAILED: the check could not run: Error: timed out waiting for edit 1 to land
+F17c the same, seen by the real window: exit=1 failing=[] restored_identical=True
+
+# 2. Rerun of F4c and F17c after the live check retried its clicks (ledger as first written).
+F4c the same, seen by the real engine and the real window: exit=1 failing=['publish 1: the engine names the 3 edits made since the last publish', 'publish 2: the engine names the 1 edit made since the last publish', "edit 1: a search for its id finds the shell's record of the edit and the engine's publish", "edit 2: a search for its id finds the shell's record of the edit and the engine's publish"] restored_identical=True
+F17c the same, seen by the real window: exit=1 failing=['publish 1: the engine names the 3 edits made since the last publish', "publish 1: the shell's own record names the same edits", 'publish 2: the engine names the 1 edit made since the last publish', "publish 2: the shell's own record names the same edits"] restored_identical=True
+
+# 3. After the ledger was rewritten to forget by number: F10 to F17c repeated, F18 to F20 added.
+F10 the ledger enters the same call twice: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F11 the ledger lets the newest ids go, not the oldest: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F12 a publish forgets the edits made while it ran: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F13 a failed publish forgets its edits: exit=101 failing=['tests::a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try'] restored_identical=True
+F14 a refused edit is noted as carried: exit=101 failing=['tests::an_edit_is_noted_by_the_id_of_the_call_that_made_it_and_nothing_else_is'] restored_identical=True
+F15 the publish does not enter the edits it carries: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+F16 the shell's own publish record leaves out the edits: exit=101 failing=['tests::a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try'] restored_identical=True
+F17 a publish looks up the edits of another target than the one edited: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+F18 a publish forgets by position, not by number (the defect found on review): exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F19 the count of unnamed edits is not cleared once they are published: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F20 a publish takes no mark of where it stopped: exit=101 failing=['tests::the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published'] restored_identical=True
+F17c the same, seen by the real window: exit=1 failing=['publish 1: the engine names the 3 edits made since the last publish', "publish 1: the shell's own record names the same edits", 'publish 2: the engine names the 1 edit made since the last publish', "publish 2: the shell's own record names the same edits"] restored_identical=True
+
+# 4. F21 and F22 against the deterministic lock tests, three runs each (the first stress test let both survive).
+F21 the document and the ledger are read after the workspace is released: exit=101 failing=['tests::the_document_and_its_edits_are_read_under_one_hold_of_the_workspace'] restored_identical=True
+F22 an edit is noted after the workspace is released: exit=101 failing=['tests::every_editor_command_and_its_answer_is_on_record', 'tests::an_edit_is_noted_under_the_same_hold_of_the_workspace_that_applied_it'] restored_identical=True
+F21 the document and the ledger are read after the workspace is released: exit=101 failing=['tests::the_document_and_its_edits_are_read_under_one_hold_of_the_workspace'] restored_identical=True
+F22 an edit is noted after the workspace is released: exit=101 failing=['tests::an_edit_is_noted_under_the_same_hold_of_the_workspace_that_applied_it'] restored_identical=True
+F21 the document and the ledger are read after the workspace is released: exit=101 failing=['tests::the_document_and_its_edits_are_read_under_one_hold_of_the_workspace'] restored_identical=True
+F22 an edit is noted after the workspace is released: exit=101 failing=['tests::an_edit_is_noted_under_the_same_hold_of_the_workspace_that_applied_it'] restored_identical=True
+
+# 5. On the final code: F13 (before the F14 text changed), then F14 to F17c and F23.
+F13 a failed publish forgets its edits: exit=101 failing=['tests::a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try'] restored_identical=True
+
+# 5 (continued).
+F14 a refused edit is noted as carried: exit=101 failing=['tests::an_edit_is_noted_by_the_id_of_the_call_that_made_it_and_nothing_else_is', 'tests::every_editor_command_and_its_answer_is_on_record'] restored_identical=True
+F15 the publish does not enter the edits it carries: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+F16 the shell's own publish record leaves out the edits: exit=101 failing=['tests::a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try'] restored_identical=True
+F17 a publish looks up the edits of another target than the one edited: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+F23 a successful publish forgets the edits of another target than the one published: exit=101 failing=['an_edit_is_followed_by_one_id_from_the_shell_through_the_publish_to_the_engine'] restored_identical=True
+F17c the same, seen by the real window: exit=1 failing=['publish 1: the engine names the 3 edits made since the last publish', "publish 1: the shell's own record names the same edits", 'publish 2: the engine names the 1 edit made since the last publish', "publish 2: the shell's own record names the same edits"] restored_identical=True
+

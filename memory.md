@@ -118,9 +118,42 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-17 — 2.17 done: a publish names the ids of the edits it carries (Claude)
+
+**Resume here.** Next is **2.14** (diagnostic bundle `gx-diag` plus a menu item in each shell), then **2.15** (named operator
+login for Playout), then **12.11** (as-run record). The user said on 17 Nov: "then 2.14, the diagnostic bundle".
+
+What was built. `gx_telemetry::corr::carry` (a thread scope of edit ids; valid distinct ids only, newest 64, the rest counted).
+`ShellState` (`Editor/shell/src/lib.rs`) keeps an `EditLedger`: per target, the ids of the shell calls whose edit applied since
+the last publish, each with a number; `execute_command` notes an edit under the workspace lock that applied it;
+`document_and_edits` reads the document and the ledger under one hold of the workspace; `publish_target` enters the ids as a
+carry scope, and forgets them by number only after a successful publish. The ids are written as `carries` (comma-separated)
+on `editor.publish`, in a new optional `"carries":[...]` asset-plane header member (`with_carries`; the listener removes and
+validates it like `corr`), and on the engine's `publish.accepted` / `publish.refused`. No wire-version change.
+
+Chosen by hand: the publish names the edit ids (Jev, 5 of 5 questions) over a front-end gesture id (Laya, 5 of 5). Jev and Laya
+disagreed on every question; Laya has given no usable signal on choices or yes/no all day.
+
+Verified: telemetry 3, asset plane 2, engine 1, shell 5 unit tests; `Editor/shell/tests/edit_carry.rs` (real engine process);
+`docs/evidence/2.17/live-check.mjs` 20/20 (a real Editor window, clicks, a real engine); 25/25 mutations; gate (fmt, clippy -D warnings, npm run check) exit 0: 424 Editor tests, 985 Rust tests passed, 0 failed, 38 ignored, 60 Node tests, conformance 613 passed, 0 failed, 9 skipped.
+
+**Two defects found by following Jev's "must fix" score** (0.72 and 0.57): (1) forgetting published edits by position lost a new
+edit when the list was full (fixed: edits are numbered, a publish takes a mark); (2) the document was copied before the ledger was
+read, so an edit could be named by a publish whose document lacked it (fixed: one lock). The third score (0.64) found nothing.
+
+**Process lessons.** (1) A stress test for a race let both mutations survive (3 of 3 and 2 of 3): hold the other lock from the test
+and assert the first stays held instead of repeating. (2) A live check that cannot run is not a caught mutation: two live
+mutations "failed" only because the first click did nothing; I did not count them, repeated the click, and reran. (3) A mutation
+runner crashes when the text it targets changed: after any refactor, rerun the list on the final code and read the traceback.
+(4) The live check closes windows by process name (`Get-Process gx-editor`): look for the user's own Editor before running it.
+
+Limits named: the id is followed through two fields; only the newest 64 edits are named per publish; edits the shell did not make
+(the Editor MCP server's, or before a shell restart) are not carried; a stored scene edited through one target and published through
+another is not matched; at most 256 targets; an engine built before this row refuses the new header member.
+
 ## 2026-11-17 — 2.19 done: a stop request on the control plane, protocol version 7 (Claude)
 
-**Resume here.** Next is **2.17** (one id from an Editor edit to the engine; the user wants it), then **2.14** (diagnostic
+(Superseded by the 2.17 entry above.) Next was **2.17** (one id from an Editor edit to the engine; the user wants it), then **2.14** (diagnostic
 bundle `gx-diag` plus the shell menu item), **2.15** (named operator login for Playout), **12.11** (as-run record).
 
 What was built. `Scope::Stop` (Playout credentials may carry it; no issuer gives it yet), `ClientRequest::Stop` (`stop`),

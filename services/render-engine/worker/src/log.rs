@@ -160,8 +160,13 @@ fn event_name(kind: &str) -> &'static str {
     }
 }
 
-/// Log a publish the asset plane handed over, and what came of it.
+/// Log a publish the asset plane handed over, and what came of it. A publish
+/// that names the edits it holds (2.17) writes them as `carries`, the ids
+/// comma-separated, so a search for an edit's id finds the publish that carried
+/// it; a publish that names none writes no field.
 pub(crate) fn publish(take_id: &str, reply: &PublishReply) {
+    let carries = gx_telemetry::corr::carried_text();
+    let carries = carries.as_deref();
     match reply {
         PublishReply::Published {
             take_id,
@@ -172,11 +177,13 @@ pub(crate) fn publish(take_id: &str, reply: &PublishReply) {
             take_id = take_id.0.as_str(),
             revision = revision.0,
             content_hash = content_hash.0.as_str(),
+            carries,
         ),
         PublishReply::Refused(refusal) => tracing::info!(
             event = "publish.refused",
             take_id,
             refusal = ?refusal,
+            carries,
         ),
     }
 }

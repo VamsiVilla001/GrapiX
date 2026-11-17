@@ -405,6 +405,7 @@ fn exchange(
 ) -> Result<(TcpStream, Vec<u8>), PublishClientError> {
     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;
     let request = with_correlation(request, gx_telemetry::corr::current().as_deref());
+    let request = with_carries(&request, &gx_telemetry::corr::carried());
     stream
         .write_all(&(request.len() as u32).to_be_bytes())
         .and_then(|()| stream.write_all(&request))
@@ -452,6 +453,56 @@ pub(crate) fn with_correlation(request: &[u8], correlation: Option<&str>) -> Vec
     }
 }
 
+/// The key a request header names the edits it carries under (2.17).
+pub(crate) const CARRIES_KEY: &str = "carries";
+
+/// `request`, a JSON object, with `"carries":["<id>",...]` added as its first
+/// member when the caller's publish names edits (a carry scope is entered). Only
+/// ids that pass the shape check are written, so none needs escaping. The server
+/// removes the key before it checks the request has exactly one member, as it
+/// does `corr`. A server built before this key existed does not remove it and
+/// refuses the request by that rule: Editor and engine are built from one tree.
+pub(crate) fn with_carries(request: &[u8], ids: &[String]) -> Vec<u8> {
+    let ids: Vec<&String> = ids
+        .iter()
+        .filter(|id| gx_telemetry::corr::is_valid(id))
+        .collect();
+    match (ids.is_empty(), request.first(), request.get(1)) {
+        (false, Some(b'{'), Some(next)) => {
+            let mut out = Vec::with_capacity(request.len() + ids.len() * 20 + 16);
+            out.extend_from_slice(b"{\"");
+            out.extend_from_slice(CARRIES_KEY.as_bytes());
+            out.extend_from_slice(b"\":[");
+            for (index, id) in ids.iter().enumerate() {
+                if index > 0 {
+                    out.push(b',');
+                }
+                out.push(b'"');
+                out.extend_from_slice(id.as_bytes());
+                out.push(b'"');
+            }
+            out.push(b']');
+            if *next != b'}' {
+                out.push(b',');
+            }
+            out.extend_from_slice(&request[1..]);
+            out
+        }
+        _ => request.to_vec(),
+    }
+}
+
+/// What a request header presented besides its own members: the correlation id
+/// (2.13) and the edits it carries (2.17). Neither is trusted: each id is
+/// checked before it is entered or written.
+#[derive(Default)]
+struct Presented {
+    correlation: Option<String>,
+    carries: Vec<String>,
+    /// Entries of `carries` that were not strings.
+    not_ids: u64,
+}
+
 /// One parsed asset-plane request.
 // A request carries the scene document it publishes; the small variants are
 // control messages. The size difference is the message set, not waste.
@@ -476,7 +527,7 @@ fn handle_publish<P: AssetPublishPeer>(
     let mut prefix = [0_u8; 4];
     stream.read_exact(&mut prefix)?;
     let length = u32::from_be_bytes(prefix) as usize;
-    let mut correlation: Option<String> = None;
+    let mut presented = Presented::default();
     let request = if length > MAX_PUBLISH_FRAME_BYTES {
         AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest {
             detail: format!(
@@ -486,17 +537,23 @@ fn handle_publish<P: AssetPublishPeer>(
     } else {
         let mut bytes = vec![0; length];
         stream.read_exact(&mut bytes)?;
-        let (request, presented) = parse_request(&bytes);
-        correlation = presented;
+        let (request, presenting) = parse_request(&bytes);
+        presented = presenting;
         request
     };
     // 2.13: everything this connection causes, the publish the engine logs
     // among it, is written under the id the request arrived with. An id that
     // does not pass the shape check is not entered.
-    let _scope = correlation
+    let _scope = presented
+        .correlation
         .as_deref()
         .filter(|id| gx_telemetry::corr::is_valid(id))
         .map(gx_telemetry::corr::enter);
+    // 2.17: a publish that names the edits it carries writes them on every
+    // record it causes here. Ids that fail the shape check, repeats and any
+    // beyond the limit are counted, not named.
+    let _carries = (!presented.carries.is_empty() || presented.not_ids > 0)
+        .then(|| gx_telemetry::corr::carry(&presented.carries, presented.not_ids));
     let locked = || {
         peer.lock()
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))
@@ -615,9 +672,9 @@ fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<
     stream.flush()
 }
 
-/// The request, and the correlation id it carried if it carried one (removed
+/// The request, and what its header presented besides its own members (removed
 /// first: a request must contain exactly one of its own members).
-fn parse_request(bytes: &[u8]) -> (AssetRequest, Option<String>) {
+fn parse_request(bytes: &[u8]) -> (AssetRequest, Presented) {
     let mut request =
         match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes) {
             Ok(request) => request,
@@ -626,7 +683,7 @@ fn parse_request(bytes: &[u8]) -> (AssetRequest, Option<String>) {
                     AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest {
                         detail: error.to_string(),
                     })),
-                    None,
+                    Presented::default(),
                 )
             }
         };
@@ -634,7 +691,30 @@ fn parse_request(bytes: &[u8]) -> (AssetRequest, Option<String>) {
         Some(serde_json::Value::String(id)) => Some(id),
         _ => None,
     };
-    (parse_members(request), correlation)
+    let (carries, not_ids) = match request.remove(CARRIES_KEY) {
+        Some(serde_json::Value::Array(items)) => {
+            let total = items.len() as u64;
+            let ids: Vec<String> = items
+                .into_iter()
+                .filter_map(|item| match item {
+                    serde_json::Value::String(id) => Some(id),
+                    _ => None,
+                })
+                .collect();
+            let strings = ids.len() as u64;
+            (ids, total - strings)
+        }
+        // A key that is not a list names nothing; it is not the request.
+        _ => (Vec::new(), 0),
+    };
+    (
+        parse_members(request),
+        Presented {
+            correlation,
+            carries,
+            not_ids,
+        },
+    )
 }
 
 fn parse_members(mut request: serde_json::Map<String, serde_json::Value>) -> AssetRequest {
@@ -717,6 +797,9 @@ mod tests {
         /// The correlation scope the server had entered when each scene was
         /// published (2.13).
         scopes: Vec<Option<String>>,
+        /// The edit ids the server had entered when each scene was published,
+        /// and how many it counted without naming (2.17).
+        carried: Vec<(Vec<String>, u64)>,
     }
 
     impl Default for Peer {
@@ -725,6 +808,7 @@ mod tests {
                 published: Vec::new(),
                 locality: Locality::CoLocated,
                 scopes: Vec::new(),
+                carried: Vec::new(),
             }
         }
     }
@@ -738,6 +822,10 @@ mod tests {
             let take_id = TakeId(scene.id.clone());
             let content_hash = scene.content_hash();
             self.scopes.push(gx_telemetry::corr::current());
+            self.carried.push((
+                gx_telemetry::corr::carried(),
+                gx_telemetry::corr::carried_dropped(),
+            ));
             self.published.push(scene);
             PublishReply::Published {
                 take_id,
@@ -936,6 +1024,113 @@ mod tests {
             peer.lock().expect("peer lock").scopes,
             [Some("ed-pub-5".to_owned()), None, None]
         );
+    }
+
+    #[test]
+    fn a_request_header_names_the_edits_it_carries_as_a_list() {
+        let with = |request: &[u8], ids: &[&str]| {
+            let ids: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
+            with_carries(request, &ids)
+        };
+        let parsed = |bytes: &[u8]| -> serde_json::Value { serde_json::from_slice(bytes).unwrap() };
+        assert_eq!(
+            parsed(&with(br#"{"scene":{"id":"s"}}"#, &["ed-1", "ed-2"])),
+            serde_json::json!({"carries": ["ed-1", "ed-2"], "scene": {"id": "s"}})
+        );
+        assert_eq!(with(br#"{}"#, &["ed-1"]), br#"{"carries":["ed-1"]}"#);
+        // After a correlation id is added, both members are there.
+        let both = with_carries(
+            &with_correlation(br#"{"scene":{"id":"s"}}"#, Some("ed-pub")),
+            &["ed-1".to_owned()],
+        );
+        assert_eq!(
+            parsed(&both),
+            serde_json::json!({"carries": ["ed-1"], "corr": "ed-pub", "scene": {"id": "s"}})
+        );
+        // Nothing to name, or an id that fails the shape check: unchanged bytes
+        // or only the good ids.
+        assert_eq!(with(br#"{"locality":{}}"#, &[]), br#"{"locality":{}}"#);
+        assert_eq!(
+            with(br#"{"locality":{}}"#, &["bad id", "gx1.a.b"]),
+            br#"{"locality":{}}"#
+        );
+        assert_eq!(
+            parsed(&with(br#"{"locality":{}}"#, &["bad id", "ed-9"])),
+            serde_json::json!({"carries": ["ed-9"], "locality": {}})
+        );
+        assert_eq!(with(b"[1]", &["ed-1"]), b"[1]");
+    }
+
+    /// 2.17: a publish that names its edits reaches the engine's publish listener
+    /// with them entered, from the client's own carry scope. Hostile headers are
+    /// counted, not named, and never make the request fail.
+    #[test]
+    fn the_server_enters_the_edits_a_publish_names_around_the_publish() {
+        let (server, peer) = server();
+        let address = server.local_addr().expect("address is known");
+        let _listener = server.serve_in_background();
+
+        // Through the client's own `exchange`, inside a correlation and a carry scope.
+        {
+            let _corr = gx_telemetry::corr::enter("ed-pub-7");
+            let _carry =
+                gx_telemetry::corr::carry(&["ed-edit-1".to_owned(), "ed-edit-2".to_owned()], 3);
+            let bytes = serde_json::to_vec(&serde_json::json!({"scene": scene_json()})).unwrap();
+            let (_, header) = exchange(address, &bytes).expect("the exchange completes");
+            let reply: PublishReply = serde_json::from_slice(&header).expect("a reply");
+            assert!(matches!(reply, PublishReply::Published { .. }), "{reply:?}");
+        }
+        // A hostile header: ids with text and a credential, a repeat, a number,
+        // and more than the limit. Served, and only the valid distinct ids named.
+        let mut ids: Vec<serde_json::Value> = vec![
+            "ed-a".into(),
+            "has space".into(),
+            "gx1.pretend.credential".into(),
+            "ed-a".into(),
+            7.into(),
+        ];
+        ids.extend((0..70).map(|n| serde_json::Value::from(format!("ed-n{n}"))));
+        let reply = request(
+            address,
+            serde_json::json!({"carries": ids, "scene": scene_json()}),
+        );
+        assert!(matches!(reply, PublishReply::Published { .. }), "{reply:?}");
+        // A `carries` that is not a list names nothing and is not the request.
+        let reply = request(
+            address,
+            serde_json::json!({"carries": "ed-a", "scene": scene_json()}),
+        );
+        assert!(matches!(reply, PublishReply::Published { .. }), "{reply:?}");
+        // The key alone is still the one-member rule's refusal.
+        let reply = request(address, serde_json::json!({"carries": ["ed-1"]}));
+        assert!(
+            matches!(
+                reply,
+                PublishReply::Refused(PublishRefusal::InvalidPublishRequest { .. })
+            ),
+            "{reply:?}"
+        );
+
+        let peer = peer.lock().expect("peer lock");
+        assert_eq!(peer.scopes[0], Some("ed-pub-7".to_owned()));
+        // The client's own: the two ids it named. The count its caller could not keep
+        // (3) is the shell's own record's; the header carries ids only.
+        assert_eq!(
+            peer.carried[0],
+            (vec!["ed-edit-1".to_owned(), "ed-edit-2".to_owned()], 0)
+        );
+        // The hostile header: 71 valid distinct ids go in ("ed-a" and 70 "ed-n"), the
+        // newest 64 are named, and "ed-a" is among the oldest seven left out.
+        let (named, dropped) = &peer.carried[1];
+        assert_eq!(named.len(), gx_telemetry::corr::MAX_CARRIED);
+        assert_eq!(named.first().map(String::as_str), Some("ed-n6"));
+        assert_eq!(named.last().map(String::as_str), Some("ed-n69"));
+        assert!(!named.iter().any(|id| id.contains(' ') || id.contains('.')));
+        // Counted, not named: the number, the two bad ids, the repeat and the
+        // seven past the limit.
+        assert_eq!(*dropped, 1 + 2 + 1 + 7, "{named:?}");
+        // Not a list: nothing entered.
+        assert_eq!(peer.carried[2], (Vec::new(), 0));
     }
 
     #[test]

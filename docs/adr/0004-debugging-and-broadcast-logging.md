@@ -230,6 +230,15 @@ scene is on Program, and otherwise stops in order: it tells its process owner, w
 `engine.stop` under the request's correlation id, finishes the log and exits 0. The transport records who asked
 (`control.stop_requested`: subject and role, never the credential) under the same id. Evidence: `docs/evidence/2.19/README.md`.
 
+## As built, row 2.17 (17 November 2026)
+
+An Editor edit and the publish that carries it are followed together by naming, not by sharing one id. Each shell call keeps its own
+id (2.13). The shell remembers, per scene target, the ids of the calls whose edit applied since the target was last published, and a
+publish writes them as `carries` on its own records: the shell's `editor.publish`, an optional `carries` member of the asset-plane
+request header, and the engine's `publish.accepted`. A search for an edit's id finds its own records and the publish that took it to
+the engine; a search for the publish's id finds the edit ids. Newest 64 per publish, the rest counted. Evidence:
+`docs/evidence/2.17/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

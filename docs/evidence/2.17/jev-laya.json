@@ -1,0 +1,280 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 70547,
+    "output_tokens": 0,
+    "state_tokens": 7771,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.17: one id from an Editor edit to the engine (the publish names the ids of the edits it carries)",
+    "done_when": "An Editor edit, and the publish of the scene that holds it, can be followed by\none correlation id from the front end through the shell and the asset plane to\nthe engine: the front end names a gesture (an edit, then its publish) with one\nid, or the publish names the ids of the edits it carries.",
+    "evidence": "# 2.17 \u2014 one id from an Editor edit to the engine (17 Nov 2026)\n\nRow 2.13 left a named gap: an Editor edit is followed from the front end to the\nshell and stops there (the scene is local until published), and the publish that\ncarries it to the engine has an id of its own. Two unrelated ids, so nobody could\nget from an edit to the engine, or from an engine publish back to its edits. Jev\nscored the strict reading of 2.13's done-when at 0.07. The user asked for the gap\nto be closed (17 Nov 2026).\n\n## Done-when\n\n> An Editor edit, and the publish of the scene that holds it, can be followed by\n> one correlation id from the front end through the shell and the asset plane to\n> the engine: the front end names a gesture (an edit, then its publish) with one\n> id, or the publish names the ids of the edits it carries.\n\nThe second form was built: **the publish names the ids of the edits it carries.**\n\n## What was built\n\n- **A carry scope** (`gx_telemetry::corr::carry`). Beside the correlation scope\n  (2.13), a thread can enter the list of edit ids a publish holds. Only ids that\n  pass the shape check are kept, once each, the newest 64 (`MAX_CARRIED`); every\n  one left out is counted.\n- **The Editor shell keeps a ledger**: per scene target, the ids of the shell calls\n  whose edit applied since that target was last published. Newest 64 per target\n  with a count of older ones, at most 256 targets. A refused edit, a command that\n  is not an edit, and an edit with no id in scope are not entered. `cmd_execute`\n  and `cmd_publish` go through `ShellState::execute_command` and `publish_target`.\n- **The publish names them in three places**, all under the publish call's own id:\n  the shell's `editor.publish` (`carries`, and `carries_dropped` when some were\n  counted, on success and on failure), the asset-plane request header (a new\n  optional member `\"carries\":[...]`), and the engine's `publish.accepted` and\n  `publish.refused` (`carries`, the ids comma-separated; no field when there are\n  none).\n- **Forgotten only when published, by number.** Every edit the ledger notes gets\n  a number in the order it applied. A publish takes a mark (the next number) when\n  it reads the ledger, and after it succeeds the ledger forgets every edit\n  numbered below the mark: exactly the ones the publish held. An edit made while\n  the publish ran stays for the next one, and a failed publish forgets nothing.\n  The first version forgot by position (the first N ids of the list), which was\n  wrong when the list was full: see \"Found on review\".\n- **Read together.** `document_and_edits` copies the document and reads the ledger\n  under one hold of the workspace, and `execute_command` notes an edit while it\n  still holds the workspace it applied the edit in (lock order: workspace, then\n  ledger). So a publish names every edit its document holds and none it does not.\n- **Untrusted on arrival.** The engine's publish listener removes `carries` from\n  the header before the request's one-member rule, as it does `corr`; ids that\n  fail the shape check, repeats, entries that are not strings and any beyond 64\n  are counted and never written; a `carries` that is not a list names nothing.\n  None of these makes the publish fail.\n\nSo one search for an edit's id finds the front end's report of the call, the\nshell's `editor.command`, and (through `carries`) the shell's `editor.publish`\nand the engine's `publish.accepted`. One search for the publish's id finds the\nsame publish records and, in `carries`, every edit.\n\nNo wire-version change (the asset-plane header is free-form JSON), no download.\n\n## What was run\n\n- Unit tests: telemetry (3: valid distinct ids only and the rest counted; the\n  newest kept; scopes nest and stay on their thread), asset plane (2: the header\n  member; the listener enters what a header names, from the client's own scope\n  and from a hostile header), engine (1: `publish.accepted` names the edits and a\n  publish with none has no field), shell (5: the ledger, including the full-list case of \"Found on review\"; which\n  calls are noted; a failed publish names its edits on record and keeps them; and\n  two that hold the ledger from the test and assert the workspace stays held while\n  the reader or the writer waits on it).\n- **A real engine process** (`Editor/shell/tests/edit_carry.rs`): a real shell\n  state publishes over the asset plane three times; the engine's own log has\n  `publish.accepted` under each publish's id naming exactly the edits since the\n  one before (two, one, none), and a search for each edit's id finds the edit and\n  the engine's publish.\n- **A real Editor window and a real engine** (`live-check.mjs`, result in\n  `live-check-result.json`): **20 of 20**, four runs in a row and again after the\n  mutations. The page is clicked through the DevTools protocol: three or more\n  shapes, Publish, one more, Publish, Publish. The ids are the front end's own\n  (`ed-\u2026`). Each publish is on the engine under the publish call's id and names\n  the edits since the last; each edit's id finds its shell record and the\n  engine's publish; an edit made after a publish is not on that publish; the\n  third publish names none; no credential in any file.\n- Gate (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`) exit 0,\n  run on the final code (after the last change to the shell): 424 Editor tests, 985 Rust tests passed, 0 failed, 38 ignored, 60 Node tests,\n  conformance 613 passed, 0 failed, 9 skipped.\n\n## Found on review\n\nJev's \"a defect to fix\" answer on the first review was 0.72, and its \"can a publish\nsilently fail to name an edit\" 0.54. I read the ledger for such a case and found\none. With 64 edits waiting, a publish reads them; one more edit arrives while the\npublish is in flight and pushes the oldest id out of the list; the publish\nsucceeds and the ledger forgot \"the first 64 entries\", which now included the new\nedit. That edit was applied, never carried, and forgotten. The fix is the numbered\nledger above (a mark, not a count of positions), and the same case is a unit test\n(`the_ledger_keeps_the_newest_ids\u2026`): a full list, a publish taken, one more edit\nduring it, a publish succeeding, and exactly the new edit left, with nothing\ncounted as unnamed. The F18 mutation puts the old rule back and the test fails.\n\nThe second review (Jev's \"must fix\" still 0.57) found a second gap in my own code:\n`publish_target` copied the document, and only afterwards read the ledger. An edit\nlanding between the two would be named by a publish whose document did not hold it.\nBoth are now read under one hold of the workspace, and an edit is noted under the\nhold that applied it.\n\n**The first test I wrote for that did not test it.** It ran a writer making 400\nedits while the reader took the pair over and over, and F21 (read the ledger after\nreleasing the workspace) survived it 3 times of 3, F22 (note the edit after\nreleasing it) 2 times of 3: the window is too narrow to hit by chance. It was\nreplaced by two deterministic tests: the test holds the ledger, starts the reader\n(or the writer), and asserts the workspace stays held while the thread waits for\nthe ledger. Both mutations then failed on every run, 3 of 3 each. A race that cannot\nbe hit by chance is tested by holding the other lock, not by repetition.\n\n## Mutations\n\n25, one at a time, each restored byte-identical, each made a named check fail\n(`mutations.txt`, in the order they ran: the first run; the rerun of the two live\nones; the run after the ledger was rewritten, which repeated F10 to F17c and added\nF18 to F20; F21 and F22 three times each; and F13 to F17c, with F23, again on the\nfinal code, after the shell took the document and ledger under one lock. F10 to F12\nand F18 to F20 touch the ledger, which did not change after their run).\n\n[Condensed: 19 mutations, each made a named check fail and was restored byte-identical: F1 the carry scope keeps ids that fail the shape check; F2 it names a repeated id twice; F3 it keeps the oldest ids, not the newest; F4 the client does not name the edits in its header; F4c the same, real window and engine; F5 the header writes ids that fail the shape check; F6 the listener ignores the edits a header names; F7 the listener does not count entries that are not ids; F8 the `carries` key is left in the request; F9 the engine writes no `carries`; F10 the ledger enters the same call twice; F11 the ledger lets the newest ids go; F12 a publish forgets the edits made while it ran; F13 a failed publish forgets its edits; F14 a refused edit is noted as carried; F15 the publish does not enter the edits it carries; F16 the shell's own publish record leaves out the edits; F17 a publish looks up another target's edits; F17c the same, real window; F18 a publish forgets by position, not by number (the defect found on review); F19 the count of unnamed edits is not cleared once they are published; F20 a publish takes no mark of where it stopped; F21 the document and the ledger are read after the workspace is released; F22 an edit is noted after the workspace is released; F23 a successful publish forgets another target's edits.]\n\n**The two live mutations did not test anything the first time.** In both runs the\nlive check stopped before its checks: the first click on \"New rectangle\" produced\nno edit (the page was not yet ready to act on it), which has nothing to do with\neither mutation. A run that could not run is not a caught mutation, so I did not\ncount them. The click now repeats until an edit applies and the checks count the\nedits that applied; the clean check then passed four runs in a row, and both\nmutations, rerun, failed the checks named above.\n\n## Limits and readings\n\n1. **\"One id\" is followed through two fields.** An edit's id is the `corr` of its\n   own records and an entry in the `carries` of the publish's records. A plain\n   text search for the id finds all of them; a filter on `corr` alone does not.\n2. **Only the newest 64 edits are named per publish**, and the count of the rest\n   is on the shell's record (`carries_dropped`), not on the engine's: the header\n   carries ids only. A person who drags a slider through 200 edits and publishes\n   will find the last 64 by id.\n3. **Edits the shell did not make are not carried.** The Editor's MCP server is a\n   separate process that edits stored scenes under its own `mcp-\u2026` ids; a publish\n   from the shell does not name them. An edit made before the shell restarted is\n   not named either: the ledger is in memory.\n4. **A stored scene is keyed by project and scene id, an open one by session.**\n   An edit to a stored scene made through one target and published through the\n   other is not matched.\n5. **At most 256 targets are followed at once**; an edit to a 257th is applied and\n   not carried until another target is published.\n6. **An old engine ignores `carries`** only if it is this code or newer: an engine\n   built before this row refuses a publish header with a second member. Editor and\n   engine are built from one tree; a mixed pair is not supported here (the same is\n   true of `corr`, 2.13, which did the same thing).\n7. **The live check reads the Editor's project list from the user's own store**\n   (read only, as the Editor does at start); its logs, packages and WebView data\n   are in a scratch folder.\n",
+    "code": "--- Shared/telemetry/src/corr.rs (changed)\ndiff --git a/Shared/telemetry/src/corr.rs b/Shared/telemetry/src/corr.rs\nindex 92c57fe..0c31e95 100644\n--- a/Shared/telemetry/src/corr.rs\n+++ b/Shared/telemetry/src/corr.rs\n@@ -147,0 +148,86 @@ impl Drop for Scope {\n+/// The most edit ids one publish names (2.17). A person can make hundreds of\n+/// edits between two publishes; the newest are named and the rest are counted.\n+pub const MAX_CARRIED: usize = 64;\n+\n+/// What a publish carries: the ids of the edits it holds, and how many more it\n+/// holds that are not named.\n+#[derive(Debug, Clone, Default, PartialEq, Eq)]\n+struct Carried {\n+    ids: Vec<String>,\n+    dropped: u64,\n+}\n+\n+thread_local! {\n+    static CARRIED: RefCell<Vec<Carried>> = const { RefCell::new(Vec::new()) };\n+}\n+\n+/// A carry scope: while it is entered, this thread's publish names the edit ids\n+/// it was given (2.17). Like [`Scope`], tied to the thread that entered it.\n+#[must_use = \"the scope ends when this is dropped\"]\n+pub struct CarryScope {\n+    depth: usize,\n+    _thread: PhantomData<*const ()>,\n+}\n+\n+/// Enter a carry scope for `ids`, the ids of the edits a publish holds.\n+///\n+/// Only ids that pass [`is_valid`] are kept, once each, and at most\n+/// [`MAX_CARRIED`] of them: the newest, which are the last given. Every id left\n+/// out (invalid, repeated, or beyond the limit) adds to the count, together with\n+/// `already_dropped` (the ids the caller itself could not keep), so a record can\n+/// say how many edits it holds that it does not name.\n+pub fn carry(ids: &[String], already_dropped: u64) -> CarryScope {\n+    let mut kept: Vec<String> = Vec::new();\n+    let mut dropped = already_dropped;\n+    for id in ids {\n+        if !is_valid(id) || kept.contains(id) {\n+            dropped += 1;\n+        } else {\n+            kept.push(id.clone());\n+        }\n+    }\n+    if kept.len() > MAX_CARRIED {\n+        let over = kept.len() - MAX_CARRIED;\n+        kept.drain(..over);\n+        dropped += over as u64;\n+    }\n+    CARRIED.with(|stack| {\n+        let mut stack = stack.borrow_mut();\n+        stack.push(Carried { ids: kept, dropped });\n+        CarryScope {\n+            depth: stack.len(),\n+            _thread: PhantomData,\n+        }\n+    })\n+}\n+\n+impl Drop for CarryScope {\n+    fn drop(&mut self) {\n+        CARRIED.with(|stack| stack.borrow_mut().truncate(self.depth - 1));\n+    }\n+}\n+\n+/// The edit ids the publish this thread is working for names, oldest first.\n+pub fn carried() -> Vec<String> {\n+    CARRIED.with(|stack| {\n+        stack\n+            .borrow()\n+            .last()\n+            .map(|c| c.ids.clone())\n+            \n--- Shared/asset-plane/src/publish.rs (changed)\ndiff --git a/Shared/asset-plane/src/publish.rs b/Shared/asset-plane/src/publish.rs\nindex 1a8165b..0ecfb78 100644\n--- a/Shared/asset-plane/src/publish.rs\n+++ b/Shared/asset-plane/src/publish.rs\n@@ -407,0 +408 @@ fn exchange(\n+    let request = with_carries(&request, &gx_telemetry::corr::carried());\n@@ -454,0 +456,50 @@ pub(crate) fn with_correlation(request: &[u8], correlation: Option<&str>) -> Vec\n+/// The key a request header names the edits it carries under (2.17).\n+pub(crate) const CARRIES_KEY: &str = \"carries\";\n+\n+/// `request`, a JSON object, with `\"carries\":[\"<id>\",...]` added as its first\n+/// member when the caller's publish names edits (a carry scope is entered). Only\n+/// ids that pass the shape check are written, so none needs escaping. The server\n+/// removes the key before it checks the request has exactly one member, as it\n+/// does `corr`. A server built before this key existed does not remove it and\n+/// refuses the request by that rule: Editor and engine are built from one tree.\n+pub(crate) fn with_carries(request: &[u8], ids: &[String]) -> Vec<u8> {\n+    let ids: Vec<&String> = ids\n+        .iter()\n+        .filter(|id| gx_telemetry::corr::is_valid(id))\n+        .collect();\n+    match (ids.is_empty(), request.first(), request.get(1)) {\n+        (false, Some(b'{'), Some(next)) => {\n+            let mut out = Vec::with_capacity(request.len() + ids.len() * 20 + 16);\n+            out.extend_from_slice(b\"{\\\"\");\n+            out.extend_from_slice(CARRIES_KEY.as_bytes());\n+            out.extend_from_slice(b\"\\\":[\");\n+            for (index, id) in ids.iter().enumerate() {\n+                if index > 0 {\n+                    out.push(b',');\n+                }\n+                out.push(b'\"');\n+                out.extend_from_slice(id.as_bytes());\n+                out.push(b'\"');\n+            }\n+            out.push(b']');\n+            if *next != b'}' {\n+                out.push(b',');\n+            }\n+            out.extend_from_slice(&request[1..]);\n+            out\n+        }\n+        _ => request.to_vec(),\n+    }\n+}\n+\n+/// What a request header presented besides its own members: the correlation id\n+/// (2.13) and the edits it carries (2.17). Neither is trusted: each id is\n+/// checked before it is entered or written.\n+#[derive(Default)]\n+struct Presented {\n+    correlation: Option<String>,\n+    carries: Vec<String>,\n+    /// Entries of `carries` that were not strings.\n+    not_ids: u64,\n+}\n+\n@@ -479 +530 @@ fn handle_publish<P: AssetPublishPeer>(\n-    let mut correlation: Option<String> = None;\n+    let mut presented = Presented::default();\n@@ -489,2 +540,2 @@ fn handle_publish<P: AssetPublishPeer>(\n-        let (request, presented) = parse_request(&bytes);\n-        correlation = presented;\n+        let (request, presenting) = parse_request(&bytes);\n+        presented = presenting;\n@@ -496 +547,2 @@ fn handle_publish<P: AssetPublishPeer>(\n-    let _scope = correlation\n+    let _scope = presented\n+        .correlation\n@@ -499,0 +552,5 @@ fn handle_publish<P: AssetPublishPeer>(\n+    // 2.17: a publish that names the edits it carries writes them on every\n+    // record it causes here. Ids that fail the shape check, repeats and any\n+    // beyond the limit are counted, not named.\n+    let _carries = (!presented.carries.is_empty() || presented.not_ids > 0)\n+        .then(|| gx_telemetry::corr::carry(&presented.carries, presented.not_ids));\n@@ -618 +675 @@ fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<\n-/// The request, and the correlation id it carried if it carried one (removed\n+/// The reques\n--- Editor/shell/src/lib.rs (changed)\ndiff --git a/Editor/shell/src/lib.rs b/Editor/shell/src/lib.rs\nindex a888655..98af081 100644\n--- a/Editor/shell/src/lib.rs\n+++ b/Editor/shell/src/lib.rs\n@@ -87,0 +88,115 @@ pub struct ShellState {\n+    /// The edits that applied to each target since it was last published (2.17).\n+    edits: Mutex<EditLedger>,\n+}\n+\n+/// The ids of the edits that applied to each scene target since it was last\n+/// published (2.17), so a publish can name the edits it carries.\n+///\n+/// An edit's id is the one the front end gave the shell call that made it\n+/// (2.13). It is kept per target, newest [`gx_telemetry::corr::MAX_CARRIED`]\n+/// only, with a count of the older ones, and for at most [`MAX_LEDGER_TARGETS`]\n+/// targets: a person can make hundreds of edits between publishes, and the\n+/// ledger must not grow with them.\n+#[derive(Default)]\n+struct EditLedger {\n+    targets: BTreeMap<String, Pending>,\n+    /// The number the next recorded edit gets. Edits are numbered across all\n+    /// targets in the order they applied, so \"everything up to here\" can be\n+    /// said exactly however many were let go in between.\n+    next: u64,\n+}\n+\n+/// The edits of one target not yet published, as the ledger holds them.\n+#[derive(Debug, Default)]\n+struct Pending {\n+    /// Oldest first, each with its number.\n+    ids: Vec<(u64, String)>,\n+    /// Older edits whose ids were let go to stay within the limit.\n+    dropped: u64,\n+    /// The number of the newest edit let go.\n+    dropped_last: u64,\n+}\n+\n+/// What a publish of one target carries: the edits not yet published when it\n+/// was taken.\n+#[derive(Debug, Default, Clone, PartialEq, Eq)]\n+struct TargetEdits {\n+    /// Oldest first.\n+    ids: Vec<String>,\n+    /// Older edits it holds whose ids were let go.\n+    dropped: u64,\n+    /// Every edit numbered below this was applied before the publish was taken,\n+    /// so a publish that succeeds has carried exactly those.\n+    upto: u64,\n+}\n+\n+/// The most targets the ledger follows at once. A target beyond them is not\n+/// followed until another is published: its edits are applied, and a publish of\n+/// it names none (named limit).\n+const MAX_LEDGER_TARGETS: usize = 256;\n+\n+impl EditLedger {\n+    /// An edit with this id applied to `target`. One shell call is one id, so a\n+    /// call that makes several edits is entered once.\n+    fn record(&mut self, target: &str, id: &str) {\n+        if !self.targets.contains_key(target) && self.targets.len() >= MAX_LEDGER_TARGETS {\n+            return;\n+        }\n+        let edits = self.targets.entry(target.to_owned()).or_default();\n+        if edits.ids.last().map(|(_, last)| last.as_str()) == Some(id) {\n+            return;\n+        }\n+        edits.ids.push((self.next, id.to_owned()));\n+        self.next += 1;\n+        if edits.ids.len() > gx_telemetry::corr::MAX_CARRIED {\n+            let (number, _) = edits.ids.remove(0);\n+            edits.dropped += 1;\n+            edits.dropped_last = number;\n+        }\n+    }\n+\n+    /// What a publish of `target` carries now.\n+    fn snapshot(&self, target: &str) -> TargetEdits {\n+        let pending = self.targets.get(target);\n+        TargetEdits {\n+            ids: pending\n+                .map(|edits| edits.ids.iter().map(|(_, id)| id.clone()).collect())\n+                .unwrap_or_default(),\n+            dropped: pending.map_or(0, |edits| edits.dropped),\n+            upto: self.next,\n+        }\n+    }\n+\n+    /// `carried` was published: forget exactly the edits applied before it was\n+    /// taken, by their numbers. An edit made while the publish was in flight\n+    /// stays for the next one, even when it pushed an older id out of the list\n+    /// (matching by position would then forget the new edit and keep a count\n+    /// for an old one that was published; found on review).\n+    fn forget(&mut self, target: &str, carried: &TargetEdits) {\n+        let Some(edits) = self.targets.get_mut(target) else {\n+            return;\n+        };\n+        edits.ids.retain(|(number, _)| *number >= carried.upto);\n+        // Ids let go before the publish was taken were published with it. If\n+        // any was let go after (more than the limit of edits during one\n+        // publi\n--- services/render-engine/worker/src/log.rs (changed)\ndiff --git a/services/render-engine/worker/src/log.rs b/services/render-engine/worker/src/log.rs\nindex 9a4aa74..d742c94 100644\n--- a/services/render-engine/worker/src/log.rs\n+++ b/services/render-engine/worker/src/log.rs\n@@ -163 +163,4 @@ fn event_name(kind: &str) -> &'static str {\n-/// Log a publish the asset plane handed over, and what came of it.\n+/// Log a publish the asset plane handed over, and what came of it. A publish\n+/// that names the edits it holds (2.17) writes them as `carries`, the ids\n+/// comma-separated, so a search for an edit's id finds the publish that carried\n+/// it; a publish that names none writes no field.\n@@ -164,0 +168,2 @@ pub(crate) fn publish(take_id: &str, reply: &PublishReply) {\n+    let carries = gx_telemetry::corr::carried_text();\n+    let carries = carr"
+  },
+  "questions": {
+    "followed_edit_to_engine": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from a real Editor window and a real engine, that an edit made in the front end can be followed by its id from the front end through the shell and the asset plane to the engine's own log?",
+      "criteria": {
+        "true": "Yes, executed on the real window and engine.",
+        "false": "No, only claimed or only unit-tested."
+      }
+    },
+    "meets_done_when": {
+      "type": "noul",
+      "instructions": "The done-when allows either form: one gesture id, or the publish names the ids of the edits it carries. Is the done-when met by the second form as built?",
+      "criteria": {
+        "true": "Yes, met.",
+        "false": "No, not met."
+      }
+    },
+    "two_fields_reading_ok": {
+      "type": "noul",
+      "instructions": "An edit id is the corr of its own records and an entry in the carries field of the publish records (limit 1). Is that an acceptable, openly named reading of \"followed by one correlation id\"?",
+      "criteria": {
+        "true": "Yes, acceptable and named.",
+        "false": "No, it must be one field."
+      }
+    },
+    "hostile_ids_kept_out": {
+      "type": "noul",
+      "instructions": "Can text that is not a valid id (a space, a line break, a credential with dots) reach a log record through the carries header, in the code shown?",
+      "criteria": {
+        "true": "Yes, a path exists.",
+        "false": "No, every id is checked before it is entered or written."
+      }
+    },
+    "wrong_edits_named": {
+      "type": "noul",
+      "instructions": "Can a publish name an edit it does not hold, or silently fail to name one it does hold, in a way the evidence does not name?",
+      "criteria": {
+        "true": "Yes, an unnamed case exists.",
+        "false": "No, or every case is named in the limits."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, and is the case of the two live runs that could not run handled honestly?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "two_fields": "The id is followed through two fields, not one.",
+        "limit_64": "Only the newest 64 edits are named.",
+        "mcp_edits_not_carried": "Edits made by the MCP server or before a shell restart are not carried.",
+        "target_key_mismatch": "A stored scene edited through one target and published through another is not matched.",
+        "mixed_versions": "An engine built before this row refuses the new header.",
+        "flaky_click": "The live check needed its clicks made to repeat."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "followed_edit_to_engine",
+      "jev": 0.96,
+      "laya": 0.9826,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9826,
+        "confidence": 0.9826,
+        "answer_confidence": 0.9826,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "meets_done_when",
+      "jev": 0.97,
+      "laya": 0.9887,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9887,
+        "confidence": 0.9887,
+        "answer_confidence": 0.9887,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "two_fields_reading_ok",
+      "jev": 0.91,
+      "laya": 0.9811,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9811,
+        "confidence": 0.9811,
+        "answer_confidence": 0.9811,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "hostile_ids_kept_out",
+      "jev": 0.32,
+      "laya": 0.9811,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.32
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9811,
+        "confidence": 0.9811,
+        "answer_confidence": 0.9811,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "wrong_edits_named",
+      "jev": 0.33,
+      "laya": 0.9774,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.33
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9774,
+        "confidence": 0.9774,
+        "answer_confidence": 0.9774,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.38,
+      "laya": 0.9801,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.38
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9801,
+        "confidence": 0.9801,
+        "answer_confidence": 0.9801,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.95,
+      "laya": 0.9781,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9781,
+        "confidence": 0.9781,
+        "answer_confidence": 0.9781,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "flaky_click",
+      "laya": "none",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "flaky_click",
+        "confidence": 0.73,
+        "probabilities": {
+          "none": 0.02,
+          "two_fields": 0.04,
+          "limit_64": 0.04,
+          "mcp_edits_not_carried": 0.04,
+          "target_key_mismatch": 0.01,
+          "mixed_versions": 0.08,
+          "flaky_click": 0.77
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "none",
+        "probabilities": {
+          "none": 0.2937,
+          "two_fields": 0.2483,
+          "limit_64": 0.0846,
+          "mcp_edits_not_carried": 0.0995,
+          "target_key_mismatch": 0.078,
+          "mixed_versions": 0.1223,
+          "flaky_click": 0.0736
+        },
+        "confidence": 0.0789,
+        "answer_confidence": 0.2937,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.64,
+      "laya": 0.9476,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.64
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9476,
+        "confidence": 0.9476,
+        "answer_confidence": 0.9476,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

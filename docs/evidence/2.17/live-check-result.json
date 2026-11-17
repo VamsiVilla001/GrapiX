@@ -1,0 +1,285 @@
+{
+  "checks": [
+    {
+      "name": "the edits from the front end applied, each under an id of its own (three or more, a publish, then one or more)",
+      "ok": true,
+      "detail": "3 then 1: ed-f7a563e5-24, ed-cae110a3-35, ed-6bcfcd07-37, ed-1b397258-41"
+    },
+    {
+      "name": "the Editor reported three publishes",
+      "ok": true,
+      "detail": "ed-f7053e66-39, ed-8bf27126-43, ed-74f10eac-45"
+    },
+    {
+      "name": "the engine accepted three publishes",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "publish 1: the engine's publish.accepted is under the publish call's id",
+      "ok": true,
+      "detail": "ed-f7053e66-39"
+    },
+    {
+      "name": "publish 1: the engine names the 3 edits made since the last publish",
+      "ok": true,
+      "detail": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37 against ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+    },
+    {
+      "name": "publish 1: the shell's own record names the same edits",
+      "ok": true,
+      "detail": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+    },
+    {
+      "name": "publish 2: the engine's publish.accepted is under the publish call's id",
+      "ok": true,
+      "detail": "ed-8bf27126-43"
+    },
+    {
+      "name": "publish 2: the engine names the 1 edit made since the last publish",
+      "ok": true,
+      "detail": "ed-1b397258-41 against ed-1b397258-41"
+    },
+    {
+      "name": "publish 2: the shell's own record names the same edits",
+      "ok": true,
+      "detail": "ed-1b397258-41"
+    },
+    {
+      "name": "publish 3: the engine's publish.accepted is under the publish call's id",
+      "ok": true,
+      "detail": "ed-74f10eac-45"
+    },
+    {
+      "name": "publish 3: the engine names no edits",
+      "ok": true,
+      "detail": "(none) against (none)"
+    },
+    {
+      "name": "publish 3: the shell's own record names the same edits",
+      "ok": true,
+      "detail": "(none)"
+    },
+    {
+      "name": "edit 1: a search for its id finds the shell's record of the edit and the engine's publish",
+      "ok": true,
+      "detail": "engine/worker:publish.accepted, editor/shell:editor.command, editor/shell:ui.call, editor/shell:editor.publish"
+    },
+    {
+      "name": "edit 2: a search for its id finds the shell's record of the edit and the engine's publish",
+      "ok": true,
+      "detail": "engine/worker:publish.accepted, editor/shell:editor.command, editor/shell:ui.call, editor/shell:editor.publish"
+    },
+    {
+      "name": "edit 3: a search for its id finds the shell's record of the edit and the engine's publish",
+      "ok": true,
+      "detail": "engine/worker:publish.accepted, editor/shell:editor.command, editor/shell:ui.call, editor/shell:editor.publish"
+    },
+    {
+      "name": "edit 4: a search for its id finds the shell's record of the edit and the engine's publish",
+      "ok": true,
+      "detail": "engine/worker:publish.accepted, editor/shell:editor.command, editor/shell:ui.call, editor/shell:editor.publish"
+    },
+    {
+      "name": "an edit made after a publish is not found on that publish or on the one after it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a publish with no edit since the last names none",
+      "ok": true,
+      "detail": "{\"content_hash\":\"d60d27e4654da6e9807674db896760ff4c873b5a564cc9a3f458e68b5896ae37\",\"revision\":3,\"take_id\":\"untitled\"}"
+    },
+    {
+      "name": "the Editor closed gracefully and finished its log",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "no token or credential text in any file",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "publishLine": "untitled revision 3 · hash d60d27e4654da6e9807674db896760ff4c873b5a564cc9a3f458e68b5896ae37 · localPath, 0 asset bytes sent",
+  "editIds": [
+    "ed-f7a563e5-24",
+    "ed-cae110a3-35",
+    "ed-6bcfcd07-37",
+    "ed-1b397258-41"
+  ],
+  "publishIds": [
+    "ed-f7053e66-39",
+    "ed-8bf27126-43",
+    "ed-74f10eac-45"
+  ],
+  "followed": {
+    "ed-f7a563e5-24": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "publish.accepted",
+        "corr": "ed-f7053e66-39",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.command",
+        "corr": "ed-f7a563e5-24",
+        "command": "editScene",
+        "result": "applied"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "ed-f7a563e5-24",
+        "command": "cmd_execute",
+        "result": "ok"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.publish",
+        "corr": "ed-f7053e66-39",
+        "result": "published",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      }
+    ],
+    "ed-cae110a3-35": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "publish.accepted",
+        "corr": "ed-f7053e66-39",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.command",
+        "corr": "ed-cae110a3-35",
+        "command": "editScene",
+        "result": "applied"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "ed-cae110a3-35",
+        "command": "cmd_execute",
+        "result": "ok"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.publish",
+        "corr": "ed-f7053e66-39",
+        "result": "published",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      }
+    ],
+    "ed-6bcfcd07-37": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "publish.accepted",
+        "corr": "ed-f7053e66-39",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.command",
+        "corr": "ed-6bcfcd07-37",
+        "command": "editScene",
+        "result": "applied"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "ed-6bcfcd07-37",
+        "command": "cmd_execute",
+        "result": "ok"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.publish",
+        "corr": "ed-f7053e66-39",
+        "result": "published",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      }
+    ],
+    "ed-1b397258-41": [
+      {
+        "file": "engine/worker",
+        "level": "info",
+        "event": "publish.accepted",
+        "corr": "ed-8bf27126-43",
+        "carries": "ed-1b397258-41"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.command",
+        "corr": "ed-1b397258-41",
+        "command": "editScene",
+        "result": "applied"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "ui.call",
+        "corr": "ed-1b397258-41",
+        "command": "cmd_execute",
+        "result": "ok"
+      },
+      {
+        "file": "editor/shell",
+        "level": "info",
+        "event": "editor.publish",
+        "corr": "ed-8bf27126-43",
+        "result": "published",
+        "carries": "ed-1b397258-41"
+      }
+    ]
+  },
+  "publishes": [
+    {
+      "corr": "ed-f7053e66-39",
+      "shell": {
+        "event": "editor.publish",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      },
+      "engine": {
+        "event": "publish.accepted",
+        "carries": "ed-f7a563e5-24,ed-cae110a3-35,ed-6bcfcd07-37"
+      }
+    },
+    {
+      "corr": "ed-8bf27126-43",
+      "shell": {
+        "event": "editor.publish",
+        "carries": "ed-1b397258-41"
+      },
+      "engine": {
+        "event": "publish.accepted",
+        "carries": "ed-1b397258-41"
+      }
+    },
+    {
+      "corr": "ed-74f10eac-45",
+      "shell": {
+        "event": "editor.publish",
+        "carries": null
+      },
+      "engine": {
+        "event": "publish.accepted",
+        "carries": null
+      }
+    }
+  ]
+}

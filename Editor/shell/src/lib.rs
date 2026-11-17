@@ -85,6 +85,121 @@ pub struct ShellState {
     /// root. Resolved once. A machine with neither can still edit; publishing
     /// then refuses by name before any socket opens.
     package_directory: Result<PathBuf, Refusal>,
+    /// The edits that applied to each target since it was last published (2.17).
+    edits: Mutex<EditLedger>,
+}
+
+/// The ids of the edits that applied to each scene target since it was last
+/// published (2.17), so a publish can name the edits it carries.
+///
+/// An edit's id is the one the front end gave the shell call that made it
+/// (2.13). It is kept per target, newest [`gx_telemetry::corr::MAX_CARRIED`]
+/// only, with a count of the older ones, and for at most [`MAX_LEDGER_TARGETS`]
+/// targets: a person can make hundreds of edits between publishes, and the
+/// ledger must not grow with them.
+#[derive(Default)]
+struct EditLedger {
+    targets: BTreeMap<String, Pending>,
+    /// The number the next recorded edit gets. Edits are numbered across all
+    /// targets in the order they applied, so "everything up to here" can be
+    /// said exactly however many were let go in between.
+    next: u64,
+}
+
+/// The edits of one target not yet published, as the ledger holds them.
+#[derive(Debug, Default)]
+struct Pending {
+    /// Oldest first, each with its number.
+    ids: Vec<(u64, String)>,
+    /// Older edits whose ids were let go to stay within the limit.
+    dropped: u64,
+    /// The number of the newest edit let go.
+    dropped_last: u64,
+}
+
+/// What a publish of one target carries: the edits not yet published when it
+/// was taken.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TargetEdits {
+    /// Oldest first.
+    ids: Vec<String>,
+    /// Older edits it holds whose ids were let go.
+    dropped: u64,
+    /// Every edit numbered below this was applied before the publish was taken,
+    /// so a publish that succeeds has carried exactly those.
+    upto: u64,
+}
+
+/// The most targets the ledger follows at once. A target beyond them is not
+/// followed until another is published: its edits are applied, and a publish of
+/// it names none (named limit).
+const MAX_LEDGER_TARGETS: usize = 256;
+
+impl EditLedger {
+    /// An edit with this id applied to `target`. One shell call is one id, so a
+    /// call that makes several edits is entered once.
+    fn record(&mut self, target: &str, id: &str) {
+        if !self.targets.contains_key(target) && self.targets.len() >= MAX_LEDGER_TARGETS {
+            return;
+        }
+        let edits = self.targets.entry(target.to_owned()).or_default();
+        if edits.ids.last().map(|(_, last)| last.as_str()) == Some(id) {
+            return;
+        }
+        edits.ids.push((self.next, id.to_owned()));
+        self.next += 1;
+        if edits.ids.len() > gx_telemetry::corr::MAX_CARRIED {
+            let (number, _) = edits.ids.remove(0);
+            edits.dropped += 1;
+            edits.dropped_last = number;
+        }
+    }
+
+    /// What a publish of `target` carries now.
+    fn snapshot(&self, target: &str) -> TargetEdits {
+        let pending = self.targets.get(target);
+        TargetEdits {
+            ids: pending
+                .map(|edits| edits.ids.iter().map(|(_, id)| id.clone()).collect())
+                .unwrap_or_default(),
+            dropped: pending.map_or(0, |edits| edits.dropped),
+            upto: self.next,
+        }
+    }
+
+    /// `carried` was published: forget exactly the edits applied before it was
+    /// taken, by their numbers. An edit made while the publish was in flight
+    /// stays for the next one, even when it pushed an older id out of the list
+    /// (matching by position would then forget the new edit and keep a count
+    /// for an old one that was published; found on review).
+    fn forget(&mut self, target: &str, carried: &TargetEdits) {
+        let Some(edits) = self.targets.get_mut(target) else {
+            return;
+        };
+        edits.ids.retain(|(number, _)| *number >= carried.upto);
+        // Ids let go before the publish was taken were published with it. If
+        // any was let go after (more than the limit of edits during one
+        // publish), the count is kept whole: it can then say more than are
+        // left, never fewer.
+        if edits.dropped > 0 && edits.dropped_last < carried.upto {
+            edits.dropped = 0;
+        }
+        if edits.ids.is_empty() && edits.dropped == 0 {
+            self.targets.remove(target);
+        }
+    }
+}
+
+/// The text a log names a scene target by (`session:3`, `project/scene`).
+fn target_text(target: &gx_contracts::command::SceneTarget) -> String {
+    match target {
+        gx_contracts::command::SceneTarget::Session { session } => {
+            format!("session:{}", session.0)
+        }
+        gx_contracts::command::SceneTarget::Stored { project, scene_id } => {
+            format!("{project}/{scene_id}")
+        }
+    }
 }
 
 /// The environment variable that names the Editor's package folder.
@@ -104,12 +219,100 @@ pub fn resolve_package_directory() -> Result<PathBuf, Refusal> {
 }
 
 impl ShellState {
+    /// Use this folder as the asset cache instead of the per-user one (a test, or
+    /// a deployment that keeps it elsewhere).
+    #[must_use]
+    pub fn with_asset_root(self, root: PathBuf) -> Self {
+        *self
+            .assets
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(AssetStore::at_root(root));
+        self
+    }
+
+    /// Write packages into this folder instead of the resolved one.
+    #[must_use]
+    pub fn with_package_directory(mut self, directory: PathBuf) -> Self {
+        self.package_directory = Ok(directory);
+        self
+    }
+
     pub fn new(workspace: Workspace) -> Self {
         Self {
             workspace: Mutex::new(workspace),
             assets: Mutex::new(None),
             package_directory: resolve_package_directory(),
+            edits: Mutex::new(EditLedger::default()),
         }
+    }
+
+    fn edits(&self) -> MutexGuard<'_, EditLedger> {
+        self.edits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Run one command as `cmd_execute` does, and note the id of the call that
+    /// made an edit that applied, against the target it edited (2.17). A
+    /// refused command, and a command that is not an edit, notes nothing.
+    pub fn execute_command(&self, command: EditorCommand) -> Result<CommandOutcome, EditorError> {
+        let edited = match &command {
+            EditorCommand::EditScene(edit) => Some(target_text(&edit.target)),
+            _ => None,
+        };
+        // The edit is noted while the workspace is still held, so a publish that
+        // reads the document under the same lock sees the edit and its note
+        // together or neither (lock order: workspace, then the ledger).
+        let mut workspace = self.workspace();
+        let outcome = execute(&mut workspace, command)?;
+        if let (Some(target), Some(id)) = (edited, gx_telemetry::corr::current()) {
+            self.edits().record(&target, &id);
+        }
+        Ok(outcome)
+    }
+
+    /// The document a target names and the edits that applied to it and are not
+    /// yet published, read together under the workspace lock: every edit the
+    /// document holds is named, and none it does not hold (an edit lands in the
+    /// workspace and in the ledger under that one lock).
+    fn document_and_edits(
+        &self,
+        target: &SceneTarget,
+    ) -> Result<(SceneDocument, TargetEdits), EditorError> {
+        let workspace = self.workspace();
+        let scene = workspace
+            .document(target)
+            .map_err(|error| command_error(error, None))?
+            .into_owned();
+        let edits = self.edits().snapshot(&target_text(target));
+        Ok((scene, edits))
+    }
+
+    /// Publish the document a target names, naming the edits that applied to it
+    /// since it was last published (2.17): they are on the shell's own record, in
+    /// the asset-plane header the engine reads, and on the engine's
+    /// `publish.accepted`. The ids are forgotten only once the publish succeeds,
+    /// and only those it carried: a failed publish keeps them for the next try.
+    pub fn publish_target(
+        &self,
+        endpoint: &str,
+        target: SceneTarget,
+    ) -> Result<PublishResult, EditorError> {
+        let key = target_text(&target);
+        let (scene, carried) = self.document_and_edits(&target)?;
+        // The cache files are checked under the store lock; the package is
+        // written and published after it is released.
+        let sources = self.with_asset_store(|store| {
+            package_sources(&scene, store).map_err(|failure| publish_error(failure, None))
+        })?;
+        let directory = self.package_directory()?;
+        let _carry = (!carried.ids.is_empty() || carried.dropped > 0)
+            .then(|| gx_telemetry::corr::carry(&carried.ids, carried.dropped));
+        let result = publish_with_sources(endpoint, &directory, scene, &sources);
+        if result.is_ok() {
+            self.edits().forget(&key, &carried);
+        }
+        result
     }
 
     fn package_directory(&self) -> Result<PathBuf, EditorError> {
@@ -295,14 +498,7 @@ pub fn execute(
     let name = command.name();
     let (target, if_revision, edits) = match &command {
         EditorCommand::EditScene(edit) => (
-            Some(match &edit.target {
-                gx_contracts::command::SceneTarget::Session { session } => {
-                    format!("session:{}", session.0)
-                }
-                gx_contracts::command::SceneTarget::Stored { project, scene_id } => {
-                    format!("{project}/{scene_id}")
-                }
-            }),
+            Some(target_text(&edit.target)),
             edit.if_revision.map(|r| r.0),
             Some(edit.edits.len()),
         ),
@@ -441,11 +637,17 @@ pub fn publish_with_sources(
             transferred_bytes: published.transferred_bytes,
         })
         .map_err(|failure| publish_error(failure, Some(directory)));
-    // 2.12: a publication and what came of it.
+    // 2.12: a publication and what came of it. 2.17: and the edits it carried,
+    // when the caller named any (a carry scope is entered around this call).
+    let carries = gx_telemetry::corr::carried_text();
+    let carries = carries.as_deref();
+    let carries_dropped = Some(gx_telemetry::corr::carried_dropped()).filter(|n| *n > 0);
     match &result {
         Ok(published) => tracing::info!(
             event = "editor.publish",
             result = "published",
+            carries,
+            carries_dropped,
             scene = scene_id.as_str(),
             endpoint,
             take_id = published.take_id.0.as_str(),
@@ -458,6 +660,8 @@ pub fn publish_with_sources(
             event = "editor.publish",
             result = "failed",
             detail = %error,
+            carries,
+            carries_dropped,
             scene = scene_id.as_str(),
             endpoint,
         ),
@@ -620,7 +824,7 @@ fn cmd_execute(
     command: serde_json::Value,
 ) -> Result<CommandOutcome, EditorError> {
     let command = parse_command(command).map_err(refused)?;
-    execute(&mut state.workspace(), command)
+    state.execute_command(command)
 }
 
 /// Import an SVG file as a new unbound graphic (7.2, 11.17). The source bytes
@@ -683,18 +887,7 @@ fn cmd_publish(
     endpoint: String,
     target: SceneTarget,
 ) -> Result<PublishResult, EditorError> {
-    let scene = state
-        .workspace()
-        .document(&target)
-        .map_err(|error| command_error(error, None))?
-        .into_owned();
-    // The cache files are checked under the store lock; the package is
-    // written and published after it is released.
-    let sources = state.with_asset_store(|store| {
-        package_sources(&scene, store).map_err(|failure| publish_error(failure, None))
-    })?;
-    let directory = state.package_directory()?;
-    publish_with_sources(&endpoint, &directory, scene, &sources)
+    state.publish_target(&endpoint, target)
 }
 
 #[tauri::command]
@@ -1175,6 +1368,354 @@ mod tests {
             ],
             "{events:?}"
         );
+    }
+
+    // --- 2.17: a publish names the edits it carries ------------------------------
+
+    /// Run `body` with this thread's events going to a fresh sink; the shell's
+    /// records, parsed.
+    fn recorded(label: &str, body: impl FnOnce()) -> Vec<serde_json::Value> {
+        use tracing_subscriber::layer::SubscriberExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "gx-editor-carry-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("editor", "shell", &dir))
+                .unwrap();
+        tracing::subscriber::with_default(tracing_subscriber::registry().with(guard.layer()), body);
+        guard.finish().unwrap();
+        let mut records: Vec<serde_json::Value> = Vec::new();
+        for entry in std::fs::read_dir(dir.join("editor")).unwrap().flatten() {
+            for line in std::fs::read_to_string(entry.path()).unwrap().lines() {
+                records.push(serde_json::from_str(line).unwrap());
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        records
+    }
+
+    fn create_rect(session: SessionKey, kind: &str) -> EditorCommand {
+        EditorCommand::EditScene(EditScene {
+            target: gx_contracts::command::SceneTarget::Session { session },
+            edits: vec![SceneEdit::CreateObject(CreateObject {
+                kind: kind.into(),
+                name: "Bar".into(),
+            })],
+            module: None,
+            if_revision: None,
+        })
+    }
+
+    #[test]
+    fn the_ledger_keeps_the_newest_ids_per_target_and_forgets_only_what_was_published() {
+        let mut ledger = EditLedger::default();
+        // One shell call is one id, however many edits it made.
+        ledger.record("session:1", "ed-1");
+        ledger.record("session:1", "ed-1");
+        ledger.record("session:1", "ed-2");
+        ledger.record("session:2", "ed-9");
+        assert_eq!(ledger.snapshot("session:1").ids, ["ed-1", "ed-2"]);
+        assert_eq!(ledger.snapshot("session:2").ids, ["ed-9"]);
+        assert!(ledger.snapshot("session:3").ids.is_empty());
+
+        // A publish carried the first two; an edit made while it ran stays.
+        let carried = ledger.snapshot("session:1");
+        ledger.record("session:1", "ed-3");
+        ledger.forget("session:1", &carried);
+        assert_eq!(ledger.snapshot("session:1").ids, ["ed-3"]);
+        assert_eq!(
+            ledger.snapshot("session:2").ids,
+            ["ed-9"],
+            "another target is untouched"
+        );
+        ledger.forget("session:1", &ledger.snapshot("session:1"));
+        assert!(
+            !ledger.targets.contains_key("session:1"),
+            "an empty target is let go"
+        );
+
+        // Hundreds of edits: the newest are kept, the older are counted.
+        let limit = gx_telemetry::corr::MAX_CARRIED;
+        for n in 0..limit + 10 {
+            ledger.record("session:5", &format!("ed-{n}"));
+        }
+        let kept = ledger.snapshot("session:5");
+        assert_eq!(kept.ids.len(), limit);
+        assert_eq!(kept.dropped, 10);
+        assert_eq!(kept.ids.first().map(String::as_str), Some("ed-10"));
+        assert_eq!(
+            kept.ids.last().map(String::as_str),
+            Some(&*format!("ed-{}", limit + 9))
+        );
+        ledger.forget("session:5", &kept);
+        assert!(ledger.snapshot("session:5").ids.is_empty());
+        assert!(
+            !ledger.targets.contains_key("session:5"),
+            "published whole, let go"
+        );
+
+        // A full list, a publish taken, then one more edit while it is in flight:
+        // the new edit pushes the oldest id out. The publish carried the 64 it
+        // took, the one pushed out among them, so afterwards exactly the new edit
+        // is left and nothing is counted as unnamed.
+        for n in 0..limit {
+            ledger.record("session:6", &format!("ed-a{n}"));
+        }
+        let taken = ledger.snapshot("session:6");
+        assert_eq!((taken.ids.len(), taken.dropped), (limit, 0));
+        ledger.record("session:6", "ed-during");
+        ledger.forget("session:6", &taken);
+        let left = ledger.snapshot("session:6");
+        assert_eq!(left.ids, ["ed-during"]);
+        assert_eq!(left.dropped, 0);
+
+        // More than the limit of edits while one publish is in flight: the ones
+        // let go after it was taken were not published, and stay counted.
+        let taken = ledger.snapshot("session:6");
+        for n in 0..limit + 3 {
+            ledger.record("session:6", &format!("ed-b{n}"));
+        }
+        ledger.forget("session:6", &taken);
+        let left = ledger.snapshot("session:6");
+        assert_eq!(left.ids.len(), limit);
+        assert_eq!(
+            left.ids.last().map(String::as_str),
+            Some(&*format!("ed-b{}", limit + 2))
+        );
+        assert!(left.dropped >= 3, "{}", left.dropped);
+
+        // A publish taken of a target with no edits forgets nothing made after it.
+        let taken = ledger.snapshot("session:7");
+        ledger.record("session:7", "ed-later");
+        ledger.forget("session:7", &taken);
+        assert_eq!(ledger.snapshot("session:7").ids, ["ed-later"]);
+
+        // The ledger follows a bounded number of targets.
+        for n in 0..MAX_LEDGER_TARGETS + 5 {
+            ledger.record(&format!("project/scene-{n}"), "ed-x");
+        }
+        assert_eq!(ledger.targets.len(), MAX_LEDGER_TARGETS);
+        assert!(ledger.targets.contains_key("project/scene-0"));
+        assert!(!ledger
+            .targets
+            .contains_key(&format!("project/scene-{}", MAX_LEDGER_TARGETS + 4)));
+    }
+
+    #[test]
+    fn an_edit_is_noted_by_the_id_of_the_call_that_made_it_and_nothing_else_is() {
+        let state = ShellState::new(Workspace::new(None));
+        let open = |id: &str| {
+            let _call = gx_telemetry::corr::enter(id);
+            state
+                .execute_command(EditorCommand::OpenScene(gx_contracts::command::OpenScene {
+                    source: gx_contracts::command::SceneSource::New {
+                        id: "card".into(),
+                        name: "Card".into(),
+                    },
+                }))
+                .expect("a new scene opens")
+                .session
+                .expect("a session")
+                .session
+        };
+        let session = open("ed-open");
+        {
+            let _call = gx_telemetry::corr::enter("ed-edit-1");
+            state
+                .execute_command(create_rect(session, "rect"))
+                .expect("applies");
+        }
+        {
+            // Refused: it changed nothing, so it is not carried.
+            let _call = gx_telemetry::corr::enter("ed-refused");
+            assert!(state
+                .execute_command(create_rect(session, "no-such-kind"))
+                .is_err());
+        }
+        {
+            let _call = gx_telemetry::corr::enter("ed-edit-2");
+            state
+                .execute_command(create_rect(session, "rect"))
+                .expect("applies");
+        }
+        // No id in scope: the edit applies and there is nothing to name.
+        state
+            .execute_command(create_rect(session, "rect"))
+            .expect("applies");
+        let key = format!("session:{}", session.0);
+        assert_eq!(state.edits().snapshot(&key).ids, ["ed-edit-1", "ed-edit-2"]);
+        assert!(!state.edits().targets.contains_key("session:999"));
+    }
+
+    /// 2.17: whether the workspace is held right now (without waiting for it).
+    fn workspace_is_held(state: &ShellState) -> bool {
+        matches!(
+            state.workspace.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        )
+    }
+
+    /// Whether the workspace stays held, from a moment `held` is first true, for
+    /// a settle time long enough for a thread that released it to have done so.
+    fn stays_held(state: &ShellState) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !workspace_is_held(state) {
+            if std::time::Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // It is held: the thread that took it is now waiting on the ledger,
+        // which the test holds. If it let go of the workspace first, the lock
+        // frees within this time.
+        let settle = std::time::Instant::now() + std::time::Duration::from_millis(400);
+        while std::time::Instant::now() < settle {
+            if !workspace_is_held(state) {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        true
+    }
+
+    fn open_card(state: &ShellState) -> SessionKey {
+        let _call = gx_telemetry::corr::enter("ed-open");
+        state
+            .execute_command(EditorCommand::OpenScene(gx_contracts::command::OpenScene {
+                source: gx_contracts::command::SceneSource::New {
+                    id: "card".into(),
+                    name: "Card".into(),
+                },
+            }))
+            .expect("a new scene opens")
+            .session
+            .expect("a session")
+            .session
+    }
+
+    /// 2.17: the document a publish holds and the edits it names are read under
+    /// one hold of the workspace, so an edit that lands between the two cannot be
+    /// named by a publish whose document lacks it. The test holds the ledger
+    /// and starts the read: it takes the workspace, copies the document, and waits
+    /// for the ledger. While it waits the workspace must stay held.
+    #[test]
+    fn the_document_and_its_edits_are_read_under_one_hold_of_the_workspace() {
+        let state = std::sync::Arc::new(ShellState::new(Workspace::new(None)));
+        let session = open_card(&state);
+        let ledger = state.edits();
+        let reader = {
+            let state = std::sync::Arc::clone(&state);
+            std::thread::spawn(move || {
+                let target = gx_contracts::command::SceneTarget::Session { session };
+                state.document_and_edits(&target).expect("reads");
+            })
+        };
+        assert!(
+            stays_held(&state),
+            "the workspace was let go before the ledger was read"
+        );
+        drop(ledger);
+        reader.join().expect("the read finished");
+    }
+
+    /// 2.17: an edit is noted in the ledger under the same hold of the workspace
+    /// that applied it, so a reader sees the edit and its note together or
+    /// neither. The test holds the ledger and makes an edit: it applies it, and
+    /// waits to note it. While it waits the workspace must stay held.
+    #[test]
+    fn an_edit_is_noted_under_the_same_hold_of_the_workspace_that_applied_it() {
+        let state = std::sync::Arc::new(ShellState::new(Workspace::new(None)));
+        let session = open_card(&state);
+        let ledger = state.edits();
+        let writer = {
+            let state = std::sync::Arc::clone(&state);
+            std::thread::spawn(move || {
+                let _call = gx_telemetry::corr::enter("ed-held");
+                state
+                    .execute_command(create_rect(session, "rect"))
+                    .expect("applies");
+            })
+        };
+        assert!(
+            stays_held(&state),
+            "the workspace was let go before the edit was noted"
+        );
+        drop(ledger);
+        writer.join().expect("the edit finished");
+        assert_eq!(
+            state
+                .edits()
+                .snapshot(&format!("session:{}", session.0))
+                .ids,
+            ["ed-held"]
+        );
+    }
+
+    #[test]
+    fn a_failed_publish_names_its_edits_on_record_and_keeps_them_for_the_next_try() {
+        let scratch = Scratch::new("carry");
+        let state = ShellState::new(Workspace::new(None))
+            .with_asset_root(scratch.0.join("assets"))
+            .with_package_directory(scratch.0.join("packages"));
+        let mut session = None;
+        let records = recorded("failed", || {
+            let opened = state
+                .execute_command(EditorCommand::OpenScene(gx_contracts::command::OpenScene {
+                    source: gx_contracts::command::SceneSource::New {
+                        id: "card".into(),
+                        name: "Card".into(),
+                    },
+                }))
+                .expect("a new scene opens");
+            let key = opened.session.expect("a session").session;
+            session = Some(key);
+            for id in ["ed-edit-1", "ed-edit-2"] {
+                let _call = gx_telemetry::corr::enter(id);
+                state
+                    .execute_command(create_rect(key, "rect"))
+                    .expect("applies");
+            }
+            let _publish = gx_telemetry::corr::enter("ed-pub-1");
+            // Nothing listens on port 1: the publish fails and nothing is published.
+            let result = state.publish_target(
+                "127.0.0.1:1",
+                gx_contracts::command::SceneTarget::Session { session: key },
+            );
+            assert!(
+                matches!(result, Err(EditorError::Unreachable { .. })),
+                "{result:?}"
+            );
+        });
+        let failed = records
+            .iter()
+            .find(|r| r["event"] == "editor.publish" && r["fields"]["result"] == "failed")
+            .unwrap_or_else(|| panic!("no failed publish in {records:#?}"));
+        assert_eq!(failed["corr"], "ed-pub-1");
+        assert_eq!(failed["fields"]["carries"], "ed-edit-1,ed-edit-2");
+        assert!(
+            failed["fields"].get("carries_dropped").is_none(),
+            "{failed}"
+        );
+        let key = format!("session:{}", session.expect("a session").0);
+        assert_eq!(
+            state.edits().snapshot(&key).ids,
+            ["ed-edit-1", "ed-edit-2"],
+            "a failed publish forgets nothing"
+        );
+        // Each edit is on record under its own id, which is what a search for it finds.
+        for id in ["ed-edit-1", "ed-edit-2"] {
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["event"] == "editor.command" && r["corr"] == id),
+                "{id}"
+            );
+        }
     }
 
     /// 2.12: a command applied and a command refused, each on record with its

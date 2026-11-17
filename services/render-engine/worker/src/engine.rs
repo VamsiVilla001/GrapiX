@@ -1673,6 +1673,34 @@ mod tests {
         );
     }
 
+    /// 2.17: a publish that names the edits it holds writes them on its
+    /// `publish.accepted`, and one that names none writes no field.
+    #[test]
+    fn a_publish_names_the_edits_it_carries_and_one_that_names_none_has_no_field() {
+        let records = logged("publish-carries", || {
+            let mut e = engine();
+            {
+                let _publish = gx_telemetry::corr::enter("ed-pub-3");
+                let _carry =
+                    gx_telemetry::corr::carry(&["ed-edit-1".to_owned(), "ed-edit-4".to_owned()], 0);
+                let _ = AssetPublishPeer::publish_scene(&mut e, animated_scene());
+            }
+            let _ = AssetPublishPeer::publish_scene(&mut e, animated_scene());
+        });
+        let accepted: Vec<&serde_json::Value> = records
+            .iter()
+            .filter(|r| r["event"] == "publish.accepted")
+            .collect();
+        assert_eq!(accepted.len(), 2, "{records:#?}");
+        assert_eq!(accepted[0]["corr"], "ed-pub-3");
+        assert_eq!(accepted[0]["fields"]["carries"], "ed-edit-1,ed-edit-4");
+        assert!(
+            accepted[1]["fields"].get("carries").is_none(),
+            "no edits named, no field: {}",
+            accepted[1]
+        );
+    }
+
     #[test]
     fn a_late_frame_a_missed_run_and_the_heartbeat_are_on_record() {
         let records = logged("frames", || {

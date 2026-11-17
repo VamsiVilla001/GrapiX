@@ -145,9 +145,147 @@ impl Drop for Scope {
     }
 }
 
+/// The most edit ids one publish names (2.17). A person can make hundreds of
+/// edits between two publishes; the newest are named and the rest are counted.
+pub const MAX_CARRIED: usize = 64;
+
+/// What a publish carries: the ids of the edits it holds, and how many more it
+/// holds that are not named.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Carried {
+    ids: Vec<String>,
+    dropped: u64,
+}
+
+thread_local! {
+    static CARRIED: RefCell<Vec<Carried>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A carry scope: while it is entered, this thread's publish names the edit ids
+/// it was given (2.17). Like [`Scope`], tied to the thread that entered it.
+#[must_use = "the scope ends when this is dropped"]
+pub struct CarryScope {
+    depth: usize,
+    _thread: PhantomData<*const ()>,
+}
+
+/// Enter a carry scope for `ids`, the ids of the edits a publish holds.
+///
+/// Only ids that pass [`is_valid`] are kept, once each, and at most
+/// [`MAX_CARRIED`] of them: the newest, which are the last given. Every id left
+/// out (invalid, repeated, or beyond the limit) adds to the count, together with
+/// `already_dropped` (the ids the caller itself could not keep), so a record can
+/// say how many edits it holds that it does not name.
+pub fn carry(ids: &[String], already_dropped: u64) -> CarryScope {
+    let mut kept: Vec<String> = Vec::new();
+    let mut dropped = already_dropped;
+    for id in ids {
+        if !is_valid(id) || kept.contains(id) {
+            dropped += 1;
+        } else {
+            kept.push(id.clone());
+        }
+    }
+    if kept.len() > MAX_CARRIED {
+        let over = kept.len() - MAX_CARRIED;
+        kept.drain(..over);
+        dropped += over as u64;
+    }
+    CARRIED.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        stack.push(Carried { ids: kept, dropped });
+        CarryScope {
+            depth: stack.len(),
+            _thread: PhantomData,
+        }
+    })
+}
+
+impl Drop for CarryScope {
+    fn drop(&mut self) {
+        CARRIED.with(|stack| stack.borrow_mut().truncate(self.depth - 1));
+    }
+}
+
+/// The edit ids the publish this thread is working for names, oldest first.
+pub fn carried() -> Vec<String> {
+    CARRIED.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|c| c.ids.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// How many edits that publish holds without naming them.
+pub fn carried_dropped() -> u64 {
+    CARRIED.with(|stack| stack.borrow().last().map_or(0, |c| c.dropped))
+}
+
+/// The named edit ids as one log field, comma-separated (an id never contains a
+/// comma), or `None` when there are none, so a record without edits carries no
+/// field.
+pub fn carried_text() -> Option<String> {
+    let ids = carried();
+    (!ids.is_empty()).then(|| ids.join(","))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_carry_scope_names_only_valid_distinct_ids_and_counts_the_rest() {
+        let ids: Vec<String> = ["ed-1", "bad id", "ed-2", "ed-1", "gx1.a.b", "ed-3"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        assert!(carried().is_empty());
+        {
+            let _scope = carry(&ids, 5);
+            assert_eq!(carried(), ["ed-1", "ed-2", "ed-3"]);
+            // Two invalid, one repeated, and the five the caller dropped itself.
+            assert_eq!(carried_dropped(), 8);
+            assert_eq!(carried_text().as_deref(), Some("ed-1,ed-2,ed-3"));
+        }
+        assert!(carried().is_empty(), "the scope ended");
+        assert_eq!(carried_text(), None);
+        assert_eq!(carried_dropped(), 0);
+    }
+
+    #[test]
+    fn a_carry_scope_keeps_the_newest_ids_when_there_are_too_many() {
+        let ids: Vec<String> = (0..MAX_CARRIED + 5).map(|n| format!("ed-{n}")).collect();
+        let _scope = carry(&ids, 0);
+        let kept = carried();
+        assert_eq!(kept.len(), MAX_CARRIED);
+        assert_eq!(
+            kept.first().map(String::as_str),
+            Some("ed-5"),
+            "the oldest went"
+        );
+        assert_eq!(
+            kept.last().map(String::as_str),
+            Some(&*format!("ed-{}", MAX_CARRIED + 4))
+        );
+        assert_eq!(carried_dropped(), 5);
+    }
+
+    #[test]
+    fn carry_scopes_nest_and_stay_on_their_thread() {
+        let outer = vec!["ed-outer".to_owned()];
+        let inner = vec!["ed-inner".to_owned()];
+        let _outer = carry(&outer, 0);
+        {
+            let _inner = carry(&inner, 0);
+            assert_eq!(carried(), ["ed-inner"]);
+        }
+        assert_eq!(carried(), ["ed-outer"]);
+        std::thread::spawn(|| assert!(carried().is_empty()))
+            .join()
+            .expect("another thread sees none");
+    }
 
     #[test]
     fn only_a_short_plain_id_is_valid() {

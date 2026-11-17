@@ -1,0 +1,233 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 4304,
+    "output_tokens": 0,
+    "state_tokens": 697,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: a broadcast graphics Editor (a Tauri shell with a TypeScript front end) that authors scenes and publishes them to a render engine. Every process writes JSON-lines logs; a correlation id on a record lets a person follow one action through the front end, the shell, the asset plane and the engine (row 2.13).",
+    "today": "The front end mints one id per shell call (ed-<random>-<n>). An edit (cmd_execute, applied to a scene target: an open session or a stored scene) is followed from the front end to the shell and stops there, because the Editor's scene is local until published. The publish (cmd_publish of that target) has its own id, which the shell passes to the asset plane header and the engine's publish listener enters, so publish.accepted carries it. So an edit and the publish that carries it have two unrelated ids: a person holding the edit id cannot reach the engine, and one holding the publish id cannot tell which edits it carries.",
+    "done_when": "An Editor edit, and the publish of the scene that holds it, can be followed by one correlation id from the front end through the shell and the asset plane to the engine: the front end names a gesture (an edit, then its publish) with one id, or the publish names the ids of the edits it carries.",
+    "constraints": "No wire change to the engine control plane. The asset-plane request header is free-form JSON and an unknown key is ignored by old peers. An id must pass a shape check (1 to 64 characters of letters, digits, underscore, colon, hyphen) before it is entered or written, so a front end cannot put text, a line break or a credential into a log. The Editor MCP server is a separate process that also edits stored scenes (with its own mcp-<n> ids); the shell cannot see those edits. Many edits can happen between two publishes (a person drags a slider: dozens of edit calls).",
+    "options": {
+      "front_end_gesture_id": "A (front end): the front end mints one gesture id at the first edit after a publish of a target and reuses it as the correlation id of every further edit call to that target and of the publish call, so one id covers every record from the first edit to the engine. The shell and the asset plane need no change; every ui.call, editor.command and editor.publish record in the run shares the one id.",
+      "publish_names_edit_ids": "B (shell): each call keeps its own id. The shell remembers, per target, the ids of the edit commands that applied since its last publish (bounded: the newest 64, with a count of any dropped) and the publish records them: editor.publish, the asset-plane request header (a new optional member) and the engine's publish.accepted all carry a \"carries\" field listing the edit ids. Searching an edit id finds its own records and the publish records that name it; searching the publish id finds the edit ids.",
+      "both": "C: both A and B.",
+      "neither": "D: change nothing; keep 2.13's reading that an edit and a publish are two chains."
+    }
+  },
+  "questions": {
+    "design": {
+      "type": "choice",
+      "instructions": "Which option should be built?",
+      "criteria": {
+        "front_end_gesture_id": "A (front end): the front end mints one gesture id at the first edit after a publish of a target and reuses it as the correlation id of every further edit call to that target and of the publish call, so one id covers every record from the first edit to the engine. The shell and the asset plane need no change; every ui.call, editor.command and editor.publish record in the run shares the one id.",
+        "publish_names_edit_ids": "B (shell): each call keeps its own id. The shell remembers, per target, the ids of the edit commands that applied since its last publish (bounded: the newest 64, with a count of any dropped) and the publish records them: editor.publish, the asset-plane request header (a new optional member) and the engine's publish.accepted all carry a \"carries\" field listing the edit ids. Searching an edit id finds its own records and the publish records that name it; searching the publish id finds the edit ids.",
+        "both": "C: both A and B.",
+        "neither": "D: change nothing; keep 2.13's reading that an edit and a publish are two chains."
+      }
+    },
+    "robust_to_front_end_mistakes": {
+      "type": "choice",
+      "instructions": "Which option stays correct if the front end groups its calls wrongly, forgets to reuse an id, or is replaced by another client?",
+      "criteria": {
+        "front_end_gesture_id": "A (front end): the front end mints one gesture id at the first edit after a publish of a target and reuses it as the correlation id of every further edit call to that target and of the publish call, so one id covers every record from the first edit to the engine. The shell and the asset plane need no change; every ui.call, editor.command and editor.publish record in the run shares the one id.",
+        "publish_names_edit_ids": "B (shell): each call keeps its own id. The shell remembers, per target, the ids of the edit commands that applied since its last publish (bounded: the newest 64, with a count of any dropped) and the publish records them: editor.publish, the asset-plane request header (a new optional member) and the engine's publish.accepted all carry a \"carries\" field listing the edit ids. Searching an edit id finds its own records and the publish records that name it; searching the publish id finds the edit ids.",
+        "both": "C: both A and B.",
+        "neither": "D: change nothing; keep 2.13's reading that an edit and a publish are two chains."
+      }
+    },
+    "easiest_to_follow_in_a_log": {
+      "type": "choice",
+      "instructions": "Which option is easiest for a person to follow in the logs: from an edit to the engine, and from an engine publish back to the edits?",
+      "criteria": {
+        "front_end_gesture_id": "A (front end): the front end mints one gesture id at the first edit after a publish of a target and reuses it as the correlation id of every further edit call to that target and of the publish call, so one id covers every record from the first edit to the engine. The shell and the asset plane need no change; every ui.call, editor.command and editor.publish record in the run shares the one id.",
+        "publish_names_edit_ids": "B (shell): each call keeps its own id. The shell remembers, per target, the ids of the edit commands that applied since its last publish (bounded: the newest 64, with a count of any dropped) and the publish records them: editor.publish, the asset-plane request header (a new optional member) and the engine's publish.accepted all carry a \"carries\" field listing the edit ids. Searching an edit id finds its own records and the publish records that name it; searching the publish id finds the edit ids.",
+        "both": "C: both A and B.",
+        "neither": "D: change nothing; keep 2.13's reading that an edit and a publish are two chains."
+      }
+    },
+    "least_risk_of_breaking_2_13": {
+      "type": "choice",
+      "instructions": "Which option carries the least risk of breaking what row 2.13 built (one id per call, scoped by the shell, validated)?",
+      "criteria": {
+        "front_end_gesture_id": "A (front end): the front end mints one gesture id at the first edit after a publish of a target and reuses it as the correlation id of every further edit call to that target and of the publish call, so one id covers every record from the first edit to the engine. The shell and the asset plane need no change; every ui.call, editor.command and editor.publish record in the run shares the one id.",
+        "publish_names_edit_ids": "B (shell): each call keeps its own id. The shell remembers, per target, the ids of the edit commands that applied since its last publish (bounded: the newest 64, with a count of any dropped) and the publish records them: editor.publish, the asset-plane request header (a new optional member) and the engine's publish.accepted all carry a \"carries\" field listing the edit ids. Searching an edit id finds its own records and the publish records that name it; searching the publish id finds the edit ids.",
+        "both": "C: both A and B.",
+        "neither": "D: change nothing; keep 2.13's reading that an edit and a publish are two chains."
+      }
+    },
+    "bounded_cost": {
+      "type": "choice",
+      "instructions": "Which option has bounded memory and log cost when a person makes hundreds of edits between publishes?",
+      "criteria": {
+        "front_end_gesture_id": "A (front end): the front end mints one gesture id at the first edit after a publish of a target and reuses it as the correlation id of every further edit call to that target and of the publish call, so one id covers every record from the first edit to the engine. The shell and the asset plane need no change; every ui.call, editor.command and editor.publish record in the run shares the one id.",
+        "publish_names_edit_ids": "B (shell): each call keeps its own id. The shell remembers, per target, the ids of the edit commands that applied since its last publish (bounded: the newest 64, with a count of any dropped) and the publish records them: editor.publish, the asset-plane request header (a new optional member) and the engine's publish.accepted all carry a \"carries\" field listing the edit ids. Searching an edit id finds its own records and the publish records that name it; searching the publish id finds the edit ids.",
+        "both": "C: both A and B.",
+        "neither": "D: change nothing; keep 2.13's reading that an edit and a publish are two chains."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "design",
+      "jev": "publish_names_edit_ids",
+      "laya": "front_end_gesture_id",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "publish_names_edit_ids",
+        "confidence": 0.25,
+        "probabilities": {
+          "front_end_gesture_id": 0.42,
+          "publish_names_edit_ids": 0.44,
+          "both": 0.13,
+          "neither": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "front_end_gesture_id",
+        "probabilities": {
+          "front_end_gesture_id": 0.9972,
+          "publish_names_edit_ids": 0.0,
+          "both": 0.0022,
+          "neither": 0.0005
+        },
+        "confidence": 0.9852,
+        "answer_confidence": 0.9972,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "robust_to_front_end_mistakes",
+      "jev": "publish_names_edit_ids",
+      "laya": "front_end_gesture_id",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "publish_names_edit_ids",
+        "confidence": 0.95,
+        "probabilities": {
+          "front_end_gesture_id": 0,
+          "publish_names_edit_ids": 0.96,
+          "both": 0.01,
+          "neither": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "front_end_gesture_id",
+        "probabilities": {
+          "front_end_gesture_id": 0.9992,
+          "publish_names_edit_ids": 0.0,
+          "both": 0.0006,
+          "neither": 0.0002
+        },
+        "confidence": 0.995,
+        "answer_confidence": 0.9992,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "easiest_to_follow_in_a_log",
+      "jev": "publish_names_edit_ids",
+      "laya": "front_end_gesture_id",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "publish_names_edit_ids",
+        "confidence": 0.25,
+        "probabilities": {
+          "front_end_gesture_id": 0.16,
+          "publish_names_edit_ids": 0.44,
+          "both": 0.4,
+          "neither": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "front_end_gesture_id",
+        "probabilities": {
+          "front_end_gesture_id": 0.9988,
+          "publish_names_edit_ids": 0.0,
+          "both": 0.001,
+          "neither": 0.0002
+        },
+        "confidence": 0.9928,
+        "answer_confidence": 0.9988,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "least_risk_of_breaking_2_13",
+      "jev": "publish_names_edit_ids",
+      "laya": "front_end_gesture_id",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "publish_names_edit_ids",
+        "confidence": 0.56,
+        "probabilities": {
+          "front_end_gesture_id": 0.1,
+          "publish_names_edit_ids": 0.67,
+          "both": 0,
+          "neither": 0.23
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "front_end_gesture_id",
+        "probabilities": {
+          "front_end_gesture_id": 0.9987,
+          "publish_names_edit_ids": 0.0,
+          "both": 0.001,
+          "neither": 0.0003
+        },
+        "confidence": 0.9921,
+        "answer_confidence": 0.9987,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "bounded_cost",
+      "jev": "publish_names_edit_ids",
+      "laya": "front_end_gesture_id",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "publish_names_edit_ids",
+        "confidence": 0.81,
+        "probabilities": {
+          "front_end_gesture_id": 0.07,
+          "publish_names_edit_ids": 0.86,
+          "both": 0.07,
+          "neither": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "front_end_gesture_id",
+        "probabilities": {
+          "front_end_gesture_id": 0.9992,
+          "publish_names_edit_ids": 0.0,
+          "both": 0.0006,
+          "neither": 0.0002
+        },
+        "confidence": 0.9947,
+        "answer_confidence": 0.9992,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}
