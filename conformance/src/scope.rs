@@ -91,6 +91,9 @@ fn every_request() -> Vec<ClientRequest> {
             live: false,
             accept_free_run: false,
         }),
+        // Last, so the indexes above stay what they were: a full credential's
+        // run ends with the one request that ends the engine.
+        ClientRequest::Stop,
     ]
 }
 
@@ -272,6 +275,7 @@ pub fn scope_enforcement_suite(report: &mut Report) {
             Scope::Take,
             Scope::Clear,
             Scope::ConfigureOutput,
+            Scope::Stop,
         ],
     ) {
         Ok(mut playout) => {
@@ -299,6 +303,86 @@ pub fn scope_enforcement_suite(report: &mut Report) {
         Err(e) => report.record(
             PLANE,
             "a full Playout credential reaches the engine with every request",
+            Outcome::Fail(format!("could not authenticate: {e}")),
+        ),
+    }
+
+    stop_suite(addr, &reached_now, report);
+}
+
+/// 2.19: the stop request through the real transport. A Playout credential that
+/// holds every Program scope but not `stop` is refused by name and the engine
+/// never sees the request; with the scope, the request is refused by name while
+/// a scene is on Program and accepted once it is cleared.
+fn stop_suite(addr: SocketAddr, reached_now: &dyn Fn() -> Vec<&'static str>, report: &mut Report) {
+    let name = "a Playout credential without the stop scope cannot stop the engine";
+    match connect(
+        addr,
+        Role::Playout,
+        vec![
+            Scope::Cue,
+            Scope::Take,
+            Scope::Clear,
+            Scope::ConfigureOutput,
+        ],
+    ) {
+        Ok(mut operator) => {
+            let before = reached_now().len();
+            let reply = operator.request(ClientRequest::Stop);
+            let seen = reached_now()[before..].to_vec();
+            report.record(
+                PLANE,
+                name,
+                expect(
+                    matches!(
+                        &reply,
+                        Ok(EngineReply::Refused(Refusal::ScopeNotGranted {
+                            required: Some(Scope::Stop),
+                            role: Role::Playout,
+                            ..
+                        }))
+                    ) && seen.is_empty(),
+                    format!("2.19: stop {reply:?}, engine handled {seen:?}"),
+                ),
+            );
+        }
+        Err(e) => report.record(
+            PLANE,
+            name,
+            Outcome::Fail(format!("could not authenticate: {e}")),
+        ),
+    }
+
+    let name = "a stop request is refused by name while a scene is on Program, and accepted once it is cleared";
+    match connect(
+        addr,
+        Role::Playout,
+        vec![Scope::Take, Scope::Clear, Scope::Stop],
+    ) {
+        Ok(mut operator) => {
+            let steps = vec![
+                operator.request(every_request().remove(5)),
+                operator.request(ClientRequest::Stop),
+                operator.request(every_request().remove(7)),
+                operator.request(ClientRequest::Stop),
+            ];
+            let ok = matches!(&steps[0], Ok(EngineReply::Taken(_)))
+                && matches!(
+                    &steps[1],
+                    Ok(EngineReply::Refused(Refusal::StopRefusedProgramOnAir { take_id, .. }))
+                        if take_id.0 == "conformance/published"
+                )
+                && matches!(&steps[2], Ok(EngineReply::Cleared(_)))
+                && matches!(&steps[3], Ok(EngineReply::Stopping));
+            report.record(
+                PLANE,
+                name,
+                expect(ok, format!("2.19: take, stop, clear, stop gave {steps:?}")),
+            );
+        }
+        Err(e) => report.record(
+            PLANE,
+            name,
             Outcome::Fail(format!("could not authenticate: {e}")),
         ),
     }

@@ -3,4 +3,4 @@
 /**
  * A closed authority a role may receive in a credential.
  */
-export type Scope = "author" | "cue" | "take" | "clear" | "configureOutput" | "report";
+export type Scope = "author" | "cue" | "take" | "clear" | "configureOutput" | "stop" | "report";

@@ -1,0 +1,234 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 3984,
+    "output_tokens": 0,
+    "state_tokens": 624,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: a broadcast graphics engine (Rust, Windows first). The render engine is a console process that puts out Program (what is on air). Playout is the operator product that cues, takes and clears scenes; the Editor authors scenes and may never change Program.",
+    "today": "The engine can be stopped in order only from its own console (Ctrl+C, Ctrl+Break, closing its window): it then writes engine.stop with the reason and log.stop, and exits 0. Nothing on the control plane can ask it to stop. The engine host deliberately never stops an engine: a host restart must not take Program down. So a person who is not at the engine machine can only kill the process, which leaves no stop record (the next start then reports the run as unfinished).",
+    "control_plane": "Requests today: authenticate, capability, status, cue, take, clear, phase, configureOutput, performance, render. Every request needs the Playout role; cue, take/phase, clear and configureOutput each need their own scope in the credential (5.7); the rest are reads. One exhaustive match decides the scope of each request, so a new request cannot be added without a scope decision. The wire protocol has a version (6 now); a new request is a new version, and the TypeScript contracts and the conformance suite are generated from and checked against it. The engine status says whether a scene is on Program.",
+    "user_decisions": "The user asked on 17 Nov 2026 for the stop gap left by row 2.16 to be closed. Work that Windows supports comes first. Downloads need approval; none is needed here.",
+    "options": {
+      "scoped_refuse_on_air": "A new request \"stop\" with a new scope \"stop\" that a credential must be granted explicitly (no credential issued today has it). The engine refuses it by name while a scene is on Program (the operator clears Program first, or stops the engine at its console). When accepted it replies \"stopping\", writes engine.stop naming the request, its correlation id and the credential, finishes its log and exits 0.",
+      "scoped_allow_on_air": "The same request and scope, but it is accepted while a scene is on Program: holding the stop scope is the whole permission. Program goes dark when the engine exits.",
+      "scoped_on_air_needs_flag": "The same request and scope; while a scene is on Program it is refused unless the request carries an explicit field saying \"even while on air\", so a stop on air is possible but can never be an accident.",
+      "reuse_clear_scope": "A stop request that needs only the existing \"clear\" scope, so every Playout credential that can clear Program can also stop the engine, on air or not.",
+      "no_stop_request": "Build nothing: the engine is stopped in order only at its console, and that is named as the product rule."
+    }
+  },
+  "questions": {
+    "design": {
+      "type": "choice",
+      "instructions": "Which option should be built?",
+      "criteria": {
+        "scoped_refuse_on_air": "A new request \"stop\" with a new scope \"stop\" that a credential must be granted explicitly (no credential issued today has it). The engine refuses it by name while a scene is on Program (the operator clears Program first, or stops the engine at its console). When accepted it replies \"stopping\", writes engine.stop naming the request, its correlation id and the credential, finishes its log and exits 0.",
+        "scoped_allow_on_air": "The same request and scope, but it is accepted while a scene is on Program: holding the stop scope is the whole permission. Program goes dark when the engine exits.",
+        "scoped_on_air_needs_flag": "The same request and scope; while a scene is on Program it is refused unless the request carries an explicit field saying \"even while on air\", so a stop on air is possible but can never be an accident.",
+        "reuse_clear_scope": "A stop request that needs only the existing \"clear\" scope, so every Playout credential that can clear Program can also stop the engine, on air or not.",
+        "no_stop_request": "Build nothing: the engine is stopped in order only at its console, and that is named as the product rule."
+      }
+    },
+    "safest_for_air": {
+      "type": "choice",
+      "instructions": "Which option is least likely to take Program off air by accident or by a credential that should not be able to?",
+      "criteria": {
+        "scoped_refuse_on_air": "A new request \"stop\" with a new scope \"stop\" that a credential must be granted explicitly (no credential issued today has it). The engine refuses it by name while a scene is on Program (the operator clears Program first, or stops the engine at its console). When accepted it replies \"stopping\", writes engine.stop naming the request, its correlation id and the credential, finishes its log and exits 0.",
+        "scoped_allow_on_air": "The same request and scope, but it is accepted while a scene is on Program: holding the stop scope is the whole permission. Program goes dark when the engine exits.",
+        "scoped_on_air_needs_flag": "The same request and scope; while a scene is on Program it is refused unless the request carries an explicit field saying \"even while on air\", so a stop on air is possible but can never be an accident.",
+        "reuse_clear_scope": "A stop request that needs only the existing \"clear\" scope, so every Playout credential that can clear Program can also stop the engine, on air or not.",
+        "no_stop_request": "Build nothing: the engine is stopped in order only at its console, and that is named as the product rule."
+      }
+    },
+    "most_useful_to_operator": {
+      "type": "choice",
+      "instructions": "Which option is the most useful to an operator who must stop an engine from another machine and wants the stop on record?",
+      "criteria": {
+        "scoped_refuse_on_air": "A new request \"stop\" with a new scope \"stop\" that a credential must be granted explicitly (no credential issued today has it). The engine refuses it by name while a scene is on Program (the operator clears Program first, or stops the engine at its console). When accepted it replies \"stopping\", writes engine.stop naming the request, its correlation id and the credential, finishes its log and exits 0.",
+        "scoped_allow_on_air": "The same request and scope, but it is accepted while a scene is on Program: holding the stop scope is the whole permission. Program goes dark when the engine exits.",
+        "scoped_on_air_needs_flag": "The same request and scope; while a scene is on Program it is refused unless the request carries an explicit field saying \"even while on air\", so a stop on air is possible but can never be an accident.",
+        "reuse_clear_scope": "A stop request that needs only the existing \"clear\" scope, so every Playout credential that can clear Program can also stop the engine, on air or not.",
+        "no_stop_request": "Build nothing: the engine is stopped in order only at its console, and that is named as the product rule."
+      }
+    },
+    "who_is_named": {
+      "type": "choice",
+      "instructions": "What should engine.stop carry for a stop request?",
+      "criteria": {
+        "request_corr_credential": "That a stop request came, its correlation id, and the credential (its id and role) that sent it.",
+        "request_only": "Only that a stop request came.",
+        "free_text_reason": "A free-text reason typed by the sender, and nothing about who sent it."
+      }
+    },
+    "reply_before_exit": {
+      "type": "choice",
+      "instructions": "When should the engine reply to the stop request?",
+      "criteria": {
+        "reply_then_stop": "Reply \"stopping\" first, then write the stop records and exit, so the sender has an answer; the next start or the log proves the stop.",
+        "stop_without_reply": "Exit without replying; the sender sees the connection close."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "design",
+      "jev": "scoped_refuse_on_air",
+      "laya": "no_stop_request",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "scoped_refuse_on_air",
+        "confidence": 0.74,
+        "probabilities": {
+          "scoped_refuse_on_air": 0.79,
+          "scoped_allow_on_air": 0.01,
+          "scoped_on_air_needs_flag": 0.1,
+          "reuse_clear_scope": 0.02,
+          "no_stop_request": 0.08
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_stop_request",
+        "probabilities": {
+          "scoped_refuse_on_air": 0.0109,
+          "scoped_allow_on_air": 0.0501,
+          "scoped_on_air_needs_flag": 0.0538,
+          "reuse_clear_scope": 0.045,
+          "no_stop_request": 0.8401
+        },
+        "confidence": 0.6008,
+        "answer_confidence": 0.8401,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "safest_for_air",
+      "jev": "no_stop_request",
+      "laya": "no_stop_request",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "no_stop_request",
+        "confidence": 0.51,
+        "probabilities": {
+          "scoped_refuse_on_air": 0.35,
+          "scoped_allow_on_air": 0,
+          "scoped_on_air_needs_flag": 0.04,
+          "reuse_clear_scope": 0,
+          "no_stop_request": 0.61
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_stop_request",
+        "probabilities": {
+          "scoped_refuse_on_air": 0.008,
+          "scoped_allow_on_air": 0.0563,
+          "scoped_on_air_needs_flag": 0.058,
+          "reuse_clear_scope": 0.0423,
+          "no_stop_request": 0.8354
+        },
+        "confidence": 0.5962,
+        "answer_confidence": 0.8354,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "most_useful_to_operator",
+      "jev": "scoped_refuse_on_air",
+      "laya": "no_stop_request",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "scoped_refuse_on_air",
+        "confidence": 0.52,
+        "probabilities": {
+          "scoped_refuse_on_air": 0.62,
+          "scoped_allow_on_air": 0.08,
+          "scoped_on_air_needs_flag": 0.04,
+          "reuse_clear_scope": 0.26,
+          "no_stop_request": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_stop_request",
+        "probabilities": {
+          "scoped_refuse_on_air": 0.0089,
+          "scoped_allow_on_air": 0.052,
+          "scoped_on_air_needs_flag": 0.1085,
+          "reuse_clear_scope": 0.0359,
+          "no_stop_request": 0.7946
+        },
+        "confidence": 0.5408,
+        "answer_confidence": 0.7946,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "who_is_named",
+      "jev": "request_corr_credential",
+      "laya": "request_corr_credential",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "request_corr_credential",
+        "confidence": 1,
+        "probabilities": {
+          "request_corr_credential": 1,
+          "request_only": 0,
+          "free_text_reason": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "request_corr_credential",
+        "probabilities": {
+          "request_corr_credential": 0.4556,
+          "request_only": 0.392,
+          "free_text_reason": 0.1523
+        },
+        "confidence": 0.0789,
+        "answer_confidence": 0.4556,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "reply_before_exit",
+      "jev": "reply_then_stop",
+      "laya": "stop_without_reply",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "reply_then_stop",
+        "confidence": 1,
+        "probabilities": {
+          "reply_then_stop": 1,
+          "stop_without_reply": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "stop_without_reply",
+        "probabilities": {
+          "reply_then_stop": 0.3292,
+          "stop_without_reply": 0.6708
+        },
+        "confidence": 0.0859,
+        "answer_confidence": 0.6708,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

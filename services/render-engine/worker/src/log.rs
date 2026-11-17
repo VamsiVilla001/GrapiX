@@ -66,6 +66,7 @@ impl RequestNote {
             ClientRequest::Authenticate { .. }
             | ClientRequest::Capability
             | ClientRequest::Status
+            | ClientRequest::Stop
             | ClientRequest::Performance => {}
         }
         note

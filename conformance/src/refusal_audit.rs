@@ -141,6 +141,35 @@ fn drive_control_refusals(report: &mut Report) {
         ),
     );
 
+    // 2.19: a stop request while a scene is on Program is refused by name, and
+    // names the scene. A peer of its own, so Program is empty for the checks below.
+    let mut on_air = MockEngine::new().genlocked(RationalRate::P50);
+    on_air.publish(
+        TakeId("audit/on-air".into()),
+        Revision(3),
+        gx_contracts::ContentHash("a".repeat(64)),
+    );
+    let taken = on_air.handle(ClientRequest::Take(TakeRequest {
+        take_id: TakeId("audit/on-air".into()),
+        revision: Revision(3),
+        content_hash: Some(ContentHash("a".repeat(64))),
+        at: TakeAt::NextOpportunity,
+    }));
+    let stop = on_air.handle(ClientRequest::Stop);
+    report.record(
+        PLANE,
+        "StopRefusedProgramOnAir is produced for a stop request while a scene is on Program",
+        expect(
+            matches!(taken, EngineReply::Taken(_))
+                && matches!(
+                    &stop,
+                    EngineReply::Refused(Refusal::StopRefusedProgramOnAir { take_id, revision })
+                        if take_id.0 == "audit/on-air" && *revision == Revision(3)
+                ),
+            format!("expected StopRefusedProgramOnAir naming audit/on-air, got {stop:?}"),
+        ),
+    );
+
     let mut peer = MockEngine::new().genlocked(RationalRate::P50);
     peer.publish(
         TakeId("audit/published".into()),
@@ -2023,6 +2052,7 @@ fn is_driven(variant: &str) -> bool {
             | "MediaTransportUnavailable"
             | "MediaCodecNotOffered"
             | "ScopeNotGranted"
+            | "StopRefusedProgramOnAir"
             | "AssetChunkOutOfOrder"
             | "AssetTransferAlreadyComplete"
             | "EmptyAssetTransfer"

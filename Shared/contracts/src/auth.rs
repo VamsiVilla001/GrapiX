@@ -35,6 +35,10 @@ pub enum Scope {
     Clear,
     /// Configure an output.
     ConfigureOutput,
+    /// Ask the engine to stop in order (2.19). Held by no credential unless it
+    /// is minted with it: stopping the engine ends Program, so nothing that can
+    /// cue, take or clear gets it by being a Playout credential.
+    Stop,
     /// Report engine status and events.
     Report,
 }
@@ -50,7 +54,7 @@ impl Role {
             (Role::Editor, Scope::Author)
                 | (
                     Role::Playout,
-                    Scope::Cue | Scope::Take | Scope::Clear | Scope::ConfigureOutput
+                    Scope::Cue | Scope::Take | Scope::Clear | Scope::ConfigureOutput | Scope::Stop
                 )
                 | (Role::Engine, Scope::Report)
         )
@@ -87,5 +91,15 @@ mod tests {
         assert!(!Role::Playout.permits(Scope::Author));
         assert!(Role::Engine.permits(Scope::Report));
         assert!(!Role::Engine.permits(Scope::Clear));
+    }
+
+    /// 2.19: only a Playout credential may carry the stop scope; an Editor or
+    /// an engine credential never can, whatever it is minted with.
+    #[test]
+    fn only_a_playout_credential_may_carry_the_stop_scope() {
+        assert!(Role::Playout.permits(Scope::Stop));
+        assert!(!Role::Editor.permits(Scope::Stop));
+        assert!(!Role::Engine.permits(Scope::Stop));
+        assert_eq!(serde_json::to_string(&Scope::Stop).unwrap(), "\"stop\"");
     }
 }

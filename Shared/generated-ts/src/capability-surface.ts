@@ -8,8 +8,8 @@
 import type { CapabilitySurface } from "./CapabilitySurface.js";
 
 export const CAPABILITY_SURFACE: CapabilitySurface = {
-  "schemaVersion": 6,
-  "protocolVersion": 6,
+  "schemaVersion": 7,
+  "protocolVersion": 7,
   "enums": [
     {
       "name": "BlendMode",
@@ -141,6 +141,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
         "take",
         "clear",
         "configureOutput",
+        "stop",
         "report"
       ]
     },
@@ -277,6 +278,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "assetStoreFailed",
     "mediaTransportUnavailable",
     "mediaCodecNotOffered",
+    "stopRefusedProgramOnAir",
     "scopeNotGranted",
     "rundownCursorOutOfRange",
     "rundownEntryUnknown",

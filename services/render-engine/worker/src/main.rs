@@ -11,6 +11,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,7 +20,7 @@ use gx_asset_plane::AssetPublishServer;
 use gx_contracts::{ContentHash, Locality, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
-use gx_render_worker::engine::Restored;
+use gx_render_worker::engine::{Restored, StopRequest};
 use gx_render_worker::recovery::RecoveryJournal;
 use gx_render_worker::Engine;
 
@@ -96,6 +97,11 @@ fn main() {
     spawn_pump(Arc::clone(&frame_source), rate);
 
     let mut engine = Engine::new(Arc::clone(&frame_source), locality);
+    // 2.19: a stop request on the control plane reaches this process through
+    // here, so it is this process that writes the stop records and exits.
+    let (stop_signal, stop_requests) = std::sync::mpsc::channel();
+    engine.set_stop_signal(stop_signal);
+    spawn_stop_listener(&log, stop_requests);
     let tier = engine.device_tier();
     for (id, revision, content_hash) in publish_specs {
         engine.publish_identifier(id, revision, content_hash);
@@ -263,16 +269,65 @@ fn log_directory(log: &SharedLog) -> Option<String> {
 
 /// What a console event does to the record: say which one stopped the engine,
 /// then write the log out. The handler then ends the process.
+fn record_interrupt(log: &SharedLog, event: gx_console_stop::ConsoleEvent) {
+    record_stop(log, event.reason());
+}
+
+/// Say why the engine is stopping, then write the log out.
 ///
 /// The log is taken first, and the stop is written only by whoever took it. A
-/// second event (Ctrl+C pressed twice, or a close during a Ctrl+C) arrives on
-/// its own thread: it waits here for the first to finish the log and then
-/// writes nothing, so a file has one `engine.stop`, and it is before `log.stop`.
-fn record_interrupt(log: &SharedLog, event: gx_console_stop::ConsoleEvent) {
+/// second event (Ctrl+C pressed twice, a close during a Ctrl+C, a stop request
+/// during either) arrives on its own thread: it waits here for the first to
+/// finish the log and then writes nothing, so a file has one `engine.stop`, and
+/// it is before `log.stop`.
+fn record_stop(log: &SharedLog, reason: &str) {
     let Ok(mut slot) = log.lock() else { return };
     let Some(guard) = slot.take() else { return };
-    tracing::info!(event = "engine.stop", reason = event.reason());
+    tracing::info!(event = "engine.stop", reason);
     let _ = guard.finish();
+}
+
+/// The reason a stop request writes (2.19).
+const STOP_REQUEST_REASON: &str = "a stop request on the control plane";
+
+/// How long the engine waits, after accepting a stop request, before it ends:
+/// the reply is written by the control transport after the engine hands it
+/// back, and the process must not end before the client has it. A reply that
+/// takes longer than this to leave (a stalled socket) is lost, and the client
+/// sees the connection close instead; the stop is on record either way.
+const STOP_REPLY_GRACE: Duration = Duration::from_millis(250);
+
+/// Wait for an accepted stop request (2.19), then stop in order: let the reply
+/// go out, write `engine.stop` under the request's correlation id, finish the
+/// log and end the process with code 0. Several requests end it once.
+fn spawn_stop_listener(log: &SharedLog, requests: Receiver<StopRequest>) {
+    let log = Arc::clone(log);
+    thread::spawn(move || {
+        if wait_and_record_stop(&log, &requests, STOP_REPLY_GRACE) {
+            std::process::exit(0);
+        }
+    });
+}
+
+/// Wait for a stop request, give its reply `grace` to leave, then write the stop
+/// under the request's correlation id. `true` when a stop was recorded, so the
+/// caller ends the process; `false` when the engine's side of the channel went
+/// away without a request, and nothing was written.
+fn wait_and_record_stop(
+    log: &SharedLog,
+    requests: &Receiver<StopRequest>,
+    grace: Duration,
+) -> bool {
+    let Ok(request) = requests.recv() else {
+        return false;
+    };
+    thread::sleep(grace);
+    let _correlation = request
+        .correlation
+        .as_deref()
+        .map(gx_telemetry::corr::enter);
+    record_stop(log, STOP_REQUEST_REASON);
+    true
 }
 
 /// Make a stop from the console orderly and on record. Without a handler a
@@ -558,6 +613,70 @@ mod tests {
             .map(|record| record["fields"]["reason"].as_str().unwrap_or("").to_owned())
             .collect();
         assert_eq!(stops, ["the first event"]);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    /// 2.19: an accepted stop request is recorded only after its reply has had
+    /// the grace to leave, under the correlation id it arrived with, and ends in
+    /// `log.stop`. A request channel that closes without a request writes nothing.
+    #[test]
+    fn a_stop_request_waits_for_its_reply_then_is_recorded_under_its_id() {
+        let directory = std::env::temp_dir().join(format!(
+            "gx-worker-stop-wait-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
+        ));
+        std::fs::create_dir_all(&directory).expect("a scratch folder is created");
+        let guard = gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new(
+            "engine", "worker", &directory,
+        ))
+        .expect("the sink starts");
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        let log: SharedLog = Arc::new(Mutex::new(Some(guard)));
+
+        // Nobody asked: the channel closes and nothing is written.
+        let (closed, never) = std::sync::mpsc::channel::<StopRequest>();
+        drop(closed);
+        assert!(!wait_and_record_stop(&log, &never, Duration::ZERO));
+        assert!(log.lock().expect("lock").is_some(), "the log is untouched");
+
+        let (send, requests) = std::sync::mpsc::channel();
+        send.send(StopRequest {
+            correlation: Some("stop-wait-9".to_owned()),
+        })
+        .expect("sent");
+        let grace = Duration::from_millis(300);
+        let started = Instant::now();
+        let recorded = tracing::subscriber::with_default(subscriber, || {
+            wait_and_record_stop(&log, &requests, grace)
+        });
+        assert!(recorded);
+        assert!(
+            started.elapsed() >= grace,
+            "the stop was written {:?} after the request, before the reply's grace of {grace:?}",
+            started.elapsed()
+        );
+
+        let file = std::fs::read_dir(directory.join("engine"))
+            .expect("the product folder exists")
+            .flatten()
+            .next()
+            .expect("one file was written")
+            .path();
+        let records: Vec<serde_json::Value> = std::fs::read_to_string(file)
+            .expect("the file reads")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("every line is JSON"))
+            .collect();
+        let events: Vec<&str> = records
+            .iter()
+            .map(|record| record["event"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(events, ["log.start", "engine.stop", "log.stop"]);
+        assert_eq!(records[1]["fields"]["reason"], STOP_REQUEST_REASON);
+        assert_eq!(records[1]["corr"], "stop-wait-9");
         let _ = std::fs::remove_dir_all(directory);
     }
 }

@@ -49,6 +49,10 @@ pub enum ClientRequest {
     /// Render a pinned revision at one of its frames to an image (11.41).
     /// Never touches Program, so it is not a Program-affecting request.
     Render(RenderRequest),
+    /// Ask the engine to stop in order (2.19): it replies `Stopping`, writes
+    /// `engine.stop`, finishes its log and exits 0. Refused by name while a
+    /// scene is on Program. Needs the `stop` scope.
+    Stop,
 }
 
 impl ClientRequest {
@@ -65,6 +69,7 @@ impl ClientRequest {
             Self::ConfigureOutput(_) => "configureOutput",
             Self::Performance => "performance",
             Self::Render(_) => "render",
+            Self::Stop => "stop",
         }
     }
 
@@ -85,6 +90,7 @@ impl ClientRequest {
             Self::Take(_) | Self::Phase(_) => Some(Scope::Take),
             Self::Clear(_) => Some(Scope::Clear),
             Self::ConfigureOutput(_) => Some(Scope::ConfigureOutput),
+            Self::Stop => Some(Scope::Stop),
         }
     }
 
@@ -130,6 +136,11 @@ pub enum EngineReply {
     Performance(PerformanceSummary),
     /// A headless render's image, named by content hash (11.41).
     Rendered(RenderedFrame),
+    /// The engine accepted a stop request and is ending in order (2.19). The
+    /// connection closes shortly after: the engine writes its stop records
+    /// first, so a client that sees this reply knows the stop is on record or
+    /// about to be.
+    Stopping,
     Refused(Refusal),
 }
 
@@ -215,7 +226,44 @@ mod tests {
                 live: false,
                 accept_free_run: false,
             }),
+            ClientRequest::Stop,
         ]
+    }
+
+    /// 2.19: a stop request needs the stop scope, and no other Playout scope
+    /// stands in for it, not even all the others together.
+    #[test]
+    fn a_stop_request_needs_the_stop_scope_and_no_other() {
+        use gx_contracts::auth::{Role, Scope};
+        let all_but_stop = [
+            Scope::Cue,
+            Scope::Take,
+            Scope::Clear,
+            Scope::ConfigureOutput,
+        ];
+        assert_eq!(ClientRequest::Stop.required_scope(), Some(Scope::Stop));
+        assert_eq!(ClientRequest::Stop.name(), "stop");
+        assert!(matches!(
+            ClientRequest::Stop.authorise(Role::Playout, &all_but_stop),
+            Err(Refusal::ScopeNotGranted {
+                required: Some(Scope::Stop),
+                role: Role::Playout,
+                ..
+            })
+        ));
+        assert_eq!(
+            ClientRequest::Stop.authorise(Role::Playout, &[Scope::Stop]),
+            Ok(())
+        );
+        // The wire name of the request and of its reply.
+        assert_eq!(
+            serde_json::to_string(&ClientRequest::Stop).unwrap(),
+            r#"{"request":"stop"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&EngineReply::Stopping).unwrap(),
+            r#"{"reply":"stopping"}"#
+        );
     }
 
     #[test]

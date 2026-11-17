@@ -272,6 +272,25 @@ fn log_refusal(
     );
 }
 
+/// 2.19: a stop request that passed the scope check and is handed to the engine.
+/// Written before the engine sees it, under the request's correlation id, so the
+/// engine's own `engine.stop` (which carries the same id) can be followed to who
+/// asked: the credential's subject and role, never the credential.
+fn log_stop_request(authentication: Option<&ConnectionAuthorization>) {
+    let (subject, role) = match authentication {
+        Some(ConnectionAuthorization::Authenticated(claims)) => (
+            Some(claims.subject.as_str()),
+            Some(format!("{:?}", claims.role)),
+        ),
+        _ => (None, None),
+    };
+    tracing::warn!(
+        event = "control.stop_requested",
+        subject,
+        role = role.as_deref(),
+    );
+}
+
 fn handle_connection<P: EnginePeer>(
     mut stream: ControlStream,
     peer: Arc<Mutex<P>>,
@@ -386,6 +405,9 @@ fn handle_connection<P: EnginePeer>(
                 (EngineReply::Refused(refusal), Vec::new())
             }
             request => {
+                if matches!(request, ClientRequest::Stop) {
+                    log_stop_request(authentication.as_ref());
+                }
                 // The engine is held only to validate and to drain events. A
                 // render's work runs after the lock is released, so Program's
                 // render loop is never queued behind it (invariant 14).

@@ -118,9 +118,36 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-17 — 2.19 done: a stop request on the control plane, protocol version 7 (Claude)
+
+**Resume here.** Next is **2.17** (one id from an Editor edit to the engine; the user wants it), then **2.14** (diagnostic
+bundle `gx-diag` plus the shell menu item), **2.15** (named operator login for Playout), **12.11** (as-run record).
+
+What was built. `Scope::Stop` (Playout credentials may carry it; no issuer gives it yet), `ClientRequest::Stop` (`stop`),
+`EngineReply::Stopping`, `Refusal::StopRefusedProgramOnAir`, `PROTOCOL_VERSION` 7. The engine refuses a stop by name while a
+scene is on Program (decided with Jev 0.74; Laya said build nothing, overruled by the user's request). Off air it tells its
+owner (`Engine::set_stop_signal`, a `StopRequest` with the correlation id); the worker waits 250 ms for the reply to leave
+(`wait_and_record_stop`), writes `engine.stop`, finishes the log and exits 0. The transport writes `control.stop_requested`
+(warn: subject, role) under the same id before the engine sees it. Mock engine, conformance (two new checks, the audit) and
+generated TypeScript follow. Real-engine test `services/render-engine/worker/tests/stop_request.rs`.
+
+Verified: unit tests in contracts, control plane, mock, engine (4) and worker (3); the real-engine test; 18/18 mutations
+(E7, the wait, survived at first because the reply usually wins the race; fixed by a testable `wait_and_record_stop`); gate (fmt, clippy -D warnings, npm run check) exit 0: 424 Editor tests, 973 Rust tests passed, 0 failed, 38 ignored, 60 Node tests, conformance 613 passed, 0 failed, 9 skipped.
+Jev slice review: must_fix 0.48, silent substitution 0.47 (reported unresolved), weakest point the 250 ms wait.
+
+**Process lessons.** (1) A background command's task status says exit 0 even when my own `GATE_EXIT` line says 101: read the
+log's `GATE_EXIT` before starting mutations. I started them on a failing gate once and had to stop, byte-compare and restore
+`message.rs`. (2) Run `cargo fmt --all` before writing a patch that matches source text: rustfmt had reflowed a function and my
+search text no longer matched. (3) A heredoc whose text holds triple quotes broke the shell twice: write patch scripts
+with the Write tool.
+
+Limits named: nobody holds the stop scope; no remote stop on air; the 250 ms wait; credential in the transport record; only the
+worker owns a process; a stop during another stop is a race for the exit code. Commit trailer is now
+`Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>` (the model changed mid-session).
+
 ## 2026-11-17 — 2.18 done: a console window close ends the engine in order; user decisions of 17 Nov (Claude)
 
-**Resume here.** Next is **2.19** (a stop request on the control plane; design consult drafted, not run:
+(Superseded by the 2.19 entry above.) Next was **2.19** (a stop request on the control plane; design consult drafted, not run:
 scratch `make_spec_219d.py`; it is a new request, a new scope and wire protocol version 7), then **2.17** (one id from an
 Editor edit to the engine), then 2.14, 2.15, 12.11.
 

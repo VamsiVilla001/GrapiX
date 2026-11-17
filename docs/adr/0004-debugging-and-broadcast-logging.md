@@ -222,6 +222,14 @@ A console window close now ends the engine in order too. The engine's console ha
 process. `engine.stop` names the exact event (Ctrl+C, Ctrl+Break, the window close, a logoff, a shutdown) instead of one
 reason for all. Logoff and shutdown were not run and may not be delivered. Evidence: `docs/evidence/2.18/README.md`.
 
+## As built, row 2.19 (17 November 2026)
+
+The control plane has a stop request (wire protocol version 7): `stop`, answered `stopping`. It needs its own scope, `stop`,
+which no Playout credential holds by being a Playout credential. The engine refuses it by name (`stopRefusedProgramOnAir`) while a
+scene is on Program, and otherwise stops in order: it tells its process owner, which waits 250 ms for the reply, writes
+`engine.stop` under the request's correlation id, finishes the log and exits 0. The transport records who asked
+(`control.stop_requested`: subject and role, never the credential) under the same id. Evidence: `docs/evidence/2.19/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

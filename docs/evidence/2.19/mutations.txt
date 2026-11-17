@@ -1,0 +1,42 @@
+E1 a stop request needs no scope: exit=101 failing=['message::tests::a_stop_request_needs_the_stop_scope_and_no_other'] restored_identical=True
+E1c the same, seen by the conformance suite: exit=1 failing=['a Playout credential without the stop scope cannot stop the engine'] restored_identical=True
+E2 a Playout credential cannot carry the stop scope: exit=101 failing=['auth::tests::only_a_playout_credential_may_carry_the_stop_scope'] restored_identical=True
+E3 an engine credential may carry the stop scope: exit=101 failing=['auth::tests::only_a_playout_credential_may_carry_the_stop_scope'] restored_identical=True
+E4 a stop request is accepted while a scene is on Program: exit=101 failing=['engine::tests::a_stop_request_while_a_scene_is_on_program_is_refused_by_name'] restored_identical=True
+E5 an accepted stop request is not passed to the process owner: exit=101 failing=['engine::tests::a_stop_request_off_air_is_accepted_and_passed_to_the_process_owner', 'engine::tests::a_stop_request_while_a_scene_is_on_program_is_refused_by_name', 'engine::tests::a_stop_request_whose_owner_is_gone_is_refused'] restored_identical=True
+E6 the stop request drops its correlation id: exit=101 failing=['engine::tests::a_stop_request_off_air_is_accepted_and_passed_to_the_process_owner'] restored_identical=True
+--- no failing check named; log tail:
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+warning: constant `STOP_REPLY_GRACE` is never used
+   --> services\render-engine\worker\src\main.rs:298:7
+    |
+298 | const STOP_REPLY_GRACE: Duration = Duration::from_millis(250);
+    |       ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `gx-render-worker` (bin "gx-render-worker") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.75s
+     Running tests\stop_request.rs (target\debug\deps\stop_request-358411a61d4a3ddc.exe)
+
+running 1 test
+test a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s
+
+---
+E7 the worker does not wait for the reply to leave: exit=0 failing=[] restored_identical=True
+E8 the stop is recorded under the wrong reason: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E9 the worker never listens for a stop request: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E10 a stop request ends the worker with code 1: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E11 the transport does not record who asked: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E12 the transport record leaves out the subject: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E13 the mock engine accepts a stop while a scene is on Program: exit=101 failing=['tests::a_stop_is_refused_on_air_and_accepted_off_air'] restored_identical=True
+E14 the new refusal has the name of another: exit=101 failing=['tests::every_refusal_code_name_is_its_wire_tag_and_unique'] restored_identical=True
+E15 the protocol version is not raised: exit=101 failing=['tests::the_tool_schema_is_versioned_with_the_protocol'] restored_identical=True
+E16 the list of every scope leaves out the stop scope: exit=101 failing=['mcp::tests::the_list_of_all_scopes_holds_every_scope'] restored_identical=True
+E7 the worker does not wait for the reply to leave: exit=101 failing=['tests::a_stop_request_waits_for_its_reply_then_is_recorded_under_its_id'] restored_identical=True
+E8 the stop is recorded under the wrong reason: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E9 the worker never listens for a stop request: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E10 a stop request ends the worker with code 1: exit=101 failing=['a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked'] restored_identical=True
+E17 the stop is written outside the request's correlation id: exit=101 failing=['tests::a_stop_request_waits_for_its_reply_then_is_recorded_under_its_id'] restored_identical=True

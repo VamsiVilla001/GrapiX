@@ -61,6 +61,9 @@ pub struct MockEngine {
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     events: Vec<EngineEvent>,
+    /// A stop request was accepted (2.19). The mock has no process to end, so
+    /// this is what a test reads to see the request was taken.
+    stopping: bool,
 }
 
 impl MockEngine {
@@ -87,6 +90,7 @@ impl MockEngine {
             package_directory: None,
             rendered: Arc::new(Mutex::new(RenderedImages::with_capacity(64))),
             program: None,
+            stopping: false,
             cued: None,
             events: Vec::new(),
         }
@@ -558,6 +562,18 @@ impl EnginePeer for MockEngine {
             }
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
+            // 2.19: the same answers as the real engine gives, so a client is
+            // tested against the rule and not against a mock that always agrees.
+            ClientRequest::Stop => match &self.program {
+                Some(program) => EngineReply::Refused(Refusal::StopRefusedProgramOnAir {
+                    take_id: program.take_id.clone(),
+                    revision: program.revision,
+                }),
+                None => {
+                    self.stopping = true;
+                    EngineReply::Stopping
+                }
+            },
             ClientRequest::Performance => {
                 EngineReply::Performance(gx_control_plane::status::PerformanceSummary {
                     rate: self.reference.effective_timebase(),
@@ -661,6 +677,32 @@ mod tests {
             e.status().unwrap().program.is_none(),
             "neither refused take reached Program"
         );
+    }
+
+    /// 2.19: the mock answers a stop request as the real engine does: refused by
+    /// name while a scene is on Program, accepted after it is cleared.
+    #[test]
+    fn a_stop_is_refused_on_air_and_accepted_off_air() {
+        let mut e = MockEngine::new().genlocked(RationalRate::P29_97);
+        e.publish(TakeId("t".into()), Revision(1), ContentHash("a".repeat(64)));
+        let _ = e.handle(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("t".into()),
+            revision: Revision(1),
+            content_hash: Some(ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        }));
+        assert!(e.status().unwrap().program.is_some());
+        assert!(matches!(
+            e.handle(ClientRequest::Stop),
+            EngineReply::Refused(Refusal::StopRefusedProgramOnAir { take_id, revision })
+                if take_id == TakeId("t".into()) && revision == Revision(1)
+        ));
+        assert!(!e.stopping, "a refused stop stops nothing");
+        let _ = e.handle(ClientRequest::Clear(ClearRequest {
+            at: TakeAt::NextOpportunity,
+        }));
+        assert_eq!(e.handle(ClientRequest::Stop), EngineReply::Stopping);
+        assert!(e.stopping);
     }
 
     #[test]

@@ -38,6 +38,10 @@ pub mod validate;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Wire protocol version 7 (2.19) added the `stop` request, its `stopping`
+/// reply, the `stop` scope and the `stopRefusedProgramOnAir` refusal: a client
+/// holding that scope asks the engine to stop in order, and the engine refuses
+/// while a scene is on Program.
 /// Wire protocol version 6 (8.12): a write to a stored scene names the
 /// revision it read (`ifRevision`), a stored write answers with the new one,
 /// and every Editor MCP write takes an `idempotencyKey`. The MCP tool schema
@@ -46,7 +50,7 @@ use ts_rs::TS;
 /// reply, and Program frames the render loop missed in the performance report.
 /// Version 4 (11.38) pinned cue and take to a content hash. A mismatch is an
 /// error code, never a negotiation.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Stable identity of a published scene. Survives every republish.
 #[derive(
@@ -700,6 +704,10 @@ pub enum Refusal {
         required: Option<auth::Scope>,
         role: auth::Role,
     },
+    /// A stop request arrived while a scene is on Program (2.19). Stopping the
+    /// engine would take Program off air, so it is refused by name: clear
+    /// Program first, or stop the engine at its console.
+    StopRefusedProgramOnAir { take_id: TakeId, revision: Revision },
     /// A rundown cursor names a position the rundown does not have.
     RundownCursorOutOfRange { cursor: usize, len: usize },
     /// A rundown entry id that the loaded rundown does not contain.
@@ -1382,6 +1390,11 @@ impl std::fmt::Display for Refusal {
             Refusal::MediaTransportUnavailable { detail } => {
                 write!(f, "media transport unavailable: {detail}")
             }
+            Refusal::StopRefusedProgramOnAir { take_id, revision } => write!(
+                f,
+                "the engine will not stop while {} revision {} is on Program: clear Program first",
+                take_id.0, revision.0
+            ),
             Refusal::ScopeNotGranted {
                 request,
                 required,
@@ -2186,6 +2199,10 @@ impl Refusal {
                 locality: Locality::Lan,
                 offered: vec![MediaCodec::Jpeg],
             },
+            Self::StopRefusedProgramOnAir {
+                take_id: TakeId("audit".into()),
+                revision: Revision(1),
+            },
             Self::ScopeNotGranted {
                 request: "take".into(),
                 required: Some(auth::Scope::Take),
@@ -2526,6 +2543,7 @@ impl Refusal {
             Self::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
             Self::MediaCodecNotOffered { .. } => "mediaCodecNotOffered",
             Self::ScopeNotGranted { .. } => "scopeNotGranted",
+            Self::StopRefusedProgramOnAir { .. } => "stopRefusedProgramOnAir",
             Self::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
             Self::RundownEntryUnknown { .. } => "rundownEntryUnknown",
             Self::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",

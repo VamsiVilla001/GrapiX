@@ -1,0 +1,277 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 42582,
+    "output_tokens": 0,
+    "state_tokens": 4667,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.19: a stop request on the control plane (new scope, request, reply, refusal; protocol version 7)",
+    "done_when": "A client holding the authority to do so asks the engine to stop: the engine\nreplies, writes `engine.stop` naming the request, its correlation id and the\ncredential, finishes its log and exits 0; a client without that authority is\nrefused by name; what happens while a scene is on Program is decided and tested.\nA new request is a new wire protocol version.",
+    "evidence": "# 2.19 \u2014 a stop request on the control plane (17 Nov 2026)\n\nRow 2.16 left two named gaps: a console window close (closed by 2.18) and no way\nto ask the engine to stop in order from another machine. The engine host\ndeliberately never stops an engine, so the only remote stop was a kill, which\nleaves no stop record. The user asked for the gap to be closed (17 Nov 2026).\n\n## Done-when\n\n> A client holding the authority to do so asks the engine to stop: the engine\n> replies, writes `engine.stop` naming the request, its correlation id and the\n> credential, finishes its log and exits 0; a client without that authority is\n> refused by name; what happens while a scene is on Program is decided and tested.\n> A new request is a new wire protocol version.\n\n## What was built\n\n- **Contracts.** `Scope::Stop` (a Playout credential may carry it; an Editor or\n  engine credential never can). `ClientRequest::Stop` (wire name `stop`, needs\n  `Scope::Stop` and no other). `EngineReply::Stopping`.\n  `Refusal::StopRefusedProgramOnAir { take_id, revision }` (`stopRefusedProgramOnAir`).\n  **`PROTOCOL_VERSION` 6 to 7.** Generated TypeScript regenerated.\n- **The rule (decided with Jev and Laya, below).** The engine refuses a stop by\n  name while a scene is on Program, naming the scene: clear Program first, or stop\n  the engine at its console. With nothing on Program it replies `Stopping`.\n- **Who is told.** The engine does not end its own process. `Engine::set_stop_signal`\n  names an owner (the render worker binary), which gets one `StopRequest` carrying\n  the correlation id the request arrived under. An engine with no owner refuses the\n  request by name (`NotImplemented`) instead of claiming to stop; an owner that is\n  gone gives `TransportFailed`.\n- **The stop (worker).** A listener thread waits for the request, waits 250 ms for\n  the reply to leave (`STOP_REPLY_GRACE`), writes `engine.stop` (info, reason \"a\n  stop request on the control plane\") under the request's correlation id, finishes\n  the log (`log.stop`) and exits 0. Several requests, or a request during Ctrl+C,\n  write one `engine.stop`: the log is taken first (2.18).\n- **Who asked (transport).** Before the engine sees a stop that passed the scope\n  check, the transport writes `control.stop_requested` (warn) with the credential's\n  subject and role, under the same correlation id. Never the credential.\n  `engine.stop` carries the same id, so the two records are followed together; the\n  credential is named by the transport's record, not duplicated into the engine's.\n- **Mock engine** answers the same way (refused on air, `Stopping` off air), so a\n  client is tested against the rule and not a mock that always agrees.\n- **Conformance.** `every_request` now includes `Stop`; the full-credential check\n  holds the new scope; new checks: a credential holding every Program scope but\n  `stop` is refused by name and the engine never sees it; a stop is refused by name\n  while a scene is on Program and accepted once it is cleared. The refusal audit\n  drives the new refusal.\n\nNo download.\n\n## What was run\n\n- Unit tests: contracts (the scope's role rule, the list of all scopes holding every\n  scope), control plane (the request needs the stop scope and no other; wire names),\n  mock engine, worker engine (4: accepted off air and passed on once with its id;\n  refused on air by name and the owner not told; refused with nobody to stop it;\n  refused with the owner gone), worker binary (the stop waits its grace, is written\n  under the request's id, and ends in `log.stop`; a closed channel writes nothing).\n- **A real engine process, a real control connection** (`tests/stop_request.rs`):\n  a credential without the stop scope is refused by name and the engine keeps\n  running and answering; a credential with it, in a correlation scope, gets\n  `Stopping`; the engine then exits 0 with `engine.stop` (info, the reason, the id),\n  `log.stop` last, exactly one `engine.stop`; the transport's `control.stop_requested`\n  names the subject and role under the same id; the refused attempt is on record;\n  neither the secret nor any `gx1.` credential is in the log.\n- Gate (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`) exit 0:\n  424 Editor tests, 973 Rust tests passed, 0 failed, 38 ignored, 60 Node tests,\n  conformance 613 passed, 0 failed, 9 skipped.\n\n## Mutations\n\n[Condensed: 18 mutations, each made at least one named check fail and was restored byte-identical: E1 a stop request needs no scope; E1c the same, seen by conformance; E2 a Playout credential cannot carry the stop scope; E3 an engine credential may carry it; E4 a stop is accepted while a scene is on Program; E5 an accepted stop is not passed to the owner; E6 the stop drops its correlation id; E7 the worker does not wait for the reply to leave; E8 the stop is recorded under the wrong reason; E9 the worker never listens for a stop; E10 a stop ends the worker with code 1; E11 the transport does not record who asked; E12 the transport record leaves out the subject; E13 the mock accepts a stop on air; E14 the new refusal has another's name; E15 the protocol version is not raised; E16 the list of every scope leaves out `stop`; E17 the stop is written outside the request's id. E7 survived once and led to making the wait a unit-tested function.]\n\n## Limits and readings\n\n1. **Nobody holds the stop scope yet.** No shell, tool or token issuer gives a\n   credential `Scope::Stop`; the request works through the protocol and is tested\n   with credentials minted for the test. Giving an operator that credential, and a\n   Playout button or MCP tool that sends it, are separate rows.\n2. **The engine will not stop on air.** The only way to stop an engine with a scene\n   on Program remains its console (Ctrl+C or a window close, 2.16, 2.18) or a kill.\n   An \"even while on air\" form was offered (Jev preferred refusing) and not built.\n3. **The reply and the stop are not tied together.** The engine waits 250 ms before\n   it ends. A reply that takes longer to leave (a stalled socket) is lost and the\n   client sees the connection close; the stop is on record either way. The wait\n   is tested; that 250 ms always suffices is not.\n4. **The credential is named by the transport's record, not the engine's.**\n5. **Only the render worker binary owns a process to stop.** The engine host, the\n   MCP servers and the shells have no stop request; a library `Engine` with no owner\n   refuses the request by name.\n6. **A stop that arrives while the engine is already ending** (Ctrl+C, a fatal exit)\n   waits for the log and then exits 0 from the handler thread; which exit code wins is\n   a race. The log is whole either way.\n7. **No wire change is compatible**: version 7 refuses a version-6 peer, as every\n   protocol bump does (a mismatch is an error code, never a negotiation).\n",
+    "code": "--- services/render-engine/worker/src/engine.rs (changed)\ndiff --git a/services/render-engine/worker/src/engine.rs b/services/render-engine/worker/src/engine.rs\nindex bb50941..c53f93d 100644\n--- a/services/render-engine/worker/src/engine.rs\n+++ b/services/render-engine/worker/src/engine.rs\n@@ -110,0 +111,4 @@ pub struct Engine {\n+    /// Where an accepted stop request goes (2.19): the process that owns the\n+    /// engine's log and exit. `None` when nothing is listening, and the engine\n+    /// then refuses a stop request by name instead of saying it is stopping.\n+    stop_signal: Option<std::sync::mpsc::Sender<StopRequest>>,\n@@ -192,0 +197 @@ impl Engine {\n+            stop_signal: None,\n@@ -221,0 +227,7 @@ impl Engine {\n+    /// Name who hears an accepted stop request (2.19). The engine does not end\n+    /// its own process: it tells whoever owns the log and the exit, which writes\n+    /// the stop records and ends the process once the reply has gone out.\n+    pub fn set_stop_signal(&mut self, signal: std::sync::mpsc::Sender<StopRequest>) {\n+        self.stop_signal = Some(signal);\n+    }\n+\n@@ -1113,0 +1126,27 @@ impl AssetPublishPeer for Engine {\n+impl Engine {\n+    /// A stop request (2.19): refused by name while a scene is on Program,\n+    /// otherwise passed to whoever owns the process, and answered `Stopping`.\n+    fn stop_requested(&mut self) -> EngineReply {\n+        if let Some(program) = &self.program {\n+            return EngineReply::Refused(Refusal::StopRefusedProgramOnAir {\n+                take_id: program.take_id.clone(),\n+                revision: program.revision,\n+            });\n+        }\n+        let Some(signal) = &self.stop_signal else {\n+            return EngineReply::Refused(Refusal::NotImplemented {\n+                what: \"this engine has no process owner to stop it: it was not started by the render worker binary\".to_string(),\n+            });\n+        };\n+        let request = StopRequest {\n+            correlation: gx_telemetry::corr::current(),\n+        };\n+        match signal.send(request) {\n+            Ok(()) => EngineReply::Stopping,\n+            Err(_) => EngineReply::Refused(Refusal::TransportFailed {\n+                detail: \"the engine's process owner is gone and cannot stop it\".to_string(),\n+            }),\n+        }\n+    }\n+}\n+\n@@ -1351,0 +1391 @@ impl Engine {\n+            ClientRequest::Stop => self.stop_requested(),\n@@ -1369,0 +1410,8 @@ impl Engine {\n+/// An accepted stop request (2.19), as the process owner receives it.\n+#[derive(Debug, Clone, PartialEq, Eq)]\n+pub struct StopRequest {\n+    /// The correlation id the request arrived under, so the engine's own sto\n--- Shared/control-transport/src/server.rs (changed)\ndiff --git a/Shared/control-transport/src/server.rs b/Shared/control-transport/src/server.rs\nindex ca924e3..5e03abc 100644\n--- a/Shared/control-transport/src/server.rs\n+++ b/Shared/control-transport/src/server.rs\n@@ -274,0 +275,19 @@ fn log_refusal(\n+/// 2.19: a stop request that passed the scope check and is handed to the engine.\n+/// Written before the engine sees it, under the request's correlation id, so the\n+/// engine's own `engine.stop` (which carries the same id) can be followed to who\n+/// asked: the credential's subject and role, never the credential.\n+fn log_stop_request(authentication: Option<&ConnectionAuthorization>) {\n+    let (subject, role) = match authentication {\n+        Some(ConnectionAuthorization::Authenticated(claims)) => (\n+            Some(claims.subject.as_str()),\n+            Some(format!(\"{:?}\", claims.role)),\n+        ),\n+        _ => (None, None),\n+    };\n+    tracing::warn!(\n+        event = \"control.stop_requested\",\n+        subject,\n+        role = role.as_deref(),\n+    );\n+}\n+\n@@ -388,0 +408,3 @@ fn handle_connection<P: EnginePeer>(\n+                if matches!(request, ClientRequest::Stop) {\n+                    log_stop_request(authentication.as_ref());\n+                }\n\n--- Shared/control-plane/src/message.rs (changed)\ndiff --git a/Shared/control-plane/src/message.rs b/Shared/control-plane/src/message.rs\nindex d72f679..3f4360b 100644\n--- a/Shared/control-plane/src/message.rs\n+++ b/Shared/control-plane/src/message.rs\n@@ -51,0 +52,4 @@ pub enum ClientRequest {\n+    /// Ask the engine to stop in order (2.19): it replies `Stopping`, writes\n+    /// `engine.stop`, finishes its log and exits 0. Refused by name while a\n+    /// scene is on Program. Needs the `stop` scope.\n+    Stop,\n@@ -67,0 +72 @@ impl ClientRequest {\n+            Self::Stop => \"stop\",\n@@ -87,0 +93 @@ impl ClientRequest {\n+            Self::Stop => Some(Scope::Stop),\n@@ -132,0 +139,5 @@ pub enum EngineReply {\n+    /// The engine accepted a stop request and is ending in order (2.19). The\n+    /// connection closes shortly after: the engine writes its stop records\n+    /// first, so a client that sees this reply knows the stop is on record or\n+    /// about to be.\n+    Stopping,\n@@ -217,0 +229 @@ mod tests {\n+            ClientRequest::Stop,\n@@ -220,0 +233,36 @@ mod tests {\n+    /// 2.19: a stop request needs the stop scope, and no other Playout scope\n+    /// stands in for it, not even all the others together.\n+    #[test]\n+    fn a_sto\n--- worker main.rs (excerpt)\n/// The reason a stop request writes (2.19).\nconst STOP_REQUEST_REASON: &str = \"a stop request on the control plane\";\n\n/// How long the engine waits, after accepting a stop request, before it ends:\n/// the reply is written by the control transport after the engine hands it\n/// back, and the process must not end before the client has it. A reply that\n/// takes longer than this to leave (a stalled socket) is lost, and the client\n/// sees the connection close instead; the stop is on record either way.\nconst STOP_REPLY_GRACE: Duration = Duration::from_millis(250);\n\n/// Wait for an accepted stop request (2.19), then stop in order: let the reply\n/// go out, write `engine.stop` under the request's correlation id, finish the\n/// log and end the process with code 0. Several requests end it once.\nfn spawn_stop_listener(log: &SharedLog, requests: Receiver<StopRequest>) {\n    let log = Arc::clone(log);\n    thread::spawn(move || {\n        if wait_and_record_stop(&log, &requests, STOP_REPLY_GRACE) {\n            std::process::exit(0);\n        }\n    });\n}\n\n/// Wait for a stop request, give its reply `grace` to leave, then write the stop\n/// under the request's correlation id. `true` when a stop was recorded, so the\n/// caller ends the process; `false` when the engine's side of the channel went\n/// away without a request, and nothing was written.\nfn wait_and_record_stop(\n    log: &SharedLog,\n    requests: &Receiver<StopRequest>,\n    grace: Duration,\n) -> bool {\n    let Ok(request) = requests.recv() else {\n        return false;\n    };\n    thread::sleep(grace);\n    let _correlation = request\n        .correlation\n        .as_deref()\n        .map(gx_telemetry::corr::enter);\n    record_stop(log, STOP_REQUEST_REASON);\n    true\n}\n\n"
+  },
+  "questions": {
+    "refused_by_name_without_scope": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from a real engine and real transport, that a client without the stop authority is refused by name and the engine keeps running?",
+      "criteria": {
+        "true": "Yes, executed.",
+        "false": "No, claimed or only unit-tested."
+      }
+    },
+    "stops_in_order_on_record": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from a real engine process, that a stop request is answered, then the engine writes engine.stop with the request and its correlation id, finishes its log and exits 0?",
+      "criteria": {
+        "true": "Yes, executed on the real engine.",
+        "false": "No."
+      }
+    },
+    "on_air_decided_and_tested": {
+      "type": "noul",
+      "instructions": "Is what happens while a scene is on Program decided and tested, at the engine, the mock and through the real transport?",
+      "criteria": {
+        "true": "Yes at each.",
+        "false": "No, at least one level is not shown."
+      }
+    },
+    "credential_named": {
+      "type": "noul",
+      "instructions": "The done-when says engine.stop names the request, its correlation id and the credential. The credential is named by the transport record (control.stop_requested) under the same id, not in engine.stop itself (limit 4). Is that an acceptable, openly named reading?",
+      "criteria": {
+        "true": "Yes, acceptable and named.",
+        "false": "No, engine.stop itself must carry it."
+      }
+    },
+    "stop_can_be_lost": {
+      "type": "noul",
+      "instructions": "Can a stop request take Program off air, or leave the engine half stopped, in a way the evidence does not name?",
+      "criteria": {
+        "true": "Yes, an unnamed case exists.",
+        "false": "No, or every case is named."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, including the one that survived at first and what was done about it?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "nobody_holds_scope": "No credential issuer gives the stop scope, so no operator can use it yet.",
+        "on_air_cannot_stop": "An engine with a scene on Program cannot be stopped remotely.",
+        "grace_250ms": "The 250 ms wait does not guarantee the reply leaves.",
+        "credential_in_transport_record": "The credential is in the transport record, not engine.stop.",
+        "only_worker_owns_process": "Only the render worker binary can be stopped this way."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "refused_by_name_without_scope",
+      "jev": 0.97,
+      "laya": 0.9909,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9909,
+        "confidence": 0.9909,
+        "answer_confidence": 0.9909,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stops_in_order_on_record",
+      "jev": 0.97,
+      "laya": 0.9907,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9907,
+        "confidence": 0.9907,
+        "answer_confidence": 0.9907,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "on_air_decided_and_tested",
+      "jev": 0.85,
+      "laya": 0.982,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.85
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.982,
+        "confidence": 0.982,
+        "answer_confidence": 0.982,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "credential_named",
+      "jev": 0.86,
+      "laya": 0.9874,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.86
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9874,
+        "confidence": 0.9874,
+        "answer_confidence": 0.9874,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stop_can_be_lost",
+      "jev": 0.36,
+      "laya": 0.9826,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.36
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9826,
+        "confidence": 0.9826,
+        "answer_confidence": 0.9826,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.47,
+      "laya": 0.9833,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.47
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9833,
+        "confidence": 0.9833,
+        "answer_confidence": 0.9833,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.96,
+      "laya": 0.9815,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9815,
+        "confidence": 0.9815,
+        "answer_confidence": 0.9815,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "grace_250ms",
+      "laya": "none",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "grace_250ms",
+        "confidence": 0.98,
+        "probabilities": {
+          "none": 0,
+          "nobody_holds_scope": 0.02,
+          "on_air_cannot_stop": 0,
+          "grace_250ms": 0.98,
+          "credential_in_transport_record": 0,
+          "only_worker_owns_process": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "none",
+        "probabilities": {
+          "none": 0.2399,
+          "nobody_holds_scope": 0.1503,
+          "on_air_cannot_stop": 0.1346,
+          "grace_250ms": 0.1586,
+          "credential_in_transport_record": 0.1348,
+          "only_worker_owns_process": 0.1817
+        },
+        "confidence": 0.0125,
+        "answer_confidence": 0.2399,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.48,
+      "laya": 0.9474,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.48
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9474,
+        "confidence": 0.9474,
+        "answer_confidence": 0.9474,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -414,6 +414,7 @@ pub const ALL_SCOPES: &[Scope] = &[
     Scope::Take,
     Scope::Clear,
     Scope::ConfigureOutput,
+    Scope::Stop,
     Scope::Report,
 ];
 
@@ -693,6 +694,31 @@ mod tests {
                 "{forbidden} must be unreachable with an author scope"
             );
         }
+    }
+
+    /// 2.19: the list of every scope holds every scope. The match is exhaustive,
+    /// so a scope added without being counted here does not compile, and one
+    /// left out of the list fails the assertion: the capability surface, the
+    /// generated TypeScript and the exhaustive scope test all read this list.
+    #[test]
+    fn the_list_of_all_scopes_holds_every_scope() {
+        fn index(scope: Scope) -> usize {
+            match scope {
+                Scope::Author => 0,
+                Scope::Cue => 1,
+                Scope::Take => 2,
+                Scope::Clear => 3,
+                Scope::ConfigureOutput => 4,
+                Scope::Stop => 5,
+                Scope::Report => 6,
+            }
+        }
+        let mut seen = [false; 7];
+        for scope in ALL_SCOPES {
+            seen[index(*scope)] = true;
+        }
+        assert!(seen.iter().all(|present| *present), "{seen:?}");
+        assert_eq!(ALL_SCOPES.len(), 7);
     }
 
     #[test]

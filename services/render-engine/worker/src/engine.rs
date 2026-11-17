@@ -108,6 +108,10 @@ pub struct Engine {
     /// The directory a co-located publisher may hand packages from by local
     /// path (5.8). `None` reads no path.
     package_directory: Option<PathBuf>,
+    /// Where an accepted stop request goes (2.19): the process that owns the
+    /// engine's log and exit. `None` when nothing is listening, and the engine
+    /// then refuses a stop request by name instead of saying it is stopping.
+    stop_signal: Option<std::sync::mpsc::Sender<StopRequest>>,
     /// The engine's own store of verified asset bytes beside its recovery
     /// journal (5.11). The asset plane writes every asset there before this
     /// engine is handed it. `None` until a journal is attached.
@@ -190,6 +194,7 @@ impl Engine {
             assets: HashSet::new(),
             asset_bytes: HashMap::new(),
             package_directory: None,
+            stop_signal: None,
             asset_store: None,
             dropped: BTreeMap::new(),
             revision_floors: BTreeMap::new(),
@@ -217,6 +222,13 @@ impl Engine {
     /// does not resolve inside it.
     pub fn set_package_directory(&mut self, directory: PathBuf) {
         self.package_directory = Some(directory);
+    }
+
+    /// Name who hears an accepted stop request (2.19). The engine does not end
+    /// its own process: it tells whoever owns the log and the exit, which writes
+    /// the stop records and ends the process once the reply has gone out.
+    pub fn set_stop_signal(&mut self, signal: std::sync::mpsc::Sender<StopRequest>) {
+        self.stop_signal = Some(signal);
     }
 
     /// The negotiated device tier. Read by the host to report health.
@@ -1111,6 +1123,33 @@ impl AssetPublishPeer for Engine {
             .get(hash)
     }
 }
+impl Engine {
+    /// A stop request (2.19): refused by name while a scene is on Program,
+    /// otherwise passed to whoever owns the process, and answered `Stopping`.
+    fn stop_requested(&mut self) -> EngineReply {
+        if let Some(program) = &self.program {
+            return EngineReply::Refused(Refusal::StopRefusedProgramOnAir {
+                take_id: program.take_id.clone(),
+                revision: program.revision,
+            });
+        }
+        let Some(signal) = &self.stop_signal else {
+            return EngineReply::Refused(Refusal::NotImplemented {
+                what: "this engine has no process owner to stop it: it was not started by the render worker binary".to_string(),
+            });
+        };
+        let request = StopRequest {
+            correlation: gx_telemetry::corr::current(),
+        };
+        match signal.send(request) {
+            Ok(()) => EngineReply::Stopping,
+            Err(_) => EngineReply::Refused(Refusal::TransportFailed {
+                detail: "the engine's process owner is gone and cannot stop it".to_string(),
+            }),
+        }
+    }
+}
+
 impl EnginePeer for Engine {
     fn capability(&self) -> EngineCapability {
         EngineCapability {
@@ -1349,6 +1388,7 @@ impl Engine {
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
             ClientRequest::Performance => EngineReply::Performance(self.performance_summary()),
+            ClientRequest::Stop => self.stop_requested(),
             // In-process callers render in place; the control transport goes
             // through `handle_detached` and renders outside the lock.
             ClientRequest::Render(req) => self.handle_detached(ClientRequest::Render(req)).finish(),
@@ -1365,6 +1405,14 @@ impl Engine {
         }
         reply
     }
+}
+
+/// An accepted stop request (2.19), as the process owner receives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopRequest {
+    /// The correlation id the request arrived under, so the engine's own stop
+    /// record can be followed back to the request and the connection that sent it.
+    pub correlation: Option<String>,
 }
 
 /// How the GPU readback ring delivered Program (3.21), for the frame-timing
@@ -1995,6 +2043,81 @@ mod tests {
             EngineReply::Taken(c) => assert!(c.frame > 500),
             other => panic!("expected Taken, got {other:?}"),
         }
+    }
+
+    // --- 2.19: a stop request ----------------------------------------------------
+
+    /// Off air, with someone to hear it, a stop request is answered `Stopping`
+    /// and the owner is told once, with the correlation id it arrived under.
+    #[test]
+    fn a_stop_request_off_air_is_accepted_and_passed_to_the_process_owner() {
+        let mut e = engine();
+        let (signal, heard) = std::sync::mpsc::channel();
+        e.set_stop_signal(signal);
+        let reply = {
+            let _correlation = gx_telemetry::corr::enter("stop-test-7");
+            e.handle(ClientRequest::Stop)
+        };
+        assert_eq!(reply, EngineReply::Stopping);
+        assert_eq!(
+            heard.try_recv().expect("the owner was told"),
+            StopRequest {
+                correlation: Some("stop-test-7".to_owned())
+            }
+        );
+        assert!(heard.try_recv().is_err(), "told once");
+    }
+
+    /// While a scene is on Program a stop request is refused by name, names the
+    /// scene, and the owner is not told: Program stays on air.
+    #[test]
+    fn a_stop_request_while_a_scene_is_on_program_is_refused_by_name() {
+        let mut e = engine();
+        let (signal, heard) = std::sync::mpsc::channel();
+        e.set_stop_signal(signal);
+        let (take_id, revision) = published(&mut e);
+        let _ = e.handle(ClientRequest::Take(TakeRequest {
+            take_id: take_id.clone(),
+            revision,
+            content_hash: Some(pin()),
+            at: TakeAt::NextOpportunity,
+        }));
+        assert!(e.status().unwrap().program.is_some());
+        assert_eq!(
+            e.handle(ClientRequest::Stop),
+            EngineReply::Refused(Refusal::StopRefusedProgramOnAir { take_id, revision })
+        );
+        assert!(heard.try_recv().is_err(), "a refused stop tells nobody");
+        // After Program is cleared it is accepted.
+        let _ = e.handle(ClientRequest::Clear(ClearRequest {
+            at: TakeAt::NextOpportunity,
+        }));
+        assert!(e.status().unwrap().program.is_none());
+        assert_eq!(e.handle(ClientRequest::Stop), EngineReply::Stopping);
+        assert!(heard.try_recv().is_ok());
+    }
+
+    /// An engine nobody owns (a library user's) does not claim to be stopping.
+    #[test]
+    fn a_stop_request_with_nobody_to_stop_the_engine_is_refused() {
+        let mut e = engine();
+        assert!(matches!(
+            e.handle(ClientRequest::Stop),
+            EngineReply::Refused(Refusal::NotImplemented { .. })
+        ));
+    }
+
+    /// An owner that is gone cannot stop the engine, and the client is told so.
+    #[test]
+    fn a_stop_request_whose_owner_is_gone_is_refused() {
+        let mut e = engine();
+        let (signal, heard) = std::sync::mpsc::channel();
+        e.set_stop_signal(signal);
+        drop(heard);
+        assert!(matches!(
+            e.handle(ClientRequest::Stop),
+            EngineReply::Refused(Refusal::TransportFailed { .. })
+        ));
     }
 
     #[test]
