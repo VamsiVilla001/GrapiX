@@ -1,0 +1,172 @@
+{
+  "checks": [
+    {
+      "name": "Editor: the window's Help menu holds both export items, and the module item was chosen",
+      "ok": true,
+      "detail": "menu: Help > Export diagnostic bundle (all modules) | Help > Export diagnostic bundle (editor only)\r\nchoosing 'Help > Export diagnostic bundle (editor only)' (id 1001)"
+    },
+    {
+      "name": "Editor: the module bundle holds this shell's log and its summary, and nothing of the engine's",
+      "ok": true,
+      "detail": "modules/editor/logs/shell-20261117T132829Z-2100164-1.jsonl, versions.json, capability.json, environment.json, modules/editor/summary.json, manifest.json"
+    },
+    {
+      "name": "Editor: its summary names the run and says the module wrote in the window",
+      "ok": true,
+      "detail": "{\"module\":\"editor\",\"runs\":1,\"requested\":[\"editor\"]}"
+    },
+    {
+      "name": "Editor: the bundle's SHA-256 of gx-editor.exe is the file's own",
+      "ok": true,
+      "detail": "698f897afb7b0c777181ad9282c4c1bfc98e45e437f1d3b5110844b431fd6c24 against 698f897afb7b0c777181ad9282c4c1bfc98e45e437f1d3b5110844b431fd6c24"
+    },
+    {
+      "name": "Editor: the all-modules item was chosen",
+      "ok": true,
+      "detail": "menu: Help > Export diagnostic bundle (all modules)\r\nchoosing 'Help > Export diagnostic bundle (all modules)' (id 1000)"
+    },
+    {
+      "name": "Editor: the all-modules bundle holds this shell's module and the engine's, with the engine's device",
+      "ok": true,
+      "detail": "modules/editor/summary.json, modules/engine/summary.json; tier T0"
+    },
+    {
+      "name": "Editor: neither bundle holds a credential, and the collector replaced none",
+      "ok": true,
+      "detail": " "
+    },
+    {
+      "name": "Editor: both exports are on its own record, each under a diag- id, naming the modules",
+      "ok": true,
+      "detail": "[{\"corr\":\"diag-200bc48b4fc74c-1\",\"modules\":\"editor\",\"files\":5},{\"corr\":\"diag-200bc48b4fc74c-2\",\"modules\":\"editor,engine\",\"files\":9}]"
+    },
+    {
+      "name": "Editor: it closed gracefully and finished its log",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "Playout: the window's Help menu holds both export items, and the module item was chosen",
+      "ok": true,
+      "detail": "menu: Help > Export diagnostic bundle (all modules) | Help > Export diagnostic bundle (playout only)\r\nchoosing 'Help > Export diagnostic bundle (playout only)' (id 1001)"
+    },
+    {
+      "name": "Playout: the module bundle holds this shell's log and its summary, and nothing of the engine's",
+      "ok": true,
+      "detail": "modules/playout/logs/shell-20261117T132924Z-2082472-1.jsonl, versions.json, capability.json, environment.json, modules/playout/summary.json, manifest.json"
+    },
+    {
+      "name": "Playout: its summary names the run and says the module wrote in the window",
+      "ok": true,
+      "detail": "{\"module\":\"playout\",\"runs\":1,\"requested\":[\"playout\"]}"
+    },
+    {
+      "name": "Playout: the bundle's SHA-256 of gx-playout.exe is the file's own",
+      "ok": true,
+      "detail": "bb2c4978f606af86e4f46a32697f2f8641a0bb30abadc275386b8fa6e4bb5f27 against bb2c4978f606af86e4f46a32697f2f8641a0bb30abadc275386b8fa6e4bb5f27"
+    },
+    {
+      "name": "Playout: the all-modules item was chosen",
+      "ok": true,
+      "detail": "menu: Help > Export diagnostic bundle (all modules)\r\nchoosing 'Help > Export diagnostic bundle (all modules)' (id 1000)"
+    },
+    {
+      "name": "Playout: the all-modules bundle holds this shell's module and the engine's, with the engine's device",
+      "ok": true,
+      "detail": "modules/editor/summary.json, modules/engine/summary.json, modules/playout/summary.json; tier T0"
+    },
+    {
+      "name": "Playout: neither bundle holds a credential, and the collector replaced none",
+      "ok": true,
+      "detail": " "
+    },
+    {
+      "name": "Playout: both exports are on its own record, each under a diag- id, naming the modules",
+      "ok": true,
+      "detail": "[{\"corr\":\"diag-1fc6a8fa004cb4-1\",\"modules\":\"playout\",\"files\":5},{\"corr\":\"diag-1fc6a8fa004cb4-2\",\"modules\":\"editor,engine,playout\",\"files\":11}]"
+    },
+    {
+      "name": "Playout: it closed gracefully and finished its log",
+      "ok": true,
+      "detail": "exit 0"
+    }
+  ],
+  "shells": {
+    "Editor": {
+      "own": [
+        "modules/editor/logs/shell-20261117T132829Z-2100164-1.jsonl",
+        "versions.json",
+        "capability.json",
+        "environment.json",
+        "modules/editor/summary.json",
+        "manifest.json"
+      ],
+      "all": [
+        "modules/editor/logs/shell-20261117T132829Z-2100164-1.jsonl",
+        "modules/engine/logs/worker-20261117T132827Z-2099640-1.jsonl",
+        "versions.json",
+        "capability.json",
+        "environment.json",
+        "modules/engine/devices.json",
+        "modules/engine/recovery.json",
+        "modules/editor/summary.json",
+        "modules/engine/summary.json",
+        "manifest.json"
+      ],
+      "exports": [
+        {
+          "corr": "diag-200bc48b4fc74c-1",
+          "modules": "editor",
+          "files": 5,
+          "bytes": 8606
+        },
+        {
+          "corr": "diag-200bc48b4fc74c-2",
+          "modules": "editor,engine",
+          "files": 9,
+          "bytes": 49466
+        }
+      ],
+      "menu": "menu: Help > Export diagnostic bundle (all modules) | Help > Export diagnostic bundle (editor only)\r\nchoosing 'Help > Export diagnostic bundle (editor only)' (id 1001)"
+    },
+    "Playout": {
+      "own": [
+        "modules/playout/logs/shell-20261117T132924Z-2082472-1.jsonl",
+        "versions.json",
+        "capability.json",
+        "environment.json",
+        "modules/playout/summary.json",
+        "manifest.json"
+      ],
+      "all": [
+        "modules/editor/logs/shell-20261117T132829Z-2100164-1.jsonl",
+        "modules/engine/logs/worker-20261117T132827Z-2099640-1.jsonl",
+        "modules/playout/logs/shell-20261117T132924Z-2082472-1.jsonl",
+        "versions.json",
+        "capability.json",
+        "environment.json",
+        "modules/engine/devices.json",
+        "modules/engine/recovery.json",
+        "modules/editor/summary.json",
+        "modules/engine/summary.json",
+        "modules/playout/summary.json",
+        "manifest.json"
+      ],
+      "exports": [
+        {
+          "corr": "diag-1fc6a8fa004cb4-1",
+          "modules": "playout",
+          "files": 5,
+          "bytes": 8243
+        },
+        {
+          "corr": "diag-1fc6a8fa004cb4-2",
+          "modules": "editor,engine,playout",
+          "files": 11,
+          "bytes": 114520
+        }
+      ],
+      "menu": "menu: Help > Export diagnostic bundle (all modules) | Help > Export diagnostic bundle (playout only)\r\nchoosing 'Help > Export diagnostic bundle (playout only)' (id 1001)"
+    }
+  }
+}

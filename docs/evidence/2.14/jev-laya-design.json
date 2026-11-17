@@ -1,0 +1,271 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 6311,
+    "output_tokens": 0,
+    "state_tokens": 945,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics (Rust, Windows first). Every process writes its own JSON-lines log under one log root, one folder per product and one file per run, with a version and build on each run. Credentials never reach a log (invariant 54); tests check it.",
+    "row": "2.14: a diagnostic bundle. `gx-diag` (a command) and a menu item in each of the two windowed shells collect the last N hours of every process log, the as-run log, versions and build hashes, the capability surface, the device and adapter, the sanitised configuration and the recovery journal into one archive for a bug report.",
+    "done_when": "A bundle from a conformance run holds every process log, the as-run log, versions and build hashes, the capability surface and the sanitised configuration, and no credential.",
+    "facts": "The as-run log is row 12.11, which is not built: no as-run file exists anywhere. The bundle is read by an engineer and by the operator who may open it on any Windows machine (Explorer must open it). The `zip` crate is already used for scene packages with zstd members only; Explorer cannot open zstd members; the deflate feature of the same crate needs no new download (flate2 and miniz_oxide are in the lockfile and cache). A log file is whole (a rotated file is up to 50 MB) and its sequence numbers run without gaps, so cutting a file by time would break that. The recovery journal holds published scene documents (customer graphics). The Playout shell has no dialog dependency; the Editor shell has one; a new dependency needs the user's approval. Windows is built first; other platforms wait. A credential in a log would be a bug, never expected.",
+    "options_credential": {
+      "redact_and_report": "The collector scans every collected byte for the credential shape (gx1. followed by two base64 segments) and for the values of known secrets, replaces each in the copy with a marker, counts them per file, and says so in the manifest and on its exit status, because a credential in a log is itself a bug worth raising.",
+      "refuse_to_write": "If any credential is found the collector writes no bundle and names the file and line, so the bug is fixed before anything leaves the machine.",
+      "trust_the_logs": "Do not scan: invariant 54 and the log tests already keep credentials out; scanning twice is redundant."
+    },
+    "options_as_run": {
+      "include_if_present_name_if_not": "Include every as-run file in the window when there is one; when there is none, the manifest names the absence and why (row 12.11 is not built), and the evidence names the reading of the done-when openly.",
+      "build_12_11_first": "Do not close 2.14 until the as-run record exists, since the done-when says the bundle holds it.",
+      "empty_placeholder": "Always write an as-run section in the bundle, empty when there is no log, with no further note."
+    },
+    "options_files": {
+      "whole_files_in_window": "Include every log file last written within N hours, whole, so each file keeps its own unbroken sequence; the manifest names each file and its first and last timestamps; a total size cap names what was left out.",
+      "cut_by_record_time": "Include only the records inside the window, cutting files at the first record in range."
+    },
+    "options_menu": {
+      "write_to_log_root_and_reveal": "The menu item writes the bundle to a bundles folder beside the logs and reveals it in Explorer; no dialog, no new dependency; the result and path are logged.",
+      "save_dialog": "The menu item opens a save dialog and the operator chooses the place; needs a dialog dependency in the Playout shell.",
+      "desktop": "The menu item writes the bundle to the Desktop and says nothing else."
+    },
+    "options_archive": {
+      "zip_deflate": "A zip with deflate members, opened by Explorer anywhere; enables an existing crate feature, no new download.",
+      "zip_stored": "A zip with stored (uncompressed) members: opens anywhere, large.",
+      "zip_zstd": "A zip with zstd members like scene packages: small, but Explorer cannot open it."
+    }
+  },
+  "questions": {
+    "credential": {
+      "type": "choice",
+      "instructions": "How should the collector treat a credential found in a file it collects?",
+      "criteria": {
+        "redact_and_report": "The collector scans every collected byte for the credential shape (gx1. followed by two base64 segments) and for the values of known secrets, replaces each in the copy with a marker, counts them per file, and says so in the manifest and on its exit status, because a credential in a log is itself a bug worth raising.",
+        "refuse_to_write": "If any credential is found the collector writes no bundle and names the file and line, so the bug is fixed before anything leaves the machine.",
+        "trust_the_logs": "Do not scan: invariant 54 and the log tests already keep credentials out; scanning twice is redundant."
+      }
+    },
+    "as_run": {
+      "type": "choice",
+      "instructions": "The as-run log does not exist yet. What should this row do?",
+      "criteria": {
+        "include_if_present_name_if_not": "Include every as-run file in the window when there is one; when there is none, the manifest names the absence and why (row 12.11 is not built), and the evidence names the reading of the done-when openly.",
+        "build_12_11_first": "Do not close 2.14 until the as-run record exists, since the done-when says the bundle holds it.",
+        "empty_placeholder": "Always write an as-run section in the bundle, empty when there is no log, with no further note."
+      }
+    },
+    "files": {
+      "type": "choice",
+      "instructions": "How should the last N hours of each log be collected?",
+      "criteria": {
+        "whole_files_in_window": "Include every log file last written within N hours, whole, so each file keeps its own unbroken sequence; the manifest names each file and its first and last timestamps; a total size cap names what was left out.",
+        "cut_by_record_time": "Include only the records inside the window, cutting files at the first record in range."
+      }
+    },
+    "menu": {
+      "type": "choice",
+      "instructions": "Where should the shell menu item put the bundle and how should it tell the person?",
+      "criteria": {
+        "write_to_log_root_and_reveal": "The menu item writes the bundle to a bundles folder beside the logs and reveals it in Explorer; no dialog, no new dependency; the result and path are logged.",
+        "save_dialog": "The menu item opens a save dialog and the operator chooses the place; needs a dialog dependency in the Playout shell.",
+        "desktop": "The menu item writes the bundle to the Desktop and says nothing else."
+      }
+    },
+    "archive": {
+      "type": "choice",
+      "instructions": "Which archive format?",
+      "criteria": {
+        "zip_deflate": "A zip with deflate members, opened by Explorer anywhere; enables an existing crate feature, no new download.",
+        "zip_stored": "A zip with stored (uncompressed) members: opens anywhere, large.",
+        "zip_zstd": "A zip with zstd members like scene packages: small, but Explorer cannot open it."
+      }
+    },
+    "journal_bodies": {
+      "type": "choice",
+      "instructions": "The recovery journal holds published scene documents. What should the bundle include of it?",
+      "criteria": {
+        "summary_only": "Which takes it holds (id, revision, content hash) and any drop report, never the scene bodies.",
+        "whole_file": "The whole journal file, scenes included, so an engineer can reproduce.",
+        "nothing": "Nothing of the journal."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "credential",
+      "jev": "redact_and_report",
+      "laya": "refuse_to_write",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "redact_and_report",
+        "confidence": 0.56,
+        "probabilities": {
+          "redact_and_report": 0.71,
+          "refuse_to_write": 0.28,
+          "trust_the_logs": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "refuse_to_write",
+        "probabilities": {
+          "redact_and_report": 0.2478,
+          "refuse_to_write": 0.6334,
+          "trust_the_logs": 0.1188
+        },
+        "confidence": 0.1917,
+        "answer_confidence": 0.6334,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "as_run",
+      "jev": "include_if_present_name_if_not",
+      "laya": "build_12_11_first",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "include_if_present_name_if_not",
+        "confidence": 0.97,
+        "probabilities": {
+          "include_if_present_name_if_not": 0.98,
+          "build_12_11_first": 0.02,
+          "empty_placeholder": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "build_12_11_first",
+        "probabilities": {
+          "include_if_present_name_if_not": 0.0337,
+          "build_12_11_first": 0.7324,
+          "empty_placeholder": 0.2339
+        },
+        "confidence": 0.379,
+        "answer_confidence": 0.7324,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "files",
+      "jev": "whole_files_in_window",
+      "laya": "whole_files_in_window",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "whole_files_in_window",
+        "confidence": 1,
+        "probabilities": {
+          "whole_files_in_window": 1,
+          "cut_by_record_time": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "whole_files_in_window",
+        "probabilities": {
+          "whole_files_in_window": 0.9789,
+          "cut_by_record_time": 0.0211
+        },
+        "confidence": 0.8526,
+        "answer_confidence": 0.9789,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "menu",
+      "jev": "write_to_log_root_and_reveal",
+      "laya": "desktop",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "write_to_log_root_and_reveal",
+        "confidence": 1,
+        "probabilities": {
+          "write_to_log_root_and_reveal": 1,
+          "save_dialog": 0,
+          "desktop": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "desktop",
+        "probabilities": {
+          "write_to_log_root_and_reveal": 0.1636,
+          "save_dialog": 0.0158,
+          "desktop": 0.8206
+        },
+        "confidence": 0.5232,
+        "answer_confidence": 0.8206,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "archive",
+      "jev": "zip_deflate",
+      "laya": "zip_deflate",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "zip_deflate",
+        "confidence": 1,
+        "probabilities": {
+          "zip_deflate": 1,
+          "zip_stored": 0,
+          "zip_zstd": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "zip_deflate",
+        "probabilities": {
+          "zip_deflate": 0.961,
+          "zip_stored": 0.0304,
+          "zip_zstd": 0.0087
+        },
+        "confidence": 0.8311,
+        "answer_confidence": 0.961,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "journal_bodies",
+      "jev": "summary_only",
+      "laya": "whole_file",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "summary_only",
+        "confidence": 0.35,
+        "probabilities": {
+          "summary_only": 0.57,
+          "whole_file": 0.4,
+          "nothing": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "whole_file",
+        "probabilities": {
+          "summary_only": 0.104,
+          "whole_file": 0.4583,
+          "nothing": 0.4376
+        },
+        "confidence": 0.131,
+        "answer_confidence": 0.4583,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

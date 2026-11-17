@@ -1,0 +1,306 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 68029,
+    "output_tokens": 0,
+    "state_tokens": 6737,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.14: the diagnostic bundle, module by module (gx-diag and a Help menu item in each shell)",
+    "done_when": "A bundle from a conformance run holds every process log, the as-run log, versions and build hashes, the\ncapability surface and the sanitised configuration, and no credential.",
+    "evidence": "# 2.14 \u2014 the diagnostic bundle, module by module (17 Nov 2026)\n\nADR-0004 \u00a78 promised one command to collect what an engineer needs for a bug report. Until this row an\nengineer had to find the log root, pick files by hand, and guess which executable build had run. The user\nthen asked that the diagnostics be **module by module**, so a report about one product holds that product's\nlogs and a summary of it.\n\n## Done-when\n\n> A bundle from a conformance run holds every process log, the as-run log, versions and build hashes, the\n> capability surface and the sanitised configuration, and no credential.\n\n## What was built\n\n- **`gx-diag`** (new crate `Shared/diag`: a library and a command). `gx-diag [--module NAME]... [--hours N]\n  [--out FILE] [--log-root DIR] [--journal FILE] [--bin-dir DIR]...`. Exit 0 written, 1 could not be, 2 usage,\n  3 written and a credential was found and replaced.\n- **A module** is one product's folder under the log root (`engine`, `editor`, `playout`, `mcp`, ...). In the\n  archive, everything it wrote is under `modules/<module>/`:\n  - `logs/*.jsonl`: its log files, whole (a file written to within the window is copied from its first line, so\n    its `seq` has no gap and a `log.lost` record stays beside what it explains).\n  - `summary.json`: which runs it had and how each ended (`ended in order`, or `no log.stop`), records by level,\n    refusals, lost-line notices, killed predecessors named, late and missed frames, lines that did not parse,\n    its 20 newest errors and warnings (newest first, with correlation ids), its executables with their hashes,\n    and the credentials replaced in its files.\n  - the engine's module also holds `devices.json` (the device and adapter its `engine.start` records reported)\n    and `recovery.json` (what its recovery journal holds: takes, revisions, hashes, program and cue state,\n    each scene's size, **never the scene bodies**) and the drop report if there is one.\n- **What belongs to no one module is at the top:** `manifest.json` (every member with its size and SHA-256, each\n  log's first and last timestamp and sequence, the modules with their errors, warnings and refusals, what was\n  left out), `versions.json` (every run with its module, process, pid, start and version; every `gx-*`\n  executable beside the collector with its **SHA-256, which is the build hash**, and its module),\n  `capability.json` (the capability surface at this protocol), `environment.json` (the `GX_*` variables with\n  secret-named ones as `<redacted>`, the platform roots, the OS and architecture; the user's folder shown as\n  `<home>`), and `as-run/*.jsonl` when there is an as-run log.\n- **Choosing modules.** `gx-diag --module playout` holds that module only; a module asked for by name is in the\n  bundle even when it wrote nothing in the window (its summary says so). The Help menu in both shells has two\n  items: *Export diagnostic bundle (all modules)* and *(editor only)* / *(playout only)*.\n- **The menu** (`Shared/shell-log/src/diagnostics.rs`, used by both shells): the export runs on its own thread\n  (hashing the executables takes seconds), under a `diag-\u2026` correlation id, writes into the log root's\n  `bundles` folder, writes `diag.bundle` (path, modules, files, bytes, credentials replaced) on the shell's own\n  record, and opens the file manager on the file (Windows). A failed export writes `diag.bundle_failed` and\n  opens the log folder instead: the shells have no dialog of their own.\n- **No credential.** Every byte copied is scanned for `gx1.` followed by token characters and for the values of\n  the collector's own secret-named environment variables. Each is replaced in the copy (`gx1.REDACTED`),\n  counted per file, named in the manifest and on stderr, and the command exits 3 with the file names: a\n  credential in a log is a bug, and a bundle that quietly cleaned it would hide the bug. The warning does not\n  repeat the credential.\n- **Read back.** The archive is written beside its name, opened again, every member hashed and compared with\n  what was meant to go in, and only then renamed into place; one that does not match is removed.\n- **No download.** `zip` with its `deflate-zlib` feature (opens in Explorer; `zopfli`, which its `deflate`\n  feature needs, is not in the lockfile). `flate2` was already locked; the lockfile gains `gx-diag` and one\n  dependency edge.\n\n## What was run\n\n- `gx-diag` unit tests (15): the scrubber (shapes, malformed, bytes that are not UTF-8, secrets, short secrets);\n  a full collection against a scratch machine (window, exclusions, manifest hashes against the members, first\n  and last timestamps, versions and the executable's hash, capability at this protocol, the engine's device,\n  the sanitised configuration with the user's name absent, the journal without its scene); a planted credential\n  replaced, counted, named, the lines still JSON; the as-run log present and absent; the size cap; an empty\n  machine; a journal that is not JSON; run names; the home folder; module layout and summaries; chosen modules;\n  executables by name; and that an archive that does not read back as written is refused.\n- `gx-diag` command tests (4), the real binary: a bundle and what it says; a credential gives exit 3, names the\n  file, is not in the bundle and not in the warning; bad arguments give exit 2 and write nothing (including\n  `--module ../escape`); one module when asked.\n- The menu (1, in `gx-shell-log`): under a mock window the Help menu has both items under their exact text;\n  another item does nothing; the module item writes the shell's module only, the all item writes both.\n- **Conformance** (`npm run conformance`, 619 passed, 0 failed, 9 skipped; six new checks): the real `gx-diag`\n  is run over the run's own logs; the bundle holds every log file the run wrote, module by module, as the file\n  begins (processes still running have appended since); each module's summary names its runs; versions with a\n  SHA-256 and module for each executable, the capability surface at this protocol, the engine's device and\n  adapter, the sanitised configuration; the as-run log, or its absence named; no credential the run used.\n- **The real Editor and Playout windows** (`live-check.mjs`, result in `live-check-result.json`): **18 of 18**.\n  A real engine and each shell are started in a scratch folder. The menu item is chosen the way Windows does when\n  a person clicks it: the window's native menu is read (`GetMenu`, `GetSubMenu`, `GetMenuString`) and the item's\n  id posted as `WM_COMMAND` (`menu-click.ps1`). Each shell: both items are in the Help menu under their exact\n  text; its own-module bundle holds its log and summary and nothing of the engine's; the summary names its run;\n  the bundle's SHA-256 of the shell's executable equals the file's own (computed independently in the check);\n  the all-modules bundle holds the shell's module, the engine's and the engine's device; no credential, none\n  replaced; both exports are on the shell's own record under `diag-\u2026` ids naming their modules; it closes\n  gracefully and finishes its log. The check refuses to run if an Editor, Playout or engine is already open on\n  the machine, because it closes windows by process name.\n- Gate (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`): see the plan row.\n\n## Mutations\n\n22, one at a time, each restored byte-identical, each made a named check fail (`mutations.txt`).\n\n[Condensed: 22 mutations, each made a named check fail and was restored byte-identical: G1 a credential is not recognised; G2 known secrets are not replaced; G3 the time window is ignored; G4 the bundles folder is collected as a module; G5 the chosen modules are ignored; G6 a module asked for by name that wrote nothing is left out; G7 the size cap keeps the oldest logs; G8 a late frame is counted as a missed one; G9 refusals are not counted; G10 every run is said to have ended in order; G11 the manifest names the wrong hash; G12 the read-back accepts a member that reads back different; G13 an executable is hashed wrongly; G14 a credential found still exits 0; G15 a module name that escapes the folder is accepted; G16 the all-modules item exports only this shell's module; G17 the module item exports every module; G18 the Editor is not given the menu; G19 Playout is not given the menu; G20 an export is not put on the shell's own record; G21 the engine's logs are left out of every bundle; G22 the as-run folder is also collected as a module.]\n\n**G4 survived the first run.** Removing the exclusion of the `bundles` folder changed nothing: my fixture's\n`bundles` folder held only a `.zip`, which the collector ignores anyway, so the test could not tell. A stray\n`.jsonl` is now in that folder and one in `as-run/`, with assertions that neither is collected as a module; G4\nthen failed two tests, and G22 (the same blind spot for `as-run`, written because of it) failed one.\n\n**G12 is the one mutation I could write but not the one that matters.** It makes the read-back accept a member\nthat reads back different, and the read-back's own test catches it. Removing the *call* to the read-back is not\ncaught by any test, because nothing can make a freshly written archive read back wrong. That is named in the\nlimits.\n\n## Limits and readings\n\n1. **No as-run log exists yet** (row 12.11). The bundle includes `as-run/*.jsonl` when there is one and the\n   manifest names its absence when there is none; the done-when says the bundle holds it, which is true of every\n   bundle made once 12.11 writes one. This is a reading, not a silent substitution, and 12.11's done-when should\n   gain the line \"and the bundle holds it\".\n2. **Launch arguments of running processes are not collected** (the engine's `engine.start` says how it\n   started; the `--token` argument is exactly what must not be). The user name and host name are not collected.\n3. **A build hash is the SHA-256 of the executable beside the collector**, which is not proof that a running\n   process was started from that file. The log records carry the workspace version only.\n4. **The read-back's call is untested** (see G12).\n5. **The hash step takes seconds** with debug executables (several hundred megabytes in `target/debug`); the menu\n   exports on a thread and nothing shows until the file manager opens.\n6. **The file manager opens on Windows only** (`GX_DIAG_NO_REVEAL` stops it); elsewhere the export is written and\n   logged only. A failed export opens the log folder.\n7. **Two exports in the same second share a file name**, the later replacing the earlier. Bundles are never\n   deleted.\n8. **The size cap** is 256 MB of logs, newest first; the rest are named in the manifest as left out.\n9. **A stale binary hid the menu.** The first real-window run found no menu (`GetMenu` returned 0) because I had\n   not rebuilt `gx-editor.exe` since wiring the menu in. The check's header now says to rebuild the shells first.\n   UI Automation cannot see a native menu bar, so the check chooses the item with `WM_COMMAND`, which is what\n   Windows sends for a click; it does not move a mouse.\n10. **Other platforms** are not built or run (Windows first, the user's decision of 17 Nov 2026).\n",
+    "code": "--- Shared/diag/src/lib.rs (scrub, window and module selection, summary notes)\npub fn scrub(input: &[u8], secrets: &[String]) -> (Vec<u8>, usize) {\n    let mut out = Vec::with_capacity(input.len());\n    let mut count = 0;\n    let mut index = 0;\n    let prefix = b\"gx1.\";\n    while index < input.len() {\n        if input[index..].starts_with(prefix) {\n            let mut end = index + prefix.len();\n            while end < input.len() && is_token_byte(input[end]) {\n                end += 1;\n            }\n            if end > index + prefix.len() {\n                out.extend_from_slice(REDACTED.as_bytes());\n                count += 1;\n                index = end;\n                continue;\n            }\n        }\n        out.push(input[index]);\n        index += 1;\n    }\n    for secret in secrets.iter().filter(|secret| secret.len() >= 8) {\n        let (replaced, found) = replace_all(&out, secret.as_bytes(), b\"REDACTED\");\n        out = replaced;\n        count += found;\n    }\n    (out, count)\n}\n\n/// Collect a bundle as `options` says.\npub fn collect(options: &Options) -> Result<Collected, DiagError> {\n    let cutoff = options\n        .now\n        .checked_sub(Duration::from_secs(options.hours.saturating_mul(3600)))\n        .unwrap_or(SystemTime::UNIX_EPOCH);\n    let home = options.home.as_deref();\n    let wanted =\n        |module: &str| options.modules.is_empty() || options.modules.iter().any(|m| m == module);\n\n    // The secrets this process holds: replaced wherever they occur in what is copied.\n    let secrets: Vec<String> = options\n        .environment\n        .iter()\n        .filter(|(name, value)| is_secret_name(name) && !value.is_empty())\n        .map(|(_, value)| value.clone())\n        .collect();\n\n    let mut members: Vec<Member> = Vec::new();\n    let mut left_out: Vec<String> = Vec::new();\n    let mut notes: BTreeMap<String, ModuleNotes> = BTreeMap::new();\n    // A module asked for by name is in the bundle even when it wrote nothing.\n    for module in &options.modules {\n        notes.entry(module.clone()).or_default();\n    }\n\n    // 1. Logs, module by module: every product folder but the as-run folder\n    // and the bundles folder.\n    let mut candidates: Vec<(SystemTime, u64, String, String, PathBuf)> = Vec::new();\n    let products = match fs::read_dir(&options.log_root) {\n        Ok(entries) => entries.flatten().collect::<Vec<_>>(),\n        Err(source) if source.kind() == io::ErrorKind::NotFound => Vec::new(),\n        Err(source) => {\n            return Err(DiagError::ReadLogRoot {\n                path: options.log_root.clone(),\n                source,\n            })\n        }\n    };\n    for product in &products {\n        let module = product.file_name().to_string_lossy().into_owned();\n        if !product.path().is_dir()\n            || module == AS_RUN_FOLDER\n            || module == BUNDLES_FOLDER\n            || !wanted(&module)\n        {\n            continue;\n        }\n        let Ok(files) = fs::read_dir(product.path()) else {\n            continue;\n        };\n        for file in files.flatten() {\n            let file_name = file.file_name().to_string_lossy().into_owned();\n            if !file_name.ends_with(\".jsonl\") {\n                continue;\n            }\n            if let Some((modified, bytes)) = modified_within(&file.path(), cutoff) {\n                candidates.push((\n                    modified,\n                    bytes,\n                    module.clone(),\n                    format!(\"modules/{module}/logs/{file_name}\"),\n                    file.path(),\n                ));\n            }\n        }\n    }\n    // Newest first, so a size cap leaves out the oldest.\n    candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.3.cmp(&b.3)));\n    let mut log_bytes = 0u64;\n    let mut kept: Vec<(String, String, PathBuf)> = Vec::new();\n    for (_, bytes, module, member, path) in candidates {\n        if log_bytes + bytes > options.max_log_bytes && !kept.is_empty() {\n            notes\n                .entry(module)\n                .or_default()\n                .left_out\n                .push(member.clone());\n            left_out.push(member);\n            continue;\n        }\n        log_bytes += bytes;\n        kept.push((member, module, path));\n    }\n    kept.sort();\n    let mut all_runs: Vec<Value> = Vec::new();\n    let mut log_files = 0;\n    for (member, module, path) in &kept {\n        let module_notes = notes.entry(module.clone()).or_default();\n        let Ok(raw) = fs::read(path) else {\n            let unreadable = format!(\"{member} (unreadable)\");\n            module_notes.left_out.push(unreadable.clone());\n            left_out.push(unreadable);\n            continue;\n        };\n        let (bytes, redactions) = scrub(&raw, &secrets);\n        let span = span_of(&bytes);\n        let ended = module_notes.read(&bytes);\n        module_notes.files += 1;\n        module_notes.bytes += bytes.len() as u64;\n        module_notes.redactions += redactions;\n        let file_name = member.rsplit('/').next().unwrap_or(member);\n        if let Some((process, started, pid)) = run_of(file_name) {\n            let version = first_record(&bytes)\n                .and_then(|r| r.get(\"version\").cloned())\n                .unwrap_or(Value::Null);\n            let run = json!({\n                \"module\": module, \"process\": process, \"pid\": pid, \"started\": started,\n                \"version\": version, \"file\": member, \"ended\": ended,\n                \"firstTs\": span[\"firstTs\"], \"lastTs\": span[\"lastTs\"],\n            });\n            module_notes.runs.push(run.clone());\n            all_runs.push(run);\n        }\n        if module == ENGINE_MODULE {\n            module_notes\n                .engine_starts\n                .extend(engine_start_records(&bytes));\n        }\n        members.push(Member {\n            path: member.clone(),\n            bytes,\n            redactions,\n            extra: span,\n        });\n        log_files += 1;\n    }\n\n\n--- Shared/shell-log/src/diagnostics.rs\n \"Help\";\n\n/// Set to any value to export without opening the file manager (an automated\n/// check, a machine with nobody at it).\npub const NO_REVEAL_ENV: &str = \"GX_DIAG_NO_REVEAL\";\n\n/// What the own-module item says for `module`.\npub fn module_item_text(module: &str) -> String {\n    format!(\"Export diagnostic bundle ({module} only)\")\n}\n\n/// Give `builder` the Help menu with both export items, and handle them.\n/// `module` is the shell's own module: its folder under the log root.\npub fn with_diagnostics_menu<R: Runtime>(\n    builder: tauri::Builder<R>,\n    module: &'static str,\n) -> tauri::Builder<R> {\n    builder\n        .menu(move |handle| {\n            let all = MenuItemBuilder::with_id(EXPORT_ITEM_ID, EXPORT_ITEM_TEXT).build(handle)?;\n            let own = MenuItemBuilder::with_id(EXPORT_MODULE_ITEM_ID, module_item_text(module))\n                .build(handle)?;\n            let help = SubmenuBuilder::new(handle, MENU_TEXT)\n                .item(&all)\n                .item(&own)\n                .build()?;\n            MenuBuilder::new(handle).item(&help).build()\n        })\n        .on_menu_event(move |_app, event| {\n            // The thread ends by itself; nothing waits for it.\n            let _ = handle_menu_event(event.id().as_ref(), module);\n        })\n}\n\n/// What a menu event does: an export item starts an export and returns its\n/// thread; any other item does nothing. `module` is the shell's own module.\npub fn handle_menu_event(id: &str, module: &str) -> Option<std::thread::JoinHandle<()>> {\n    let modules: Vec<String> = match id {\n        EXPORT_ITEM_ID => Vec::new(),\n        EXPORT_MODULE_ITEM_ID => vec![module.to_owned()],\n        _ => return None,\n    };\n    Some(std::thread::spawn(move || export_and_show(&modules)))\n}\n\nfn export_and_show(modules: &[String])"
+  },
+  "questions": {
+    "real_windows": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from the real Editor and Playout windows, that their Help menu has the export items and that choosing one writes a bundle that holds what it should?",
+      "criteria": {
+        "true": "Yes, executed on the real windows.",
+        "false": "No, only claimed or only a mock window."
+      }
+    },
+    "meets_done_when": {
+      "type": "noul",
+      "instructions": "The done-when lists: every process log, the as-run log, versions and build hashes, the capability surface, the sanitised configuration, and no credential, from a conformance run. Is it met, given that no as-run log exists until row 12.11 and the bundle names its absence (limit 1)?",
+      "criteria": {
+        "true": "Yes, met on an openly named reading.",
+        "false": "No, not met."
+      }
+    },
+    "module_by_module": {
+      "type": "noul",
+      "instructions": "The user asked that the diagnostics be module by module. Does each module have its own folder with its logs and a summary, can a bundle be made of chosen modules, and does the menu offer both?",
+      "criteria": {
+        "true": "Yes, shown.",
+        "false": "No."
+      }
+    },
+    "credential_cannot_leak": {
+      "type": "noul",
+      "instructions": "Can a credential reach the bundle, the command warning or the manifest through the code shown?",
+      "criteria": {
+        "true": "Yes, a path exists.",
+        "false": "No, every collected byte is scanned and the warning never repeats it."
+      }
+    },
+    "scene_bodies": {
+      "type": "noul",
+      "instructions": "Can a published scene document (customer content) reach the bundle through the recovery journal summary or anything else the collector copies?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "build_hash_honest": {
+      "type": "noul",
+      "instructions": "The build hash is the SHA-256 of the executable beside the collector (limit 3). Is that acceptable and openly named?",
+      "criteria": {
+        "true": "Yes, acceptable and named.",
+        "false": "No, it claims more than it shows."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, including the survivor (G4), what was done about it, and the named untested read-back call (G12)?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "as_run_absent": "No as-run log exists yet.",
+        "hash_beside_collector": "The build hash is of the file beside the collector, not of what is running.",
+        "launch_args_not_collected": "Launch arguments of running processes are not collected.",
+        "readback_call_untested": "The read-back call itself is not tested.",
+        "menu_chosen_by_message": "The menu item is chosen by WM_COMMAND, not by moving a mouse.",
+        "windows_only_reveal": "Only Windows opens the file manager."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "real_windows",
+      "jev": 0.96,
+      "laya": 0.976,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.976,
+        "confidence": 0.976,
+        "answer_confidence": 0.976,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "meets_done_when",
+      "jev": 0.83,
+      "laya": 0.9795,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.83
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9795,
+        "confidence": 0.9795,
+        "answer_confidence": 0.9795,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "module_by_module",
+      "jev": 0.98,
+      "laya": 0.9731,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9731,
+        "confidence": 0.9731,
+        "answer_confidence": 0.9731,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "credential_cannot_leak",
+      "jev": 0.43,
+      "laya": 0.9283,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.43
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9283,
+        "confidence": 0.9283,
+        "answer_confidence": 0.9283,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "scene_bodies",
+      "jev": 0.3,
+      "laya": 0.9681,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.3
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9681,
+        "confidence": 0.9681,
+        "answer_confidence": 0.9681,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "build_hash_honest",
+      "jev": 0.87,
+      "laya": 0.9631,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.87
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9631,
+        "confidence": 0.9631,
+        "answer_confidence": 0.9631,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.4,
+      "laya": 0.9705,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.4
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9705,
+        "confidence": 0.9705,
+        "answer_confidence": 0.9705,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.96,
+      "laya": 0.9658,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9658,
+        "confidence": 0.9658,
+        "answer_confidence": 0.9658,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "readback_call_untested",
+      "laya": "windows_only_reveal",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "readback_call_untested",
+        "confidence": 0.95,
+        "probabilities": {
+          "none": 0,
+          "as_run_absent": 0.03,
+          "hash_beside_collector": 0.01,
+          "launch_args_not_collected": 0,
+          "readback_call_untested": 0.96,
+          "menu_chosen_by_message": 0,
+          "windows_only_reveal": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "windows_only_reveal",
+        "probabilities": {
+          "none": 0.1691,
+          "as_run_absent": 0.1937,
+          "hash_beside_collector": 0.0689,
+          "launch_args_not_collected": 0.0731,
+          "readback_call_untested": 0.1037,
+          "menu_chosen_by_message": 0.0671,
+          "windows_only_reveal": 0.3244
+        },
+        "confidence": 0.0876,
+        "answer_confidence": 0.3244,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.49,
+      "laya": 0.9087,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.49
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9087,
+        "confidence": 0.9087,
+        "answer_confidence": 0.9087,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

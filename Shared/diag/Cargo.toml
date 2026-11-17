@@ -1,0 +1,23 @@
+[package]
+name = "gx-diag"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The diagnostic bundle (row 2.14): one archive of the logs, versions, capability surface and sanitised configuration for a bug report."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-diag"
+path = "src/main.rs"
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-telemetry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = "0.1"
+zip = { version = "2.4", default-features = false, features = ["deflate-zlib"] }

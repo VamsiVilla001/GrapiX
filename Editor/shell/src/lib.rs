@@ -1261,7 +1261,7 @@ pub fn run() {
     let mut log = gx_telemetry::sink::init_process_logging("editor", "shell");
     tracing::info!(event = "editor.start", version = env!("CARGO_PKG_VERSION"));
     let workspace = Workspace::new(projects().ok());
-    let built = tauri::Builder::default()
+    let built = gx_shell_log::with_diagnostics_menu(tauri::Builder::default(), "editor")
         .manage(ShellState::new(workspace))
         .plugin(tauri_plugin_dialog::init())
         // 2.13: each command runs inside the scope of its call's correlation id.

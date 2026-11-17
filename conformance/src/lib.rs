@@ -10,6 +10,7 @@
 
 mod asset_restart;
 mod asset_route;
+mod diag_bundle;
 mod editor_commands;
 mod editor_publish;
 mod headless;
@@ -20,6 +21,7 @@ mod scene_plane;
 mod scope;
 pub use asset_restart::{asset_restart_suite, RestartableWorker};
 pub use asset_route::asset_route_suite;
+pub use diag_bundle::diag_bundle_suite;
 pub use editor_commands::editor_command_suite;
 pub use editor_publish::{
     asset_locality_agrees, editor_publish_suite, lan_with_a_package_directory_is_a_usage_error,

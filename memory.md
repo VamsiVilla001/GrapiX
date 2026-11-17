@@ -118,6 +118,39 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-17 — 2.14 done: the diagnostic bundle, module by module (Claude)
+
+**Resume here.** Next is **2.15** (named operator login for Playout), then **12.11** (as-run record: its done-when gains a line,
+the bundle holds it, and `gx_diag` already includes `as-run/*.jsonl` when it exists). Also asked by the user on 17 Nov, not
+started: **make sure the whole application is solidly built on the OSI model**. Reading: a layering audit mapping every
+network-facing piece (control plane, asset plane, media plane, local pipes, MCP servers, shells) to the seven layers, finding
+leaks, proposing guard rules in `tools/check-boundaries.mjs`; report before changing code. A read-only audit agent was stopped
+before it reported; start it again. (In this repo "L0/L1" means locality tiers, not OSI layers.)
+
+What was built. `Shared/diag` (`gx-diag`, lib and bin): `collect(&Options)`, `scrub`, `export_for_shell(modules)`, `reveal`.
+A bundle is a zip: `modules/<module>/logs/*.jsonl` and `modules/<module>/summary.json` per module (a module is a product folder
+under the log root), `modules/engine/devices.json` and `recovery.json` (journal summary, never scene bodies), and at the top
+`manifest.json`, `versions.json` (every `gx-*` executable with its SHA-256 and module), `capability.json`, `environment.json`, and
+`as-run/*.jsonl` when there is one. `gx-diag --module NAME` collects chosen modules. Credentials: found, replaced with
+`gx1.REDACTED`, counted per file, exit 3. `Shared/shell-log/src/diagnostics.rs`: the Help menu (`with_diagnostics_menu(builder,
+module)`), two items; both shells call it. `conformance/src/diag_bundle.rs`: six checks over a conformance run's own logs.
+
+Verified: gx-diag 15 unit + 4 CLI tests, shell-log menu test, conformance 619/0/9, `docs/evidence/2.14/live-check.mjs` 18/18 on the
+real Editor and Playout windows (native menu chosen with WM_COMMAND, bundle read back); 22 of 22 mutations failed a named check (one survived at first and led to a stronger test); gate (fmt, clippy -D warnings, npm run check) exit 0: 424 Editor tests, 1005 Rust tests passed, 0 failed, 38 ignored, 60 Node tests, conformance 619 passed, 0 failed, 9 skipped.
+
+**Process lessons.** (1) A stale binary hid the menu: `GetMenu` returned 0 on the real window and I nearly blamed Tauri. Rebuild
+every binary a live check starts (`cargo build -p gx-editor-shell -p gx-playout-shell`) before reading a live failure as a
+product bug. (2) UI Automation cannot see a native Win32 menu bar; choose an item as Windows does: `GetMenu`, `GetSubMenu`,
+`GetMenuString`, then `PostMessage(WM_COMMAND, id)` (`docs/evidence/2.14/menu-click.ps1`). (3) `powershell -File x.ps1 -Read a,b`
+passes one string "a,b": split it inside the script. (4) rustfmt reflows lines: check every mutation's target text exists once
+before a long run starts.
+
+Limits named: no as-run log exists until 12.11 (named in the manifest); launch arguments of running processes are not collected;
+an executable's hash is of the file beside the collector, not proof of what a running process started from; the hash step takes
+seconds with debug builds (the menu exports on a thread); the file manager is opened on Windows only (`GX_DIAG_NO_REVEAL` stops
+it); a failed export opens the log folder and writes `diag.bundle_failed`; two exports in one second share a file name; old
+bundles are never deleted.
+
 ## 2026-11-17 — 2.17 done: a publish names the ids of the edits it carries (Claude)
 
 **Resume here.** Next is **2.14** (diagnostic bundle `gx-diag` plus a menu item in each shell), then **2.15** (named operator

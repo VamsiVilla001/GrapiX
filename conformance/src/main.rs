@@ -19,7 +19,8 @@ use gx_conformance::{
     Report, RestartableWorker,
 };
 use gx_conformance::{
-    engine_log_suite, host_log_suite, mcp_log_suite, protected_engine_log_suite, run_log_suite,
+    diag_bundle_suite, engine_log_suite, host_log_suite, mcp_log_suite, protected_engine_log_suite,
+    run_log_suite,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -115,6 +116,8 @@ fn main() {
     report.set_peer("every process this run started, read from its own log file (2.12)");
     mcp_log_suite(&mut report);
     run_log_suite(&[CONFORMANCE_TOKEN, REAL_ENGINE_SECRET], &mut report);
+    // 2.14: a diagnostic bundle made from those same files.
+    diag_bundle_suite(&[CONFORMANCE_TOKEN, REAL_ENGINE_SECRET], &mut report);
 
     print_report(&report);
 

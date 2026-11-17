@@ -560,7 +560,7 @@ pub fn run() {
     // 2.12: Playout's log, from here until the window closes.
     let mut log = gx_telemetry::sink::init_process_logging("playout", "shell");
     tracing::info!(event = "playout.start", version = env!("CARGO_PKG_VERSION"));
-    let built = tauri::Builder::default()
+    let built = gx_shell_log::with_diagnostics_menu(tauri::Builder::default(), "playout")
         .manage(Connection::default())
         // 2.13: each command runs inside the scope of its call's correlation id.
         .invoke_handler(gx_shell_log::scoped(tauri::generate_handler![

@@ -239,6 +239,16 @@ request header, and the engine's `publish.accepted`. A search for an edit's id f
 the engine; a search for the publish's id finds the edit ids. Newest 64 per publish, the rest counted. Evidence:
 `docs/evidence/2.17/README.md`.
 
+## As built, row 2.14 (17 November 2026)
+
+`gx-diag` and the Help menu of each shell make one zip, module by module. A module is one product's folder under the log root;
+everything it wrote is under `modules/<module>/` with a `summary.json`, and what belongs to no module is at the top: the manifest
+(every member with its SHA-256), the executables' hashes and versions, the capability surface, the sanitised configuration and the
+as-run log when there is one. A credential found in anything copied is replaced and counted, and the command exits 3: a credential
+in a log is a bug, and a bundle that quietly cleaned it would hide it. Whole log files in the window are copied, so each file's
+`seq` still runs without a gap. The recovery journal is summarised, never copied with its scenes. Evidence:
+`docs/evidence/2.14/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

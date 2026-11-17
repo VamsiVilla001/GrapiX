@@ -1920,6 +1920,7 @@ dependencies = [
  "gx-render-worker",
  "parking_lot",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -1993,6 +1994,19 @@ name = "gx-decklink"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "gx-diag"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-telemetry",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tracing",
+ "zip",
 ]
 
 [[package]]
@@ -2215,9 +2229,12 @@ dependencies = [
 name = "gx-shell-log"
 version = "0.1.0"
 dependencies = [
+ "gx-diag",
  "gx-telemetry",
  "serde_json",
  "tauri",
+ "tracing",
+ "zip",
 ]
 
 [[package]]
@@ -7553,6 +7570,7 @@ dependencies = [
  "crc32fast",
  "crossbeam-utils",
  "displaydoc",
+ "flate2",
  "indexmap 2.14.2",
  "memchr",
  "thiserror 2.0.20",

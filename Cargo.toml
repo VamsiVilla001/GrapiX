@@ -10,6 +10,7 @@ members = [
   "Shared/control-transport",
   "Shared/telemetry",
   "Shared/console-stop",
+  "Shared/diag",
   "Shared/shell-log",
   "Shared/fs",
   "Shared/decklink",
@@ -45,6 +46,7 @@ gx-asset-plane   = { path = "Shared/asset-plane" }
 gx-media-plane   = { path = "Shared/media-plane" }
 gx-telemetry     = { path = "Shared/telemetry" }
 gx-console-stop  = { path = "Shared/console-stop" }
+gx-diag          = { path = "Shared/diag" }
 gx-shell-log     = { path = "Shared/shell-log" }
 gx-fs            = { path = "Shared/fs" }
 gx-write-semantics = { path = "Shared/write-semantics" }

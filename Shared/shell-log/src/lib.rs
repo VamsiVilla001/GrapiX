@@ -1,4 +1,5 @@
-//! The invoke wrapper both shells use (build-plan row 2.13, ADR-0004 §2, §6).
+//! What both shells share of logging: the invoke wrapper (build-plan row 2.13, ADR-0004 §2, §6)
+//! and the diagnostic bundle's menu item (row 2.14, [`diagnostics`]).
 //!
 //! A front end sends its correlation id as the request header
 //! [`gx_telemetry::ui::CORR_HEADER`]. [`scoped`] wraps a shell's whole invoke
@@ -14,6 +15,12 @@
 //! synchronous, and a test here fails if a command ran outside its scope.
 
 #![forbid(unsafe_code)]
+
+pub mod diagnostics;
+
+pub use diagnostics::{
+    handle_menu_event, with_diagnostics_menu, EXPORT_ITEM_ID, EXPORT_ITEM_TEXT, MENU_TEXT,
+};
 
 use tauri::ipc::Invoke;
 use tauri::Runtime;

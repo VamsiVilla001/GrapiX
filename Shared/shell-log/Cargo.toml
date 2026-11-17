@@ -7,9 +7,12 @@ rust-version.workspace = true
 description = "What the Editor and Playout shells share of correlation: the invoke wrapper that scopes each command to its call's id (row 2.13)."
 
 [dependencies]
+gx-diag = { workspace = true }
 gx-telemetry = { workspace = true }
 tauri = { workspace = true }
+tracing = "0.1"
 
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
 serde_json = { workspace = true }
+zip = { version = "2.4", default-features = false, features = ["deflate-zlib"] }

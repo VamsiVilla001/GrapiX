@@ -1,0 +1,26 @@
+# 1. First run (G1 to G21). G4 survived.
+G1 a credential is not recognised: exit=101 failing=['tests::a_credential_is_found_and_replaced_wherever_it_is', 'tests::a_credential_in_a_log_is_replaced_counted_and_named'] restored_identical=True
+G2 known secrets are not replaced: exit=101 failing=['tests::a_credential_is_found_and_replaced_wherever_it_is', 'tests::a_credential_in_a_log_is_replaced_counted_and_named'] restored_identical=True
+G3 the time window is ignored: exit=101 failing=['tests::a_bundle_holds_the_logs_in_the_window_and_what_the_manifest_says', 'tests::a_bundle_of_chosen_modules_holds_those_modules_and_nothing_of_the_others', 'tests::the_as_run_log_is_included_when_there_is_one'] restored_identical=True
+G4 the bundles folder is collected as a module: exit=0 failing=[] restored_identical=True
+G5 the chosen modules are ignored: exit=101 failing=['tests::a_bundle_of_chosen_modules_holds_those_modules_and_nothing_of_the_others'] restored_identical=True
+G6 a module asked for by name that wrote nothing is left out: exit=101 failing=['tests::a_bundle_of_chosen_modules_holds_those_modules_and_nothing_of_the_others'] restored_identical=True
+G7 the size cap keeps the oldest logs: exit=101 failing=['tests::the_size_cap_keeps_the_newest_logs_and_names_what_it_left_out'] restored_identical=True
+G8 a late frame is counted as a missed one: exit=101 failing=['tests::each_module_has_its_own_folder_and_a_summary_that_reads_without_opening_a_log'] restored_identical=True
+G9 refusals are not counted: exit=101 failing=['tests::each_module_has_its_own_folder_and_a_summary_that_reads_without_opening_a_log'] restored_identical=True
+G10 every run is said to have ended in order: exit=101 failing=['tests::each_module_has_its_own_folder_and_a_summary_that_reads_without_opening_a_log'] restored_identical=True
+G11 the manifest names the wrong hash: exit=101 failing=['tests::a_bundle_holds_the_logs_in_the_window_and_what_the_manifest_says'] restored_identical=True
+G12 the read-back accepts a member that reads back different: exit=101 failing=['tests::an_archive_that_does_not_read_back_as_written_is_refused'] restored_identical=True
+G13 an executable is hashed wrongly: exit=101 failing=['tests::a_bundle_holds_the_logs_in_the_window_and_what_the_manifest_says'] restored_identical=True
+G14 a credential found still exits 0: exit=101 failing=['a_credential_in_a_log_gives_exit_three_names_the_file_and_is_not_in_the_bundle'] restored_identical=True
+G15 a module name that escapes the folder is accepted: exit=101 failing=['bad_arguments_exit_two_and_write_nothing'] restored_identical=True
+G16 the all-modules item exports only this shell's module: exit=101 failing=['a_shell_has_both_export_items_under_help_and_each_writes_its_bundle'] restored_identical=True
+G17 the module item exports every module: exit=101 failing=['a_shell_has_both_export_items_under_help_and_each_writes_its_bundle'] restored_identical=True
+G18 the Editor is not given the menu: exit=1 failing=["Editor: the window's Help menu holds both export items, and the module item was chosen"] restored_identical=True
+G19 Playout is not given the menu: exit=1 failing=["Playout: the window's Help menu holds both export items, and the module item was chosen"] restored_identical=True
+G20 an export is not put on the shell's own record: exit=1 failing=['Editor: both exports are on its own record, each under a diag- id, naming the modules', 'Playout: both exports are on its own record, each under a diag- id, naming the modules'] restored_identical=True
+G21 the engine's logs are left out of every bundle: exit=1 failing=['the bundle holds every log file the run wrote, module by module', 'each module in the bundle has a summary that names its runs', "the bundle holds versions with a hash for each executable, the capability surface, the engine's device and adapter and the sanitised configuration"] restored_identical=True
+
+# 2. After G4 was fixed in the test: G4 again, and G22 (the same blind spot for the as-run folder).
+G4 the bundles folder is collected as a module: exit=101 failing=['tests::a_bundle_holds_the_logs_in_the_window_and_what_the_manifest_says', 'tests::each_module_has_its_own_folder_and_a_summary_that_reads_without_opening_a_log'] restored_identical=True
+G22 the as-run folder is also collected as a module: exit=101 failing=['tests::the_as_run_log_is_included_when_there_is_one'] restored_identical=True

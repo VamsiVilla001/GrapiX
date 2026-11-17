@@ -27,4 +27,6 @@ gx-editor = { path = "../services/editor" }
 gx-editor-mcp = { path = "../services/editor-mcp" }
 gx-playout-mcp = { path = "../services/playout-mcp" }
 gx-mcp-server = { path = "../services/mcp-server" }
+# 2.14: opens the bundle `gx-diag` writes. The same crate and feature `gx-diag` uses.
+zip = { version = "2.4", default-features = false, features = ["deflate-zlib"] }
 parking_lot = "0.12"
