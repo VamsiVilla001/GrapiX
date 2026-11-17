@@ -215,6 +215,13 @@ start walks back only to the newest run with a `running` list, since every run a
 writer holds its file against other writers (Windows `FILE_SHARE_READ`; an advisory shared lock elsewhere), which is how a
 running run is told from a killed one without trusting a process id. Evidence: `docs/evidence/2.16/README.md`.
 
+## As built, row 2.18 (17 November 2026)
+
+A console window close now ends the engine in order too. The engine's console handler is registered by `gx-console-stop`
+(one user-approved `unsafe` call) and runs on the system's handler thread, so the log is finished before Windows ends the
+process. `engine.stop` names the exact event (Ctrl+C, Ctrl+Break, the window close, a logoff, a shutdown) instead of one
+reason for all. Logoff and shutdown were not run and may not be delivered. Evidence: `docs/evidence/2.18/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

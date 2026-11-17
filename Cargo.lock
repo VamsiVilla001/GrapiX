@@ -1923,6 +1923,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-console-stop"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "gx-contract-codegen"
 version = "0.1.0"
 dependencies = [
@@ -2179,9 +2187,9 @@ name = "gx-render-worker"
 version = "0.1.0"
 dependencies = [
  "cosmic-text",
- "ctrlc",
  "gltf",
  "gx-asset-plane",
+ "gx-console-stop",
  "gx-contracts",
  "gx-control-plane",
  "gx-control-transport",

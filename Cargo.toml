@@ -9,6 +9,7 @@ members = [
   "Shared/media-plane",
   "Shared/control-transport",
   "Shared/telemetry",
+  "Shared/console-stop",
   "Shared/shell-log",
   "Shared/fs",
   "Shared/decklink",
@@ -43,6 +44,7 @@ gx-control-plane = { path = "Shared/control-plane" }
 gx-asset-plane   = { path = "Shared/asset-plane" }
 gx-media-plane   = { path = "Shared/media-plane" }
 gx-telemetry     = { path = "Shared/telemetry" }
+gx-console-stop  = { path = "Shared/console-stop" }
 gx-shell-log     = { path = "Shared/shell-log" }
 gx-fs            = { path = "Shared/fs" }
 gx-write-semantics = { path = "Shared/write-semantics" }
@@ -60,9 +62,10 @@ schemars = { version = "1", default-features = false, features = ["derive", "std
 # one over the original — which would make a `.gpxpkg` manifest (1.8) wrong.
 serde_json       = { version = "1", features = ["float_roundtrip"] }
 sha2             = "0.10"
-# 2.16: lets the render worker write `engine.stop` when Ctrl+C ends it.
+# 2.16: let the render worker write `engine.stop` when Ctrl+C ends it.
 # Downloaded with the user's approval (16 Nov 2026), exact version pinned.
-# `#![forbid(unsafe_code)]` rules out a hand-written console control handler.
+# Since 2.18 only `gx-console-stop` uses it, and only off Windows: on Windows
+# that crate registers the console handler itself (user-approved `unsafe`).
 ctrlc            = "=3.5.2"
 hmac             = "0.12"
 ttf-parser       = "0.25"

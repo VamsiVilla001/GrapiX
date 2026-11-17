@@ -118,9 +118,37 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-17 — 2.18 done: a console window close ends the engine in order; user decisions of 17 Nov (Claude)
+
+**Resume here.** Next is **2.19** (a stop request on the control plane; design consult drafted, not run:
+scratch `make_spec_219d.py`; it is a new request, a new scope and wire protocol version 7), then **2.17** (one id from an
+Editor edit to the engine), then 2.14, 2.15, 12.11.
+
+**User decisions, 17 Nov 2026.** (1) `frame.late` / `frame.missed` are never merged or coalesced: every one keeps its own
+line. (2) Everything Windows supports is built first; non-Windows paths and CI-only rows wait. (3) Row 2.17 is wanted.
+(4) The stop gap left by 2.16 is to be closed, and a small `unsafe` block is allowed for the window close.
+
+What was built. New crate `Shared/console-stop` (`gx-console-stop`): `on_console_event(closure)` registers the Windows
+console handler (the one `unsafe` call, `SetConsoleCtrlHandler`; the crate is `deny(unsafe_code)` with one `allow`) and
+runs the closure with the exact event on the system's handler thread, before the handler returns. That is the fix: Windows
+ends the process when the handler for a close returns, and `ctrlc` ran the closure on another thread. The worker
+(`services/render-engine/worker/src/main.rs`) uses it instead of `ctrlc`, keeps `forbid(unsafe_code)`, and `engine.stop`
+now names the event ("Ctrl+C at the console", "Ctrl+Break at the console", "the console window was closed", ...).
+`record_interrupt` takes the log before writing, so a second event during the first writes nothing (Jev's review, 0.72 on
+"can the handler lose records": two events could write `engine.stop` twice). No download: `windows-sys 0.61.2` was in the
+lockfile; `ctrlc` is now a non-Windows dependency of the new crate only.
+
+Verified: `gx-console-stop` 3/3; worker bin 2/2; live `docs/evidence/2.18/live-check.mjs` 15/15 (Ctrl+C, Ctrl+Break, window
+close; a kill still named once); 14/14 mutations (C7 restores the 2.16 behaviour and only the live window close catches
+it); gate (fmt, clippy -D warnings, npm run check) exit 0: 424 Editor tests, 963 Rust tests passed, 0 failed, 38 ignored, conformance 610 passed, 0 failed, 9 skipped. Jev and Laya both chose this design; Laya wanted logoff/shutdown ignored without mention, overridden by hand.
+
+Limits named: logoff and shutdown not run (and probably never delivered: the engine loads user32); about five seconds for
+the closure after a close; only the engine has a handler; non-Windows not compiled or run; no stop request yet (2.19).
+2.16's live check now accepts the new reasons; its `--close` note describes 2.16 as it was.
+
 ## 2026-11-17 — 2.16 done: `engine.stop` on Ctrl+C, and every kill named once by the next start (Claude)
 
-**Resume here.** 2.16 is done. Next is **2.14** (diagnostic bundle `gx-diag` plus the shell menu item), then **2.15** (named
+2.16 is done. (Superseded by the entry above.) Next was **2.14** (diagnostic bundle `gx-diag` plus the shell menu item), then **2.15** (named
 operator login for Playout), then **12.11** (as-run record). Still open for the user: row **2.17** (one id from an Editor
 edit to the engine) and whether to coalesce runs of `frame.late` / `frame.missed` (a debug engine wrote 207 255 lines in 90
 minutes).

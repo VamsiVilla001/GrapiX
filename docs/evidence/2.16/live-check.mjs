@@ -28,6 +28,8 @@
 // the last run, so run the default last):
 //
 //   --break   Ctrl+Break instead: the same result is required.
+//   (Since 2.18 a window close is orderly and engine.stop names the exact event:
+//   see docs/evidence/2.18. The --close note below describes 2.16 as it was.)
 //   --close   the console window's close button: NOT required to pass and expected
 //             not to. Windows ends the process as soon as the `ctrlc` crate's
 //             system handler returns, before the engine has finished its log, so
@@ -246,7 +248,7 @@ try {
   const aEvents = aRecords.map((r) => r.event);
   const aStop = aRecords.find((r) => r.event === "engine.stop");
   check("engine A ended on its own after the interrupt, with exit code 0", exit === "0", `exit ${exit}`);
-  check("engine A wrote engine.stop at info with its reason", aStop?.level === "info" && /console control event/.test(aStop?.fields?.reason ?? ""), JSON.stringify(aStop ?? null));
+  check("engine A wrote engine.stop at info with its reason", aStop?.level === "info" && /console/.test(aStop?.fields?.reason ?? ""), JSON.stringify(aStop ?? null));
   check("engine A's last two records are engine.stop and log.stop", aEvents.at(-2) === "engine.stop" && aEvents.at(-1) === "log.stop", aEvents.slice(-4).join(", "));
   check("engine A started with no predecessor to name", !aEvents.includes("log.previous_unfinished"));
 

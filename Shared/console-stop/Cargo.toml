@@ -1,0 +1,16 @@
+[package]
+name = "gx-console-stop"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "One safe function over the console control handler, so a console process can record why it was stopped."
+
+# 2.18: no download. `windows-sys` 0.61 with `Win32_System_Console` was already
+# in the lockfile (through `ctrlc`, 2.16). `ctrlc` itself is now used only off
+# Windows, where this crate hands it the closure.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[target.'cfg(not(windows))'.dependencies]
+ctrlc = { workspace = true }

@@ -1,0 +1,152 @@
+{
+  "checks": [
+    {
+      "name": "Ctrl+C was delivered",
+      "ok": true,
+      "detail": "helper 0"
+    },
+    {
+      "name": "Ctrl+C: the engine ended on its own with exit code 0",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "Ctrl+C: engine.stop is at info and its reason is \"Ctrl+C at the console\"",
+      "ok": true,
+      "detail": "{\"event\":\"engine.stop\",\"fields\":{\"reason\":\"Ctrl+C at the console\"},\"level\":\"info\",\"mono\":4515848700,\"pid\":529372,\"process\":\"worker\",\"seq\":209,\"target\":\"gx_render_worker\",\"ts\":\"2026-11-17T07:50:10.314500Z\",\"version\":\"0.1.0\"}"
+    },
+    {
+      "name": "Ctrl+C: the last two records are engine.stop and log.stop",
+      "ok": true,
+      "detail": "frame.missed, frame.late, engine.stop, log.stop"
+    },
+    {
+      "name": "Ctrl+Break was delivered",
+      "ok": true,
+      "detail": "helper -1073741510"
+    },
+    {
+      "name": "Ctrl+Break: the engine ended on its own with exit code 0",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "Ctrl+Break: engine.stop is at info and its reason is \"Ctrl+Break at the console\"",
+      "ok": true,
+      "detail": "{\"event\":\"engine.stop\",\"fields\":{\"reason\":\"Ctrl+Break at the console\"},\"level\":\"info\",\"mono\":4565936300,\"pid\":529596,\"process\":\"worker\",\"seq\":212,\"target\":\"gx_render_worker\",\"ts\":\"2026-11-17T07:50:16.560700Z\",\"version\":\"0.1.0\"}"
+    },
+    {
+      "name": "Ctrl+Break: the last two records are engine.stop and log.stop",
+      "ok": true,
+      "detail": "frame.late, engine.heartbeat, engine.stop, log.stop"
+    },
+    {
+      "name": "a window close was delivered",
+      "ok": true,
+      "detail": "helper 0"
+    },
+    {
+      "name": "a window close: the engine ended on its own with exit code 0",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "a window close: engine.stop is at info and its reason is \"the console window was closed\"",
+      "ok": true,
+      "detail": "{\"event\":\"engine.stop\",\"fields\":{\"reason\":\"the console window was closed\"},\"level\":\"info\",\"mono\":3948957800,\"pid\":530088,\"process\":\"worker\",\"seq\":182,\"target\":\"gx_render_worker\",\"ts\":\"2026-11-17T07:50:21.379157Z\",\"version\":\"0.1.0\"}"
+    },
+    {
+      "name": "a window close: the last two records are engine.stop and log.stop",
+      "ok": true,
+      "detail": "frame.late, frame.late, engine.stop, log.stop"
+    },
+    {
+      "name": "the next engine names none of the three, which all finished",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "a killed engine still writes no stop record",
+      "ok": true,
+      "detail": "frame.late, frame.late"
+    },
+    {
+      "name": "the engine after it names the killed one, once, with its pid, last sequence number and last timestamp",
+      "ok": true,
+      "detail": "[{\"file\":\"worker-20261117T075022Z-531172-1.jsonl\",\"last_event\":\"frame.late\",\"last_seq\":66,\"last_ts\":\"2026-11-17T07:50:23.827392Z\",\"predecessor_pid\":531172,\"started\":\"20261117T075022Z\"}] against pid 531172 seq 66 ts 2026-11-17T07:50:23.827392Z"
+    }
+  ],
+  "ended": [
+    {
+      "event": "Ctrl+C",
+      "pid": 529372,
+      "exit": "0",
+      "tail": [
+        {
+          "event": "engine.stop",
+          "level": "info",
+          "fields": {
+            "reason": "Ctrl+C at the console"
+          }
+        },
+        {
+          "event": "log.stop",
+          "level": "info",
+          "fields": {
+            "lastSeq": 209
+          }
+        }
+      ]
+    },
+    {
+      "event": "Ctrl+Break",
+      "pid": 529596,
+      "exit": "0",
+      "tail": [
+        {
+          "event": "engine.stop",
+          "level": "info",
+          "fields": {
+            "reason": "Ctrl+Break at the console"
+          }
+        },
+        {
+          "event": "log.stop",
+          "level": "info",
+          "fields": {
+            "lastSeq": 212
+          }
+        }
+      ]
+    },
+    {
+      "event": "a window close",
+      "pid": 530088,
+      "exit": "0",
+      "tail": [
+        {
+          "event": "engine.stop",
+          "level": "info",
+          "fields": {
+            "reason": "the console window was closed"
+          }
+        },
+        {
+          "event": "log.stop",
+          "level": "info",
+          "fields": {
+            "lastSeq": 182
+          }
+        }
+      ]
+    }
+  ],
+  "named": {
+    "file": "worker-20261117T075022Z-531172-1.jsonl",
+    "last_event": "frame.late",
+    "last_seq": 66,
+    "last_ts": "2026-11-17T07:50:23.827392Z",
+    "predecessor_pid": 531172,
+    "started": "20261117T075022Z"
+  }
+}

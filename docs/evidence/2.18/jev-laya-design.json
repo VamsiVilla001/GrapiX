@@ -1,0 +1,227 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 4440,
+    "output_tokens": 0,
+    "state_tokens": 736,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: a broadcast graphics engine (Rust). The render engine worker is a Windows console process that puts out Program. Every process writes a JSON-lines log that starts with log.start and, when it ends in order, ends with log.stop.",
+    "as_built_2_16": "The worker uses the ctrlc crate 3.5.2. Its Windows system handler signals a semaphore and returns TRUE; a separate thread then runs our closure, which writes engine.stop (one generic reason naming all five console events, because the crate does not say which event came), finishes the log (log.stop) and calls exit(0). For Ctrl+C and Ctrl+Break this is orderly (run live). For a console window close Windows ends the process as soon as the system handler returns TRUE, which is before our thread finished: the file has engine.stop but no log.stop, and the next start names the run as unfinished. The worker crate has #![forbid(unsafe_code)], which is why the crate was used.",
+    "user_decision": "On 17 Nov 2026 the user allowed a small unsafe block to fix the window close. Downloads still need approval; windows-sys 0.61.2 with Win32_System_Console is already in the lockfile (ctrlc depends on it), so calling SetConsoleCtrlHandler directly needs no download. Work that Windows supports comes first; non-Windows paths wait.",
+    "windows_facts": "A handler registered with SetConsoleCtrlHandler runs on a new thread the system creates, so it may lock, write files and block. Handlers are called newest registration first; returning FALSE passes the event to the next handler. For CTRL_CLOSE_EVENT the process is ended when the handler returns, or after about 5 seconds if it does not. A process that has loaded user32.dll or gdi32.dll is not sent CTRL_LOGOFF_EVENT or CTRL_SHUTDOWN_EVENT at all; the worker loads a GPU stack, so it probably gets neither, and a logoff cannot be run in a test.",
+    "options": {
+      "own_handler_new_crate": "A new small workspace crate (gx-console-stop) holds the one unsafe call to SetConsoleCtrlHandler behind a safe function that takes a closure and passes it the exact event. The closure runs inside the system handler thread, so the log is finished before the handler returns, for every event. On Windows the worker uses only this; ctrlc stays for non-Windows only. engine.stop names the exact event. The worker keeps forbid(unsafe_code). Other processes (engine host, MCP servers) can use the crate later. The Ctrl+C path proven in 2.16 changes and is proven again by the same live check.",
+      "second_handler_keep_ctrlc": "The same new crate, but its handler acts only on close, logoff and shutdown and returns FALSE for Ctrl+C and Ctrl+Break, which ctrlc keeps handling as today. The proven Ctrl+C path is untouched; there are two mechanisms, and Ctrl+C keeps the generic reason.",
+      "unsafe_in_worker": "No new crate: the worker binary changes forbid(unsafe_code) to deny(unsafe_code) and allows it on one function in main.rs that registers the handler.",
+      "leave_it": "Build nothing; keep the named limit (the next start names a closed-window engine as unfinished)."
+    }
+  },
+  "questions": {
+    "design": {
+      "type": "choice",
+      "instructions": "Which option should be built to make a console window close an orderly, recorded stop of the engine?",
+      "criteria": {
+        "own_handler_new_crate": "A new small workspace crate (gx-console-stop) holds the one unsafe call to SetConsoleCtrlHandler behind a safe function that takes a closure and passes it the exact event. The closure runs inside the system handler thread, so the log is finished before the handler returns, for every event. On Windows the worker uses only this; ctrlc stays for non-Windows only. engine.stop names the exact event. The worker keeps forbid(unsafe_code). Other processes (engine host, MCP servers) can use the crate later. The Ctrl+C path proven in 2.16 changes and is proven again by the same live check.",
+        "second_handler_keep_ctrlc": "The same new crate, but its handler acts only on close, logoff and shutdown and returns FALSE for Ctrl+C and Ctrl+Break, which ctrlc keeps handling as today. The proven Ctrl+C path is untouched; there are two mechanisms, and Ctrl+C keeps the generic reason.",
+        "unsafe_in_worker": "No new crate: the worker binary changes forbid(unsafe_code) to deny(unsafe_code) and allows it on one function in main.rs that registers the handler.",
+        "leave_it": "Build nothing; keep the named limit (the next start names a closed-window engine as unfinished)."
+      }
+    },
+    "least_risk_to_proven_path": {
+      "type": "choice",
+      "instructions": "Which option carries the least risk of breaking the Ctrl+C stop that already works?",
+      "criteria": {
+        "own_handler_new_crate": "A new small workspace crate (gx-console-stop) holds the one unsafe call to SetConsoleCtrlHandler behind a safe function that takes a closure and passes it the exact event. The closure runs inside the system handler thread, so the log is finished before the handler returns, for every event. On Windows the worker uses only this; ctrlc stays for non-Windows only. engine.stop names the exact event. The worker keeps forbid(unsafe_code). Other processes (engine host, MCP servers) can use the crate later. The Ctrl+C path proven in 2.16 changes and is proven again by the same live check.",
+        "second_handler_keep_ctrlc": "The same new crate, but its handler acts only on close, logoff and shutdown and returns FALSE for Ctrl+C and Ctrl+Break, which ctrlc keeps handling as today. The proven Ctrl+C path is untouched; there are two mechanisms, and Ctrl+C keeps the generic reason.",
+        "unsafe_in_worker": "No new crate: the worker binary changes forbid(unsafe_code) to deny(unsafe_code) and allows it on one function in main.rs that registers the handler.",
+        "leave_it": "Build nothing; keep the named limit (the next start names a closed-window engine as unfinished)."
+      }
+    },
+    "best_record": {
+      "type": "choice",
+      "instructions": "Which option leaves the most useful log record for an operator reading why the engine stopped?",
+      "criteria": {
+        "own_handler_new_crate": "A new small workspace crate (gx-console-stop) holds the one unsafe call to SetConsoleCtrlHandler behind a safe function that takes a closure and passes it the exact event. The closure runs inside the system handler thread, so the log is finished before the handler returns, for every event. On Windows the worker uses only this; ctrlc stays for non-Windows only. engine.stop names the exact event. The worker keeps forbid(unsafe_code). Other processes (engine host, MCP servers) can use the crate later. The Ctrl+C path proven in 2.16 changes and is proven again by the same live check.",
+        "second_handler_keep_ctrlc": "The same new crate, but its handler acts only on close, logoff and shutdown and returns FALSE for Ctrl+C and Ctrl+Break, which ctrlc keeps handling as today. The proven Ctrl+C path is untouched; there are two mechanisms, and Ctrl+C keeps the generic reason.",
+        "unsafe_in_worker": "No new crate: the worker binary changes forbid(unsafe_code) to deny(unsafe_code) and allows it on one function in main.rs that registers the handler.",
+        "leave_it": "Build nothing; keep the named limit (the next start names a closed-window engine as unfinished)."
+      }
+    },
+    "where_unsafe": {
+      "type": "choice",
+      "instructions": "Where should the one unsafe block live?",
+      "criteria": {
+        "own_crate": "In its own small crate with a safe API, so every other crate keeps forbid(unsafe_code).",
+        "worker_main": "In the worker binary, relaxing its forbid to deny with one allow.",
+        "telemetry": "In the shared telemetry crate, relaxing its forbid."
+      }
+    },
+    "logoff_shutdown": {
+      "type": "choice",
+      "instructions": "Logoff and shutdown events are probably never delivered to the worker (it loads user32) and cannot be run in a test. What should this slice do about them?",
+      "criteria": {
+        "name_limit": "Handle them in the same handler if they arrive, and name in the evidence that they were not run and may not be delivered.",
+        "hidden_window": "Add a hidden window that answers WM_QUERYENDSESSION now, more unsafe code, untestable without logging off.",
+        "ignore": "Do not handle them and do not mention them."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "design",
+      "jev": "own_handler_new_crate",
+      "laya": "own_handler_new_crate",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "own_handler_new_crate",
+        "confidence": 0.92,
+        "probabilities": {
+          "own_handler_new_crate": 0.94,
+          "second_handler_keep_ctrlc": 0.04,
+          "unsafe_in_worker": 0.02,
+          "leave_it": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "own_handler_new_crate",
+        "probabilities": {
+          "own_handler_new_crate": 0.9969,
+          "second_handler_keep_ctrlc": 0.0,
+          "unsafe_in_worker": 0.0013,
+          "leave_it": 0.0018
+        },
+        "confidence": 0.9832,
+        "answer_confidence": 0.9969,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "least_risk_to_proven_path",
+      "jev": "second_handler_keep_ctrlc",
+      "laya": "own_handler_new_crate",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "second_handler_keep_ctrlc",
+        "confidence": 0.83,
+        "probabilities": {
+          "own_handler_new_crate": 0.02,
+          "second_handler_keep_ctrlc": 0.87,
+          "unsafe_in_worker": 0,
+          "leave_it": 0.11
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "own_handler_new_crate",
+        "probabilities": {
+          "own_handler_new_crate": 1.0,
+          "second_handler_keep_ctrlc": 0.0,
+          "unsafe_in_worker": 0.0,
+          "leave_it": 0.0
+        },
+        "confidence": 0.9997,
+        "answer_confidence": 1.0,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "best_record",
+      "jev": "own_handler_new_crate",
+      "laya": "own_handler_new_crate",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "own_handler_new_crate",
+        "confidence": 1,
+        "probabilities": {
+          "own_handler_new_crate": 1,
+          "second_handler_keep_ctrlc": 0,
+          "unsafe_in_worker": 0,
+          "leave_it": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "own_handler_new_crate",
+        "probabilities": {
+          "own_handler_new_crate": 1.0,
+          "second_handler_keep_ctrlc": 0.0,
+          "unsafe_in_worker": 0.0,
+          "leave_it": 0.0
+        },
+        "confidence": 0.9997,
+        "answer_confidence": 1.0,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "where_unsafe",
+      "jev": "own_crate",
+      "laya": "own_crate",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "own_crate",
+        "confidence": 1,
+        "probabilities": {
+          "own_crate": 1,
+          "worker_main": 0,
+          "telemetry": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "own_crate",
+        "probabilities": {
+          "own_crate": 0.5875,
+          "worker_main": 0.4104,
+          "telemetry": 0.002
+        },
+        "confidence": 0.3714,
+        "answer_confidence": 0.5875,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "logoff_shutdown",
+      "jev": "name_limit",
+      "laya": "ignore",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "name_limit",
+        "confidence": 1,
+        "probabilities": {
+          "name_limit": 1,
+          "hidden_window": 0,
+          "ignore": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "ignore",
+        "probabilities": {
+          "name_limit": 0.3002,
+          "hidden_window": 0.0926,
+          "ignore": 0.6071
+        },
+        "confidence": 0.1948,
+        "answer_confidence": 0.6071,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,254 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 38347,
+    "output_tokens": 0,
+    "state_tokens": 4728,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.18: a console window close ends the engine in order (the limit left by 2.16), with a user-approved unsafe block",
+    "done_when": "An engine ended by closing its console window writes `engine.stop` naming that\nevent, then `log.stop`, and exits 0, as Ctrl+C and Ctrl+Break do; each of the\nthree is named by its own reason; the next start names none of them as\nunfinished.",
+    "evidence": "# 2.18 \u2014 a console window close ends the engine in order (17 Nov 2026)\n\nRow 2.16 left a named limit: Ctrl+C and Ctrl+Break ended the engine in order, but\na console window close wrote `engine.stop` and not `log.stop`, so the next start\nreported an engine that was closed on purpose as one that died. The user allowed\na small `unsafe` block to close it (17 Nov 2026). This row is that fix.\n\n## Done-when\n\n> An engine ended by closing its console window writes `engine.stop` naming that\n> event, then `log.stop`, and exits 0, as Ctrl+C and Ctrl+Break do; each of the\n> three is named by its own reason; the next start names none of them as\n> unfinished.\n\n## What was built\n\n- **`Shared/console-stop`** (`gx-console-stop`), a new workspace crate. One safe\n  function, `on_console_event(closure)`, registers a Windows console control\n  handler and calls the closure with the event that came (`CtrlC`, `CtrlBreak`,\n  `Close`, `Logoff`, `Shutdown`) **on the system's handler thread, before the\n  handler returns**. That ordering is the fix: Windows ends the process when the\n  handler for a close returns, and `ctrlc` (2.16) ran the closure on another\n  thread, which lost the race. The crate holds the one `unsafe` block in the\n  stop path (a single call to `SetConsoleCtrlHandler`); it is `deny(unsafe_code)`\n  with one `allow`. A panic in the closure is caught and does not unwind into the\n  system. One handler per process; a second is refused.\n- **The engine** (`services/render-engine/worker/src/main.rs`) uses that crate\n  instead of `ctrlc`, keeps `#![forbid(unsafe_code)]`, and writes `engine.stop`\n  with the exact event as its reason: \"Ctrl+C at the console\", \"Ctrl+Break at the\n  console\", \"the console window was closed\", \"the user logged off\", \"the system\n  is shutting down\". Before, one generic reason named all five.\n- **No download.** `windows-sys 0.61.2` with `Win32_System_Console` was already\n  in the lockfile (through `ctrlc`). `Cargo.lock` gains only the new workspace\n  crate and moves `ctrlc` from the worker to it. `ctrlc` is now used only off\n  Windows, inside `gx-console-stop`.\n\n## What was run\n\n- `cargo test -p gx-console-stop`: 3 of 3 (each control code maps to its own\n  event and reserved codes to none; every event has its own reason; the closure\n  gets each event before the handler returns, a panic is caught, a second\n  handler is refused).\n- `cargo test -p gx-render-worker --bin gx-render-worker`: 1 of 1 (a console\n  event leaves `engine.stop` naming it and then `log.stop`).\n- **Live, on the real engine binary** (`node docs/evidence/2.18/live-check.mjs`,\n  result in `live-check-result.json`): **15 of 15**. Three engines, each in its\n  own console window, ended by a real Ctrl+C, a real Ctrl+Break and the window's\n  own close request. Each exited 0, wrote `engine.stop` at info with its own\n  reason, and had `engine.stop`, `log.stop` as its last two records. A fourth\n  engine named none of them, was killed outright and wrote no stop record; a\n  fifth named it once (pid, last sequence number, last timestamp), so the 2.16\n  naming of a real kill holds beside the new handler.\n- The gate (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`) is\n  recorded in the plan row and `memory.md`.\n\n## Mutations\n\n13, one at a time, each restored byte-identical, each made a named check fail\n(`mutations.log`, the runner's own output; the runner writes to a file, kills the\nprocess tree on timeout and sweeps scratch engines).\n\n| # | Mutation | Fails |\n|---|---|---|\n| C1 | a window close is not a known event | `each_control_code_is_its_own_event_and_the_reserved_ones_are_none` |\n| C2 | a reserved code is taken for a shutdown | the same test |\n| C3 | a panic in the closure is not caught | `the_closure_gets_each_event_before_the_handler_returns_and_a_second_is_refused` |\n| C4 | a second handler is accepted | the same test |\n| C5 | a logoff and a shutdown give the same reason | `every_event_has_its_own_reason` |\n| C6 | the close reason says something else | worker `an_interrupt_writes_engine_stop_and_finishes_the_log` |\n| C7 | the closure runs on another thread and the handler returns at once (the 2.16 behaviour) | live: \"a window close: the last two records are engine.stop and log.stop\", its exit code, and \"the next engine names none of the three\" |\n| C8 | the handler is removed, not added | live: every Ctrl+C and Ctrl+Break check |\n| D1 | a console event writes no `engine.stop` | worker `an_interrupt_writes_engine_stop_and_finishes_the_log` |\n| D2 | a console event does not finish the log | the same test |\n| D3 | every event is recorded as Ctrl+C | live: the Ctrl+Break reason and the close reason |\n| D4 | the handler ends the process with code 1 | live: exit code 0, all three events |\n| D5 | the handler records the stop and returns without ending the process | live: exit code 0, all three events |\n\nC7 is the one that matters most: it puts the 2.16 behaviour back, the unit tests\nstill pass, and only the live window close catches it.\n\n## Limits and readings\n\n1. **Logoff and shutdown were not run.** They would end the user's session.\n   Windows also documents that a process which has loaded `user32.dll` or\n   `gdi32.dll` is not sent them, and the engine loads a GPU stack, so it probably\n   gets neither. They are handled the same way if they arrive. If they do not, the\n   engine is ended without a stop record and the next start names it (2.16).\n2. **The closure has about five seconds** after a window close before Windows\n   ends the process anyway. Finishing the log took well under that in every run;\n   an engine whose log disk is stalled would still be cut off, and named by the\n   next start.\n3. **Only the engine has a handler.** The engine host and the MCP servers still\n   run no code on Ctrl+C or a window close (unchanged from 2.16); the crate is\n   there for them to use.\n4. **A process with no console gets no event**, and a process can inherit \"ignore\n   Ctrl+C\" from the one that started it (unchanged from 2.16).\n5. **Off Windows is compiled nowhere on this machine and not run** (user decision,\n   17 Nov 2026: Windows-supported work first). There the crate hands the closure\n   to `ctrlc` with the one event `Interrupt`.\n6. **There is still no stop request on the control plane.** That is row 2.19.\n7. **2.16's live check** asserted the old generic reason; its pattern now accepts\n   the new reasons too, and its `--close` note is out of date (this row's check is\n   the one that covers a window close).\n",
+    "code": "--- Shared/console-stop/src/lib.rs (all but its tests)\n#![deny(unsafe_code)]\n\nuse std::fmt;\nuse std::sync::OnceLock;\n\n/// What ended the process from its console.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum ConsoleEvent {\n    /// Ctrl+C was pressed in the console.\n    CtrlC,\n    /// Ctrl+Break was pressed in the console.\n    CtrlBreak,\n    /// The console window was closed (its close button, or a request to close).\n    Close,\n    /// The user is logging off.\n    Logoff,\n    /// The system is shutting down.\n    Shutdown,\n    /// An interrupt signal, off Windows.\n    Interrupt,\n}\n\nimpl ConsoleEvent {\n    /// The event in words, for a stop record's reason.\n    pub const fn reason(self) -> &'static str {\n        match self {\n            Self::CtrlC => \"Ctrl+C at the console\",\n            Self::CtrlBreak => \"Ctrl+Break at the console\",\n            Self::Close => \"the console window was closed\",\n            Self::Logoff => \"the user logged off\",\n            Self::Shutdown => \"the system is shutting down\",\n            Self::Interrupt => \"an interrupt signal\",\n        }\n    }\n\n    /// The event for a Windows console control code, or `None` for a code this\n    /// crate does not know (which is then left to the next handler).\n    pub const fn from_control_code(code: u32) -> Option<Self> {\n        // The values of CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT,\n        // CTRL_LOGOFF_EVENT and CTRL_SHUTDOWN_EVENT. 3 and 4 are reserved.\n        match code {\n            0 => Some(Self::CtrlC),\n            1 => Some(Self::CtrlBreak),\n            2 => Some(Self::Close),\n            5 => Some(Self::Logoff),\n            6 => Some(Self::Shutdown),\n            _ => None,\n        }\n    }\n}\n\n/// Why the handler could not be installed.\n#[derive(Debug)]\npub enum InstallError {\n    /// A handler was already installed in this process. There is one.\n    AlreadyInstalled,\n    /// The system refused the registration.\n    System(std::io::Error),\n}\n\nimpl fmt::Display for InstallError {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Self::AlreadyInstalled => f.write_str(\"a console handler is already installed\"),\n            Self::System(error) => write!(f, \"the system refused the console handler: {error}\"),\n        }\n    }\n}\n\nimpl std::error::Error for InstallError {}\n\ntype Handler = Box<dyn Fn(ConsoleEvent) + Send + Sync>;\n\nstatic HANDLER: OnceLock<Handler> = OnceLock::new();\n\n/// Call `handler` when the console ends this process, with the event that\n/// came, on the system's handler thread and before the process is ended.\n///\n/// The closure normally records the stop and exits the process. If it returns,\n/// the event counts as handled: Ctrl+C and Ctrl+Break then leave the process\n/// running, and a close, logoff or shutdown ends it.\n///\n/// One handler per process: a second call is refused.\npub fn on_console_event(\n    handler: impl Fn(ConsoleEvent) + Send + Sync + 'static,\n) -> Result<(), InstallError> {\n    if HANDLER.set(Box::new(handler)).is_err() {\n        return Err(InstallError::AlreadyInstalled);\n    }\n    platform::register()\n}\n\n/// Hand a control code to the installed closure, as the system does. Returns\n/// whether the event was handled: `false` for a code this crate does not know,\n/// when no closure is installed, or when the closure panicked (the event then\n/// goes to the next handler, which by default ends the process).\n///\n/// Public so a test can deliver an event without raising one on a console it\n/// shares with the test runner.\npub fn deliver(code: u32) -> bool {\n    let (Some(event), Some(handler)) = (ConsoleEvent::from_control_code(code), HANDLER.get())\n    else {\n        return false;\n    };\n    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(event))).is_ok()\n}\n\n#[cfg(windows)]\nmod platform {\n    use super::InstallError;\n    use windows_sys::core::BOOL;\n    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;\n\n    /// What the system calls, on a thread it creates for the purpose.\n    extern \"system\" fn routine(code: u32) -> BOOL {\n        BOOL::from(super::deliver(code))\n    }\n\n    pub(super) fn register() -> Result<(), InstallError> {\n        // SAFETY: `routine` is a plain function with the signature the system\n        // expects, it lives for the life of the process, and it does not\n        // unwind (`deliver` catches a panic). Adding a handler has no other\n        // precondition.\n        #[allow(unsafe_code)]\n        let added = unsafe { SetConsoleCtrlHandler(Some(routine), 1) };\n        if added == 0 {\n            return Err(InstallError::System(std::io::Error::last_os_error()));\n        }\n        Ok(())\n    }\n}\n\n#[cfg(not(windows))]\nmod platform {\n    use super::{ConsoleEvent, InstallError, HANDLER};\n\n    pub(super) fn register() -> Result<(), InstallError> {\n        ctrlc::set_handler(|| {\n            if let Some(handler) = HANDLER.get() {\n                handler(ConsoleEvent::Interrupt);\n            }\n        })\n        .map_err(|error| InstallError::System(std::io::Error::other(error)))\n    }\n}\n\n\n--- services/render-engine/worker/src/main.rs (excerpt)\ntype SharedLog = Arc<Mutex<Option<gx_telemetry::sink::LogGuard>>>;\n\n/// Write the log out and end it. The lock is held while the log finishes, so an\n/// interrupt that arrives during a normal exit waits for it instead of ending\n/// the process in the middle of the last lines.\nfn finish_log(log: &SharedLog) {\n    let Ok(mut slot) = log.lock() else { return };\n    if let Some(guard) = slot.take() {\n        let _ = guard.finish();\n    }\n}\n\nfn log_directory(log: &SharedLog) -> Option<String> {\n    let slot = log.lock().ok()?;\n    slot.as_ref()\n        .map(|guard| guard.directory().display().to_string())\n}\n\n/// What a console event does to the record: say which one stopped the engine,\n/// then write the log out. The handler then ends the process.\nfn record_interrupt(log: &SharedLog, event: gx_console_stop::ConsoleEvent) {\n    tracing::info!(event = \"engine.stop\", reason = event.reason());\n    finish_log(log);\n}\n\n/// Make a stop from the console orderly and on record. Without a handler a\n/// Windows process ended from its console runs none of its own code, so the log\n/// has no `engine.stop` and no `log.stop`, and the file of an engine that was\n/// stopped on purpose looks like the file of one that died.\n///\n/// The closure runs on the system's handler thread and has finished the log\n/// before that handler returns (`gx-console-stop`, 2.18). That is what makes a\n/// console window close orderly: Windows ends the process when the handler\n/// returns, and under 2.16 (the `ctrlc` crate, which runs its closure on another\n/// thread) the file ended at `engine.stop` without `log.stop`. Ctrl+C, Ctrl+Break\n/// and a window close each end the engine with `engine.stop` naming the event,\n/// `log.stop` and exit code 0 (run live, `docs/evidence/2.18`). A logoff or\n/// shutdown is handled the same way if Windows delivers it; neither was run.\nfn install_interrupt_handler(log: &SharedLog) {\n    let log = Arc::clone(log);\n    let installed = gx_console_stop::on_console_event(move |event| {\n        record_interrupt(&log, event);\n        std::process::exit(0);\n    });\n    if let Err(error) = installed {\n        eprintln!(\n            \"cannot watch the console ({error}): Ctrl+C or a window close will end the engine without a stop record\"\n        );\n        tracing::warn!(event = \"engine.interrupt_handler_failed\", detail = %error);\n    }\n}\n\n"
+  },
+  "questions": {
+    "close_orderly": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from a run of the real engine, that closing its console window ends it with engine.stop naming that event, then log.stop as the last record, and exit code 0?",
+      "criteria": {
+        "true": "Yes, executed on the real engine.",
+        "false": "No, only claimed or only unit-tested."
+      }
+    },
+    "ctrl_c_still_orderly": {
+      "type": "noul",
+      "instructions": "Does the evidence show that Ctrl+C and Ctrl+Break, whose mechanism changed in this slice, still end the real engine in order?",
+      "criteria": {
+        "true": "Yes, run again on the real engine after the change.",
+        "false": "No, relies on the earlier row."
+      }
+    },
+    "unsafe_sound": {
+      "type": "noul",
+      "instructions": "Is the one unsafe block sound: is the SAFETY comment true of the code shown (signature, lifetime, no unwinding into the system)?",
+      "criteria": {
+        "true": "Yes, sound as written.",
+        "false": "No, a stated condition does not hold."
+      }
+    },
+    "handler_can_deadlock": {
+      "type": "noul",
+      "instructions": "Can the closure, which runs on the system handler thread and locks the shared log, deadlock or lose records in a way the evidence does not name?",
+      "criteria": {
+        "true": "Yes, an unnamed case exists.",
+        "false": "No, or every such case is named."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, including one that restores the old behaviour and is caught only by the live window close?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "logoff_shutdown_not_run": "Logoff and shutdown were not run and may never be delivered.",
+        "five_second_limit": "The closure has only about five seconds after a close.",
+        "only_engine": "Only the engine has a handler.",
+        "non_windows_not_compiled": "The non-Windows path is not compiled or run.",
+        "close_request_not_button": "The close was a programmatic close request, not a person clicking the button.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "close_orderly",
+      "jev": 0.97,
+      "laya": 0.9895,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9895,
+        "confidence": 0.9895,
+        "answer_confidence": 0.9895,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "ctrl_c_still_orderly",
+      "jev": 0.95,
+      "laya": 0.9887,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9887,
+        "confidence": 0.9887,
+        "answer_confidence": 0.9887,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unsafe_sound",
+      "jev": 0.9,
+      "laya": 0.9755,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.9
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9755,
+        "confidence": 0.9755,
+        "answer_confidence": 0.9755,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "handler_can_deadlock",
+      "jev": 0.72,
+      "laya": 0.9473,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.72
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9473,
+        "confidence": 0.9473,
+        "answer_confidence": 0.9473,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.37,
+      "laya": 0.9875,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.37
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9875,
+        "confidence": 0.9875,
+        "answer_confidence": 0.9875,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.98,
+      "laya": 0.9872,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9872,
+        "confidence": 0.9872,
+        "answer_confidence": 0.9872,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "logoff_shutdown_not_run",
+      "laya": "only_engine",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "logoff_shutdown_not_run",
+        "confidence": 0.86,
+        "probabilities": {
+          "none": 0,
+          "logoff_shutdown_not_run": 0.88,
+          "five_second_limit": 0.01,
+          "only_engine": 0,
+          "non_windows_not_compiled": 0.08,
+          "close_request_not_button": 0.03,
+          "vague_record": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "only_engine",
+        "probabilities": {
+          "none": 0.0574,
+          "logoff_shutdown_not_run": 0.0398,
+          "five_second_limit": 0.0577,
+          "only_engine": 0.4636,
+          "non_windows_not_compiled": 0.0708,
+          "close_request_not_button": 0.0308,
+          "vague_record": 0.2798
+        },
+        "confidence": 0.2474,
+        "answer_confidence": 0.4636,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.36,
+      "laya": 0.9368,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.36
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9368,
+        "confidence": 0.9368,
+        "answer_confidence": 0.9368,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

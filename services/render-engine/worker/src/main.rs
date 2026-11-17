@@ -83,7 +83,8 @@ fn main() {
         Locality::CoLocated
     };
     // 2.12: the engine's log, from here on. Kept for the life of the process, and
-    // shared with the interrupt handler (2.16), which is what ends it on Ctrl+C.
+    // shared with the console handler (2.16, 2.18), which is what ends it on
+    // Ctrl+C or a window close.
     let log: SharedLog = Arc::new(Mutex::new(gx_telemetry::sink::init_process_logging(
         "engine", "worker",
     )));
@@ -244,11 +245,6 @@ fn main() {
 /// (2.16). Whichever ends the process takes the guard out and finishes it.
 type SharedLog = Arc<Mutex<Option<gx_telemetry::sink::LogGuard>>>;
 
-/// Why the engine stopped when a console control event ended it. The handler is
-/// the same for each event and is not told which, so the reason names them all.
-const INTERRUPT_REASON: &str =
-    "a console control event (Ctrl+C, Ctrl+Break, window close, logoff or shutdown)";
-
 /// Write the log out and end it. The lock is held while the log finishes, so an
 /// interrupt that arrives during a normal exit waits for it instead of ending
 /// the process in the middle of the last lines.
@@ -265,34 +261,42 @@ fn log_directory(log: &SharedLog) -> Option<String> {
         .map(|guard| guard.directory().display().to_string())
 }
 
-/// What an interrupt does to the record: say why the engine stopped, then write
-/// the log out. The handler then ends the process.
-fn record_interrupt(log: &SharedLog) {
-    tracing::info!(event = "engine.stop", reason = INTERRUPT_REASON);
-    finish_log(log);
+/// What a console event does to the record: say which one stopped the engine,
+/// then write the log out. The handler then ends the process.
+///
+/// The log is taken first, and the stop is written only by whoever took it. A
+/// second event (Ctrl+C pressed twice, or a close during a Ctrl+C) arrives on
+/// its own thread: it waits here for the first to finish the log and then
+/// writes nothing, so a file has one `engine.stop`, and it is before `log.stop`.
+fn record_interrupt(log: &SharedLog, event: gx_console_stop::ConsoleEvent) {
+    let Ok(mut slot) = log.lock() else { return };
+    let Some(guard) = slot.take() else { return };
+    tracing::info!(event = "engine.stop", reason = event.reason());
+    let _ = guard.finish();
 }
 
-/// Make Ctrl+C an orderly stop, on record. Without a handler a Windows process
-/// ended from the console runs none of its own code, so the log has no
-/// `engine.stop` and no `log.stop`, and the file of an engine that was stopped
-/// on purpose looks like the file of one that died. `#![forbid(unsafe_code)]`
-/// rules out a hand-written console handler; this is the `ctrlc` crate.
+/// Make a stop from the console orderly and on record. Without a handler a
+/// Windows process ended from its console runs none of its own code, so the log
+/// has no `engine.stop` and no `log.stop`, and the file of an engine that was
+/// stopped on purpose looks like the file of one that died.
 ///
-/// Ctrl+C and Ctrl+Break end the engine with `engine.stop`, `log.stop` and exit
-/// code 0 (run live, `docs/evidence/2.16`). A console window close, logoff or
-/// shutdown reach the same handler, but Windows ends the process as soon as the
-/// crate's system handler returns, which is before this one has finished: the
-/// file usually ends at `engine.stop` without `log.stop`, and the next start names
-/// it as unfinished. That is a limit of the crate, not something to hide.
+/// The closure runs on the system's handler thread and has finished the log
+/// before that handler returns (`gx-console-stop`, 2.18). That is what makes a
+/// console window close orderly: Windows ends the process when the handler
+/// returns, and under 2.16 (the `ctrlc` crate, which runs its closure on another
+/// thread) the file ended at `engine.stop` without `log.stop`. Ctrl+C, Ctrl+Break
+/// and a window close each end the engine with `engine.stop` naming the event,
+/// `log.stop` and exit code 0 (run live, `docs/evidence/2.18`). A logoff or
+/// shutdown is handled the same way if Windows delivers it; neither was run.
 fn install_interrupt_handler(log: &SharedLog) {
     let log = Arc::clone(log);
-    let installed = ctrlc::set_handler(move || {
-        record_interrupt(&log);
+    let installed = gx_console_stop::on_console_event(move |event| {
+        record_interrupt(&log, event);
         std::process::exit(0);
     });
     if let Err(error) = installed {
         eprintln!(
-            "cannot watch for Ctrl+C ({error}): an interrupt will end the engine without a stop record"
+            "cannot watch the console ({error}): Ctrl+C or a window close will end the engine without a stop record"
         );
         tracing::warn!(event = "engine.interrupt_handler_failed", detail = %error);
     }
@@ -449,8 +453,8 @@ mod tests {
     use super::*;
     use tracing_subscriber::layer::SubscriberExt;
 
-    /// 2.16: an interrupt leaves `engine.stop` with its reason and then
-    /// `log.stop`, as the last two lines of the file, at info.
+    /// 2.16, 2.18: a console event leaves `engine.stop` naming that event and
+    /// then `log.stop`, as the last two lines of the file, at info.
     #[test]
     fn an_interrupt_writes_engine_stop_and_finishes_the_log() {
         let directory = std::env::temp_dir().join(format!(
@@ -468,7 +472,9 @@ mod tests {
         let subscriber = tracing_subscriber::registry().with(guard.layer());
         let log: SharedLog = Arc::new(Mutex::new(Some(guard)));
 
-        tracing::subscriber::with_default(subscriber, || record_interrupt(&log));
+        tracing::subscriber::with_default(subscriber, || {
+            record_interrupt(&log, gx_console_stop::ConsoleEvent::Close);
+        });
 
         let file = std::fs::read_dir(directory.join("engine"))
             .expect("the product folder exists")
@@ -487,10 +493,71 @@ mod tests {
             .collect();
         assert_eq!(events, ["log.start", "engine.stop", "log.stop"]);
         assert_eq!(records[1]["level"], "info");
-        assert_eq!(records[1]["fields"]["reason"], INTERRUPT_REASON);
+        assert_eq!(
+            records[1]["fields"]["reason"],
+            "the console window was closed"
+        );
         // The guard was taken, so a normal exit that follows finishes nothing twice.
         assert!(log.lock().expect("lock").is_none());
         finish_log(&log);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    /// 2.18: a second console event that arrives while the first is still
+    /// finishing the log (Ctrl+C pressed twice) waits for it and writes nothing:
+    /// the file has one `engine.stop`, the first one's.
+    #[test]
+    fn a_second_event_during_the_first_waits_and_writes_nothing() {
+        let directory = std::env::temp_dir().join(format!(
+            "gx-worker-interrupt-twice-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
+        ));
+        std::fs::create_dir_all(&directory).expect("a scratch folder is created");
+        let guard = gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new(
+            "engine", "worker", &directory,
+        ))
+        .expect("the sink starts");
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(guard.layer()));
+        let log: SharedLog = Arc::new(Mutex::new(Some(guard)));
+
+        // The first event, stopped half way: it has taken the log and not yet
+        // finished it, and still holds the lock.
+        let mut slot = log.lock().expect("lock");
+        let first = slot.take().expect("the log is there");
+        let second = {
+            let (log, dispatch) = (Arc::clone(&log), dispatch.clone());
+            thread::spawn(move || {
+                tracing::dispatcher::with_default(&dispatch, || {
+                    record_interrupt(&log, gx_console_stop::ConsoleEvent::CtrlC);
+                });
+            })
+        };
+        // Time for the second event to write, if it were going to.
+        thread::sleep(Duration::from_millis(400));
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(event = "engine.stop", reason = "the first event");
+        });
+        first.finish().expect("the log finishes");
+        drop(slot);
+        second.join().expect("the second event returns");
+
+        let file = std::fs::read_dir(directory.join("engine"))
+            .expect("the product folder exists")
+            .flatten()
+            .next()
+            .expect("one file was written")
+            .path();
+        let stops: Vec<String> = std::fs::read_to_string(file)
+            .expect("the file reads")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON"))
+            .filter(|record| record["event"] == "engine.stop")
+            .map(|record| record["fields"]["reason"].as_str().unwrap_or("").to_owned())
+            .collect();
+        assert_eq!(stops, ["the first event"]);
         let _ = std::fs::remove_dir_all(directory);
     }
 }
