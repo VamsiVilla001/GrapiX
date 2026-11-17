@@ -1245,10 +1245,14 @@ impl Engine {
                 what: "authentication is a transport concern, not an engine one".to_string(),
             }),
 
-            ClientRequest::Capability => match check_protocol(gx_contracts::PROTOCOL_VERSION) {
-                Ok(()) => EngineReply::Capability(self.capability()),
-                Err(refusal) => EngineReply::Refused(refusal),
-            },
+            // 2.20: the protocol the client says it speaks is compared with this
+            // engine's. A client that does not say is served.
+            ClientRequest::Capability { protocol } => {
+                match protocol.map_or(Ok(()), check_protocol) {
+                    Ok(()) => EngineReply::Capability(self.capability()),
+                    Err(refusal) => EngineReply::Refused(refusal),
+                }
+            }
 
             ClientRequest::Status => {
                 self.sync_clock();
@@ -1493,12 +1497,47 @@ mod tests {
         Engine::new(Arc::new(AtomicU64::new(0)), Locality::CoLocated)
     }
 
+    // --- 2.20: the protocol a client states ------------------------------------------
+
+    /// A client that states another protocol is refused by name, naming both; one
+    /// that states this engine's is served; one that does not say is served.
+    #[test]
+    fn the_engine_refuses_a_client_that_states_another_protocol_by_name() {
+        let mut e = engine();
+        let other = gx_contracts::PROTOCOL_VERSION + 1;
+        assert_eq!(
+            e.handle(ClientRequest::Capability {
+                protocol: Some(other)
+            }),
+            EngineReply::Refused(Refusal::ProtocolMismatch {
+                expected: gx_contracts::PROTOCOL_VERSION,
+                actual: other
+            })
+        );
+        assert_eq!(
+            e.handle(ClientRequest::Capability { protocol: Some(0) }),
+            EngineReply::Refused(Refusal::ProtocolMismatch {
+                expected: gx_contracts::PROTOCOL_VERSION,
+                actual: 0
+            })
+        );
+        for served in [
+            ClientRequest::capability(),
+            ClientRequest::Capability { protocol: None },
+        ] {
+            assert!(
+                matches!(e.handle(served), EngineReply::Capability(_)),
+                "served"
+            );
+        }
+    }
+
     #[test]
     fn an_engine_without_a_material_renderer_declares_no_material_support() {
         let mut engine = engine();
         assert_eq!(engine.material_support(), MaterialSupport::none());
         assert_eq!(engine.capability().material, MaterialSupport::none());
-        let EngineReply::Capability(capability) = engine.handle(ClientRequest::Capability) else {
+        let EngineReply::Capability(capability) = engine.handle(ClientRequest::capability()) else {
             panic!("capability exchange must succeed")
         };
         assert_eq!(capability.material, MaterialSupport::none());

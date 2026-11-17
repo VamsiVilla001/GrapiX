@@ -64,7 +64,7 @@ impl RequestNote {
             ClientRequest::ConfigureOutput(config) => note.output = Some(format!("{config:?}")),
             ClientRequest::Render(r) => return Self::render(r),
             ClientRequest::Authenticate { .. }
-            | ClientRequest::Capability
+            | ClientRequest::Capability { .. }
             | ClientRequest::Status
             | ClientRequest::Stop
             | ClientRequest::Performance => {}

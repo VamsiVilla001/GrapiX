@@ -14,6 +14,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 parking_lot = "0.12"
+gx-mock-engine = { path = "../../../mocks/mock-engine" }
 serde_json = { workspace = true }
 
 [lib]

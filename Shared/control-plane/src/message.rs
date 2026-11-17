@@ -35,8 +35,14 @@ pub enum ClientRequest {
     Authenticate {
         token: String,
     },
-    /// Capability exchange, including locality tier (ADR-001 action 2).
-    Capability,
+    /// Capability exchange, including locality tier (ADR-001 action 2). The
+    /// client says which protocol version it speaks (2.20) and the engine
+    /// refuses a different one by name. A client that does not say is served,
+    /// and is left to check the reply it gets.
+    Capability {
+        #[serde(default)]
+        protocol: Option<u32>,
+    },
     Status,
     Cue(CueRequest),
     Take(TakeRequest),
@@ -56,11 +62,19 @@ pub enum ClientRequest {
 }
 
 impl ClientRequest {
+    /// The capability request a client of this build sends: it names the
+    /// protocol this build speaks.
+    pub fn capability() -> Self {
+        Self::Capability {
+            protocol: Some(gx_contracts::PROTOCOL_VERSION),
+        }
+    }
+
     /// The request's wire name: the `request` tag serde emits for it.
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Authenticate { .. } => "authenticate",
-            Self::Capability => "capability",
+            Self::Capability { .. } => "capability",
             Self::Status => "status",
             Self::Cue(_) => "cue",
             Self::Take(_) => "take",
@@ -82,7 +96,7 @@ impl ClientRequest {
     pub const fn required_scope(&self) -> Option<Scope> {
         match self {
             Self::Authenticate { .. }
-            | Self::Capability
+            | Self::Capability { .. }
             | Self::Status
             | Self::Performance
             | Self::Render(_) => None,
@@ -200,7 +214,7 @@ mod tests {
                 token: "gx1.test.0000000000000000000000000000000000000000000000000000000000000000"
                     .into(),
             },
-            ClientRequest::Capability,
+            ClientRequest::capability(),
             ClientRequest::Status,
             ClientRequest::Cue(CueRequest {
                 take_id: TakeId("t".into()),
@@ -228,6 +242,48 @@ mod tests {
             }),
             ClientRequest::Stop,
         ]
+    }
+
+    /// 2.20: the capability request names the protocol it speaks, and one that
+    /// does not say still reads.
+    #[test]
+    fn the_capability_request_names_the_protocol_and_one_that_does_not_still_reads() {
+        assert_eq!(
+            serde_json::to_string(&ClientRequest::capability()).unwrap(),
+            format!(
+                r#"{{"request":"capability","protocol":{}}}"#,
+                gx_contracts::PROTOCOL_VERSION
+            )
+        );
+        let unstated: ClientRequest = serde_json::from_str(r#"{"request":"capability"}"#).unwrap();
+        assert_eq!(unstated, ClientRequest::Capability { protocol: None });
+        let stated: ClientRequest =
+            serde_json::from_str(r#"{"request":"capability","protocol":3}"#).unwrap();
+        assert_eq!(stated, ClientRequest::Capability { protocol: Some(3) });
+        assert_eq!(stated.name(), "capability");
+        assert_eq!(stated.required_scope(), None);
+    }
+
+    /// 2.20: what an engine built before this row (where `capability` was a request
+    /// with nothing after it) does with the form this build sends. Written against a
+    /// copy of the old shape, so the answer is observed, not assumed.
+    #[test]
+    fn an_engine_that_predates_the_protocol_field_reads_the_new_request_as_it_always_did() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "request", rename_all = "camelCase")]
+        enum Before {
+            Capability,
+            Status,
+        }
+        let old: Before = serde_json::from_str(r#"{"request":"capability"}"#).unwrap();
+        assert_eq!(old, Before::Capability);
+        let new = serde_json::to_string(&ClientRequest::capability()).unwrap();
+        let read = serde_json::from_str::<Before>(&new);
+        assert_eq!(
+            read.as_ref().ok(),
+            Some(&Before::Capability),
+            "an older engine reading the new request: {read:?}"
+        );
     }
 
     /// 2.19: a stop request needs the stop scope, and no other Playout scope

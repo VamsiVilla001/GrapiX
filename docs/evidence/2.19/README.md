@@ -146,5 +146,10 @@ nothing further to fix. Laya answered 0.95 to 0.99 on every yes/no question, as 
 6. **A stop that arrives while the engine is already ending** (Ctrl+C, a fatal exit)
    waits for the log and then exits 0 from the handler thread; which exit code wins is
    a race. The log is whole either way.
-7. **No wire change is compatible**: version 7 refuses a version-6 peer, as every
-   protocol bump does (a mismatch is an error code, never a negotiation).
+7. **The version bump is not enforced on connect (corrected 17 Nov 2026, found by the OSI audit).** This
+   limit first said version 7 "refuses a version-6 peer, as every protocol bump does". It does not. The client
+   stores the engine's capability reply without comparing its protocol number, and the engine's own check
+   compares `PROTOCOL_VERSION` with itself (`engine.rs` `check_protocol(PROTOCOL_VERSION)`), so
+   `ProtocolMismatch` cannot be produced on the real path. A version-6 engine that is sent `stop` fails to
+   decode the unknown request and the connection closes: a refusal by accident, not by name. Editor, engine and
+   shells are built from one tree, which is the only thing that keeps them in step today.

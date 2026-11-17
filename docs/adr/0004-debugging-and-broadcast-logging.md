@@ -249,6 +249,14 @@ in a log is a bug, and a bundle that quietly cleaned it would hide it. Whole log
 `seq` still runs without a gap. The recovery journal is summarised, never copied with its scenes. Evidence:
 `docs/evidence/2.14/README.md`.
 
+## As built, row 2.20 (17 November 2026)
+
+The wire protocol version is compared on connect, from both sides (protocol 8). The `capability` request carries the version the client
+speaks; the engine refuses a different one by name (`protocolMismatch`, naming both), and the client refuses an engine whose reply reports
+another. A client that does not state its version is still served. Before this row nothing compared the two: the client stored the reply
+unread and the engine compared its own constant with itself. The engine host no longer mistakes an engine that answered and refused it for
+no engine. Evidence: `docs/evidence/2.20/README.md`; the audit that found it: `docs/audit/osi-layering-2026-11-17.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

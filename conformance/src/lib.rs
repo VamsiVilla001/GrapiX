@@ -212,6 +212,35 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
         ),
     );
 
+    // 2.20: the protocol a client states is compared, by the peer, on the wire.
+    let other = PROTOCOL_VERSION + 1;
+    let stated = peer.handle(ClientRequest::Capability {
+        protocol: Some(other),
+    });
+    report.record(
+        PLANE,
+        "a client that states another protocol is refused by name, with both versions",
+        expect(
+            matches!(
+                &stated,
+                EngineReply::Refused(Refusal::ProtocolMismatch { expected, actual })
+                    if *expected == PROTOCOL_VERSION && *actual == other
+            ),
+            format!("a client stating protocol {other} got {stated:?}"),
+        ),
+    );
+    let own = peer.handle(ClientRequest::capability());
+    let unstated = peer.handle(ClientRequest::Capability { protocol: None });
+    report.record(
+        PLANE,
+        "a client that states this protocol, or none, is served the capability",
+        expect(
+            matches!(own, EngineReply::Capability(_))
+                && matches!(unstated, EngineReply::Capability(_)),
+            format!("stated {own:?}, unstated {unstated:?}"),
+        ),
+    );
+
     report.record(
         PLANE,
         "capability declares a locality tier",
@@ -829,7 +858,7 @@ pub fn timing_plane_suite(report: &mut Report) {
             .as_str()
             .to_owned(),
         },
-        ClientRequest::Capability,
+        ClientRequest::capability(),
         ClientRequest::Status,
         ClientRequest::Cue(CueRequest {
             take_id: TakeId("t".into()),

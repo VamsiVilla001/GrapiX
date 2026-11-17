@@ -446,7 +446,7 @@ impl EnginePeer for DeclaredPeer {
     }
     fn handle(&mut self, request: ClientRequest) -> EngineReply {
         match request {
-            ClientRequest::Capability => EngineReply::Capability(self.capability()),
+            ClientRequest::Capability { .. } => EngineReply::Capability(self.capability()),
             _ => EngineReply::Refused(Refusal::NotImplemented {
                 what: "capability probe only".into(),
             }),

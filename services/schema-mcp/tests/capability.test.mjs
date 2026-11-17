@@ -26,9 +26,9 @@ test("the surface is read-only by construction", () => {
   assert.equal(status, "Partial");
 });
 
-test("the schema version travels with write-semantics protocol v7", () => {
-  assert.equal(SCHEMA_VERSION, 7);
-  assert.equal(getCapabilitySurface().protocolVersion, 7);
+test("the schema version travels with write-semantics protocol v8", () => {
+  assert.equal(SCHEMA_VERSION, 8);
+  assert.equal(getCapabilitySurface().protocolVersion, 8);
 });
 
 test("capability discovery enumerates the supported enums as data", () => {

@@ -118,6 +118,48 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-17 — 2.20 done: the wire version enforced on connect; OSI audit rows 2.21 to 2.24 added (Claude)
+
+**Resume here.** The user asked (17 Nov) to "fix the serious findings" of the OSI layering audit
+(`docs/audit/osi-layering-2026-11-17.md`, committed with this row). Order: **2.20** done (this entry), then **2.21** (one bind policy
+for every listener, `--lan` real, ports in one place, guard rules), **2.22** (timeouts, connection caps, acknowledgement eviction,
+low-latency accepted streams, a flush signal so the stop path does not sleep 250 ms), **2.23** (MCP HTTP authentication: a decision for
+the user, today any local process gets the Author scope), **2.24** (asset-plane authentication, resume, retry; also a decision).
+2.23 and 2.24 need the user's answer on the credential before they are built. Then **2.15** (named operator login for Playout) and
+**12.11** (as-run record; its done-when should gain "and the bundle holds it").
+
+What was built. `ClientRequest::Capability { protocol: Option<u32> }` (constructor `ClientRequest::capability()` states this build's
+protocol; the wire form `{"request":"capability","protocol":8}`; one without `protocol` still reads); `PROTOCOL_VERSION` 8. The engine
+(`engine.rs`) and the mock refuse a stated protocol that differs (`protocol.map_or(Ok(()), check_protocol)` ->
+`ProtocolMismatch`), serve one that does not say. `Client::connect` (`client.rs`) compares the engine's reported protocol with its own
+and refuses, `InvalidData` naming both. `gx_engine_host`: `nothing_is_listening(&io::Error)` (the system's own `ConnectionRefused`,
+which carries an OS error code, or `TimedOut`) and `SupervisorError::EngineUnusable` for an engine that answered and refused (a token
+the host does not hold, another protocol), instead of spawning a second worker that fails to bind.
+
+**Correction.** The 2.19 evidence said a protocol bump refuses a mismatched peer. It did not: nothing compared the versions. Fixed
+here and in `docs/evidence/2.19/README.md` limit 7.
+
+Verified: transport tests (3, both directions over the real wire), host tests (4), engine and mock unit tests, control-plane message
+test, conformance checks against the mock and the real worker, 10 of 10 mutations failed a named check; gate (fmt, clippy -D warnings, npm run check) exit 0: 424 Editor tests, 1012 Rust tests passed, 0 failed, 38 ignored, 60 Node tests, conformance 631 passed, 0 failed, 9 skipped.
+
+**Process lessons.** (1) Run each new test target on its own: `cargo test -p a -p b --lib` cannot take `--lib` twice. (2) A subagent's
+audit report is a lead, not a fact: I re-read the code for each claim before putting it in the report, and one of my own earlier
+claims fell to it. (3) rustfmt reflows a line a mutation must match: check every target text exists once before starting a long run.
+
+Limits named: a client that does not state its protocol is served (it relies on its own check of the reply); the asset plane and the MCP
+servers have no version negotiation of their own (2.24, 2.23); an older client that predates this row does not compare the version.
+
+## 2026-11-17 — OSI layering audit done, report only (Claude)
+
+The user asked (17 Nov) for the application to be "solidly built on the OSI model". Done as a read-only audit:
+`docs/audit/osi-layering-2026-11-17.md` (uncommitted until the user says; also an uncommitted correction to
+`docs/evidence/2.19/README.md` limit 7). No code was changed. Headline findings: the wire version is not enforced on connect
+(client never compares; the engine compares the constant with itself, so my 2.19 claim that v7 refuses a v6 peer was wrong and is
+corrected); MCP HTTP and the asset plane have no authentication; the asset plane and MCP bind outside `check_bind`; `--lan` only
+changes a label (both listeners stay on loopback); no timeouts, connection caps or acknowledgement eviction at the transport.
+Proposed rows 2.20 to 2.24 are in the report for the user to accept, reorder or refuse. In this repo "L0/L1" means locality tiers,
+not OSI layers. Next as before: 2.15 (named operator login for Playout), 12.11 (as-run record).
+
 ## 2026-11-17 — 2.14 done: the diagnostic bundle, module by module (Claude)
 
 **Resume here.** Next is **2.15** (named operator login for Playout), then **12.11** (as-run record: its done-when gains a line,

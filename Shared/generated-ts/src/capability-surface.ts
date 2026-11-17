@@ -8,8 +8,8 @@
 import type { CapabilitySurface } from "./CapabilitySurface.js";
 
 export const CAPABILITY_SURFACE: CapabilitySurface = {
-  "schemaVersion": 7,
-  "protocolVersion": 7,
+  "schemaVersion": 8,
+  "protocolVersion": 8,
   "enums": [
     {
       "name": "BlendMode",

@@ -2064,6 +2064,7 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-control-transport",
+ "gx-mock-engine",
  "gx-telemetry",
  "parking_lot",
  "serde_json",

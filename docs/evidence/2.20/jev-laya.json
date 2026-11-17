@@ -1,0 +1,277 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 41869,
+    "output_tokens": 0,
+    "state_tokens": 4584,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.20: the wire version enforced on connect (protocol 8)",
+    "done_when": "A client and an engine on different protocol versions refuse each other on connect, by name and naming\nboth versions, from either side, over the real wire; a client that does not state its version is still\nserved and checks the reply itself; the host does not start a second worker beside an engine that\nanswered and refused it.",
+    "evidence": "# 2.20 \u2014 the wire version enforced on connect (17 Nov 2026)\n\nThe OSI layering audit (`docs/audit/osi-layering-2026-11-17.md`, finding 1) found that the wire protocol\nversion was a number each side wrote down and nobody compared. The user asked for the serious findings\nto be fixed, and this is the first of them.\n\n## What was wrong\n\n- `Client::connect` stored the engine's capability reply without reading its `protocol` field.\n- The engine answered a capability request with `check_protocol(PROTOCOL_VERSION)`: the constant compared\n  with itself, which cannot fail. `ProtocolMismatch` could not be produced on the real path.\n- So every protocol bump (4 to 7) changed the number and enforced nothing, and the evidence of row 2.19\n  said otherwise (\"version 7 refuses a version-6 peer\"). That claim was wrong and is corrected in\n  `docs/evidence/2.19/README.md` (limit 7).\n\n## Done-when\n\n> A client and an engine on different protocol versions refuse each other on connect, by name and naming\n> both versions, from either side, over the real wire; a client that does not state its version is still\n> served and checks the reply itself; the host does not start a second worker beside an engine that\n> answered and refused it.\n\n## What was built\n\n- **`ClientRequest::Capability { protocol: Option<u32> }`.** The client says which protocol it speaks.\n  `ClientRequest::capability()` is the request a client of this build sends (`{\"request\":\"capability\",\n  \"protocol\":8}`); `{\"request\":\"capability\"}` still reads, as `protocol: None`. **`PROTOCOL_VERSION` is 8.**\n- **The engine and the mock** compare the stated protocol with their own (`protocol.map_or(Ok(()),\n  check_protocol)`): a different one is `Refused(ProtocolMismatch { expected, actual })`; one that is not\n  stated is served.\n- **The client** compares the protocol in the engine's capability reply with its own and refuses on\n  connect, `InvalidData`, with a message naming both versions. This is the check that protects a client\n  of this build from an engine that never learned to refuse.\n- **The host** (`gx-engine-host`) no longer takes any failed connect for \"nothing is listening\".\n  `nothing_is_listening(&io::Error)` is true for the operating system's own refusal (`ConnectionRefused`\n  carrying an OS error code) or a timeout; an engine that answered and then refused the host (a token the\n  host does not hold, another protocol) is `SupervisorError::EngineUnusable`, named, and **no second\n  worker is started beside it** (it would fail to bind, and the host would report that instead of the\n  refusal).\n- Generated TypeScript regenerated (`ClientRequest.ts`, the capability surface at protocol 8).\n\nNo download. No change to the asset plane or the MCP servers (no version negotiation there: rows 2.24\nand 2.23).\n\n## What was run\n\n- **Transport, over a real socket** (`Shared/control-transport/tests/protocol_version.rs`, 3): an engine\n  reporting a protocol one above, one below and zero is refused by `Client::connect` with `InvalidData`\n  naming both numbers; an engine on this protocol connects and its capability is kept; a client that states\n  another protocol is refused by name by the engine and one that states none is served.\n- **Host** (`services/render-engine/host/tests/adopt.rs`, 4): the classification (a real refused connect and\n  a timeout say nothing is listening; `PermissionDenied`, `InvalidData` and a `ConnectionRefused` without an OS\n  code do not); an engine with a token the host does not hold is `EngineUnusable` with `PermissionDenied`\n  and no spawn is attempted (the program it would start does not exist, so a spawn would be a different\n  error); an engine on another protocol is `EngineUnusable` with `InvalidData` naming the version; and\n  nothing listening still tries to start a worker.\n- **Unit tests:** the request's wire form and that the unstated form still reads (`message.rs`); the real\n  engine's three cases (`engine.rs`); the mock's (`mock-engine`).\n- **Conformance** (two new checks in the control-plane suite, which runs against the mock peers and the\n  real render worker process): a client that states another protocol is refused by name with both versions;\n  one that states this protocol or none is served.\n- Gate (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`): see the plan row.\n\n## Mutations\n\n10, one at a time, each restored byte-identical, each made a named check fail (`mutations.txt`).\n\n[Condensed: 10 mutations, each made a named check fail and was restored byte-identical: H1 the client does not compare the protocol the engine reports; H2 the client refuses only an engine on an older protocol; H3 the engine ignores the protocol a client states; H3c the same, seen by the conformance run against the real worker; H4 the mock ignores the protocol a client states; H5 the engine refuses a client that does not state a protocol; H6 the mismatch names the two versions the wrong way round; H7 a client of this build does not state its protocol; H8 the host takes any failed connect for nothing listening; H9 the host takes a refusal by name for the system's own refusal; H10 the protocol is not raised.]\n\n## Limits and readings\n\n1. **A client that does not state its protocol is served.** It relies on its own check of the reply. A client\n   built before this row sends no protocol and does not compare the reply: it is protected by nothing but the\n   fact that Editor, engine and shells are built from one tree.\n2. **Only the control plane is covered.** The asset plane (a publish, a fetch, a transfer) and the two MCP\n   servers carry no protocol version of their own: rows 2.24 and 2.23 (audit findings 3 and 2).\n3. **The mock refuses by the same rule**, not independently: a mock cannot catch the real engine's mistake,\n   which is why the conformance checks run against the real worker process too.\n4. **`ConnectionRefused` with an OS error code** is the host's only evidence that nothing listens. A firewall\n   that drops packets reports a timeout and is treated the same way.\n",
+    "code": "--- Shared/control-transport/src/client.rs (changed)\ndiff --git a/Shared/control-transport/src/client.rs b/Shared/control-transport/src/client.rs\nindex 57359a0..9330e44 100644\n--- a/Shared/control-transport/src/client.rs\n+++ b/Shared/control-transport/src/client.rs\n@@ -135,4 +135,16 @@ impl Client {\n         }\n-        match client.request(ClientRequest::Capability) {\n-            Ok(EngineReply::Capability(capability)) => client.capability = capability,\n+        match client.request(ClientRequest::capability()) {\n+            Ok(EngineReply::Capability(capability)) => {\n+                // 2.20: an engine that speaks another protocol is refused here, by\n+                // name, whatever it says about us. The engine's own check covers\n+                // the other direction.\n+                if capability.protocol != gx_contracts::PROTOCOL_VERSION {\n+                    let mismatch = Refusal::ProtocolMismatch {\n+                        expected: gx_contracts::PROTOCOL_VERSION,\n+                        actual: capability.protocol,\n+                    };\n+                    return Err(io::Error::new(kind_for(&mismatch), mismatch.to_string()));\n+                }\n+                client.capability = capability\n+            }\n             Ok(EngineReply::Refused(refusal)) => {\n\n--- services/render-engine/worker/src/engine.rs (changed)\ndiff --git a/services/render-engine/worker/src/engine.rs b/services/render-engine/worker/src/engine.rs\nindex 47a6abb..c87ce7a 100644\n--- a/services/render-engine/worker/src/engine.rs\n+++ b/services/render-engine/worker/src/engine.rs\n@@ -1247,6 +1247,10 @@ impl Engine {\n \n-            ClientRequest::Capability => match check_protocol(gx_contracts::PROTOCOL_VERSION) {\n-                Ok(()) => EngineReply::Capability(self.capability()),\n-                Err(refusal) => EngineReply::Refused(refusal),\n-            },\n+            // 2.20: the protocol the client says it speaks is compared with this\n+            // engine's. A client that does not say is served.\n+            ClientRequest::Capability { protocol } => {\n+                match protocol.map_or(Ok(()), check_protocol) {\n+                    Ok(()) => EngineReply::Capability(self.capability()),\n+                    Err(refusal) => EngineReply::Refused(refusal),\n+                }\n+            }\n \n@@ -1495,2 +1499,37 @@ \n--- Shared/control-plane/src/message.rs (changed)\ndiff --git a/Shared/control-plane/src/message.rs b/Shared/control-plane/src/message.rs\nindex 3f4360b..ff79ed1 100644\n--- a/Shared/control-plane/src/message.rs\n+++ b/Shared/control-plane/src/message.rs\n@@ -37,4 +37,10 @@ pub enum ClientRequest {\n     },\n-    /// Capability exchange, including locality tier (ADR-001 action 2).\n-    Capability,\n+    /// Capability exchange, including locality tier (ADR-001 action 2). The\n+    /// client says which protocol version it speaks (2.20) and the engine\n+    /// refuses a different one by name. A client that does not say is served,\n+    /// and is left to check the reply it gets.\n+    Capability {\n+        #[serde(default)]\n+        protocol: Option<u32>,\n+    },\n     Status,\n@@ -58,2 +64,10 @@ pub enum ClientRequest {\n impl ClientRequest {\n+    /// The capability request a client of this build sends: it names the\n+    /// protocol this build speaks.\n+    pub fn capability() -> Self {\n+        Self::Capability {\n+            protocol: Some(gx_contracts::PROTOCOL_VERSION),\n+        }\n+    }\n+\n     /// The request's wire name: the `request` tag serde emits for it.\n@@ -62,3 +76,3 @@ impl ClientRequest {\n             Self::Authenticate { .. } => \"authenticate\",\n-            Self::Capability => \"capability\",\n+            Self::Capability { .. } => \"capability\",\n             Self::Status => \"status\",\n@@ -84,3 +98,3 @@ impl ClientRequest {\n             Self::Authenticate { .. }\n-            | Self::Capability\n+            | Self::Capability { .. }\n             | Self::Status\n@@ -202,3 +216,3 @@ \n--- services/render-engine/host/src/lib.rs (changed)\ndiff --git a/services/render-engine/host/src/lib.rs b/services/render-engine/host/src/lib.rs\nindex 25dc5dc..0e1fb0d 100644\n--- a/services/render-engine/host/src/lib.rs\n+++ b/services/render-engine/host/src/lib.rs\n@@ -37,5 +37,21 @@ pub enum SupervisorError {\n     DataRoot(Refusal),\n-    ReservedSpawnArgument { argument: &'static str },\n-    Spawn { program: String, source: io::Error },\n-    WorkerUnavailable { source: io::Error, detail: String },\n+    ReservedSpawnArgument {\n+        argument: &'static str,\n+    },\n+    Spawn {\n+        program: String,\n+        source: io::Error,\n+    },\n+    WorkerUnavailable {\n+        source: io::Error,\n+        detail: String,\n+    },\n+    /// Something answers on the control port and cannot be used by this host: it\n+    /// refused the connection by name (a credential this host does not hold, or\n+    /// a protocol it does not speak). Not \"nothing is listening\", so no second\n+    /// worker is started beside it (2.20).\n+    EngineUnusable {\n+        endpoint: SocketAddr,\n+        source: io::Error,\n+    },\n }\n@@ -51,2 +67,6 @@ impl fmt::Display for SupervisorError {\n             Self::WorkerUnavailable { detail, .. } => f.write_str(detail),\n+            Self::EngineUnusable { endpoint, source } => write!(\n+                f,\n+                \"an engine answers at {endpoint} and refuses this host, so none is started beside it: {source}\"\n+            ),\n         }\n@@ -59,3 +79,5 @@ impl Error for SupervisorError {\n             Self::DataRoot(refusal) => Some(refusal),\n-            Self::Spawn { source, .. } | Self::WorkerUnavailable { source, .. } => Some(source),\n+            Self::Spawn { source, .. }\n+            | Self::WorkerUnavailable { source, .. }\n+            | Self::EngineUnusable { source, .. } => Some(source),\n             Self::ReservedSpawnArgument { .. } => None,\n@@ -107,2 +129,11 @@ impl Supervised {\n \n+/// Whether a failed connect says that nothing is listening: the operating\n+/// system's own refusal of the connection (or no answer in time), as opposed to\n+/// an answer from an engine that then refused this client, which the transport\n+/// reports without an operating-system error code (2.20).\n+pub fn nothing_is_listening(error: &io::Error) -> bool {\n+    error.kind() == io::ErrorKind::TimedOut\n+        || (error.kind() == io::ErrorKind::ConnectionRefused && error.raw_os_error().is_some())\n+}\n+\n /// Ensure an engine is reachable, adopting one that is and spawning one that\n@@ -143,9 +174,21 @@ pub fn ensure_with_journal(\n \n-    // Adopt: something is already answering the capability exchange here.\n-    if let Ok(client) = Client::connect(addr) {\n-        return Ok(Supervised {\n-            client,\n-            provenance: Provenance::Adopted,\n-            child: None,\n-        });\n+    // Adopt: something is already answering the capability exchange here. If\n+    // something answers and refuses us (a credential we do not hold, a protocol\n+    // we do not speak), it is there, and a second w"
+  },
+  "questions": {
+    "both_directions_over_wire": {
+      "type": "noul",
+      "instructions": "Does the evidence show, over a real socket and against the real render worker process, that a client and an engine on different protocol versions refuse each other, from both sides, by name and naming both versions?",
+      "criteria": {
+        "true": "Yes, shown from both sides.",
+        "false": "No, one side or the real worker is not shown."
+      }
+    },
+    "meets_done_when": {
+      "type": "noul",
+      "instructions": "Is the done-when met, given that a client that does not state its version is still served (limit 1) and the asset plane and MCP have no version check (limit 2)?",
+      "criteria": {
+        "true": "Yes, on openly named readings.",
+        "false": "No."
+      }
+    },
+    "compat_break_hidden": {
+      "type": "noul",
+      "instructions": "Can this change break an existing client or engine in a way the evidence does not name (the request changed from a unit variant to one with a field; an older peer; the generated TypeScript)?",
+      "criteria": {
+        "true": "Yes, an unnamed break exists.",
+        "false": "No, or every break is named."
+      }
+    },
+    "host_classification_sound": {
+      "type": "noul",
+      "instructions": "Is the host's rule sound: an OS-coded ConnectionRefused or a timeout means nothing is listening, anything else that failed means something answered and refused? Can it call a listening engine absent, or an absent one listening?",
+      "criteria": {
+        "true": "Yes, a case fools it.",
+        "false": "No, it is sound, or its limits are named."
+      }
+    },
+    "honest_correction": {
+      "type": "noul",
+      "instructions": "The row corrects an earlier false claim (the 2.19 evidence said a version bump refused a mismatched peer). Is the correction made openly in the evidence and the record?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, including a mutation seen only by the conformance run against the real worker, and is the runner crash that stopped the first run (a slow cleanup command, not a test) reported?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "unstated_client_served": "A client that does not state its protocol is served.",
+        "old_clients_unprotected": "A client built before this row compares nothing.",
+        "planes_not_covered": "The asset plane and the MCP servers have no version check.",
+        "mock_same_rule": "The mock applies the same rule, so it cannot catch the engine's mistake.",
+        "host_timeout_case": "A dropped-packet firewall is treated as nothing listening."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "both_directions_over_wire",
+      "jev": 0.89,
+      "laya": 0.9672,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.89
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9672,
+        "confidence": 0.9672,
+        "answer_confidence": 0.9672,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "meets_done_when",
+      "jev": 0.91,
+      "laya": 0.953,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.953,
+        "confidence": 0.953,
+        "answer_confidence": 0.953,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "compat_break_hidden",
+      "jev": 0.51,
+      "laya": 0.9418,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.51
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9418,
+        "confidence": 0.9418,
+        "answer_confidence": 0.9418,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "host_classification_sound",
+      "jev": 0.49,
+      "laya": 0.946,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.49
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.946,
+        "confidence": 0.946,
+        "answer_confidence": 0.946,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "honest_correction",
+      "jev": 0.97,
+      "laya": 0.9574,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9574,
+        "confidence": 0.9574,
+        "answer_confidence": 0.9574,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.4,
+      "laya": 0.9582,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.4
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9582,
+        "confidence": 0.9582,
+        "answer_confidence": 0.9582,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.22,
+      "laya": 0.9494,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.22
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9494,
+        "confidence": 0.9494,
+        "answer_confidence": 0.9494,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "old_clients_unprotected",
+      "laya": "none",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "old_clients_unprotected",
+        "confidence": 0.82,
+        "probabilities": {
+          "none": 0,
+          "unstated_client_served": 0.04,
+          "old_clients_unprotected": 0.85,
+          "planes_not_covered": 0.05,
+          "mock_same_rule": 0.05,
+          "host_timeout_case": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "none",
+        "probabilities": {
+          "none": 0.4228,
+          "unstated_client_served": 0.1397,
+          "old_clients_unprotected": 0.2045,
+          "planes_not_covered": 0.1253,
+          "mock_same_rule": 0.0582,
+          "host_timeout_case": 0.0495
+        },
+        "confidence": 0.1416,
+        "answer_confidence": 0.4228,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.6,
+      "laya": 0.9078,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.6
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9078,
+        "confidence": 0.9078,
+        "answer_confidence": 0.9078,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

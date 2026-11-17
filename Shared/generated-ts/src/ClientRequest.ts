@@ -12,4 +12,4 @@ import type { TakeRequest } from "./TakeRequest";
  * enforced by the command surfaces each product exposes rather than by a flag
  * on the message.
  */
-export type ClientRequest = { "request": "authenticate", token: string, } | { "request": "capability" } | { "request": "status" } | { "request": "cue" } & CueRequest | { "request": "take" } & TakeRequest | { "request": "clear" } & ClearRequest | { "request": "phase" } & PhaseRequest | { "request": "configureOutput" } & OutputConfig | { "request": "performance" } | { "request": "render" } & RenderRequest | { "request": "stop" };
+export type ClientRequest = { "request": "authenticate", token: string, } | { "request": "capability", protocol: number | null, } | { "request": "status" } | { "request": "cue" } & CueRequest | { "request": "take" } & TakeRequest | { "request": "clear" } & ClearRequest | { "request": "phase" } & PhaseRequest | { "request": "configureOutput" } & OutputConfig | { "request": "performance" } | { "request": "render" } & RenderRequest | { "request": "stop" };

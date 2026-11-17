@@ -414,11 +414,11 @@ impl EnginePeer for MockEngine {
                 what: "authentication is a transport concern, not an engine one".to_string(),
             }),
 
-            ClientRequest::Capability => {
-                // A real engine checks the client's protocol on connect; the
-                // mock checks its own constant so the refusal path is reachable
-                // in a test rather than dead code.
-                match check_protocol(gx_contracts::PROTOCOL_VERSION) {
+            ClientRequest::Capability { protocol } => {
+                // The same rule as the real engine (2.20): the protocol the
+                // client says it speaks is compared with this one; a client
+                // that does not say is served.
+                match protocol.map_or(Ok(()), check_protocol) {
                     Ok(()) => EngineReply::Capability(self.capability()),
                     Err(refusal) => EngineReply::Refused(refusal),
                 }
@@ -719,6 +719,29 @@ mod tests {
             AssetPublishPeer::locality(&MockEngine::new().over_lan()),
             Locality::Lan
         );
+    }
+
+    /// 2.20: the mock applies the same rule as the real engine to the protocol a
+    /// client states.
+    #[test]
+    fn the_mock_refuses_a_client_that_states_another_protocol_by_name() {
+        let mut e = MockEngine::new();
+        let other = gx_contracts::PROTOCOL_VERSION + 1;
+        assert_eq!(
+            e.handle(ClientRequest::Capability {
+                protocol: Some(other)
+            }),
+            EngineReply::Refused(Refusal::ProtocolMismatch {
+                expected: gx_contracts::PROTOCOL_VERSION,
+                actual: other
+            })
+        );
+        for served in [
+            ClientRequest::capability(),
+            ClientRequest::Capability { protocol: None },
+        ] {
+            assert!(matches!(e.handle(served), EngineReply::Capability(_)));
+        }
     }
 
     #[test]

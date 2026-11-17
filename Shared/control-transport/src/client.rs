@@ -133,8 +133,20 @@ impl Client {
         if !exchange {
             return Ok(client);
         }
-        match client.request(ClientRequest::Capability) {
-            Ok(EngineReply::Capability(capability)) => client.capability = capability,
+        match client.request(ClientRequest::capability()) {
+            Ok(EngineReply::Capability(capability)) => {
+                // 2.20: an engine that speaks another protocol is refused here, by
+                // name, whatever it says about us. The engine's own check covers
+                // the other direction.
+                if capability.protocol != gx_contracts::PROTOCOL_VERSION {
+                    let mismatch = Refusal::ProtocolMismatch {
+                        expected: gx_contracts::PROTOCOL_VERSION,
+                        actual: capability.protocol,
+                    };
+                    return Err(io::Error::new(kind_for(&mismatch), mismatch.to_string()));
+                }
+                client.capability = capability
+            }
             Ok(EngineReply::Refused(refusal)) => {
                 return Err(io::Error::new(kind_for(&refusal), refusal.to_string()))
             }

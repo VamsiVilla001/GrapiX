@@ -183,7 +183,7 @@ mod tests {
         use gx_contracts::{ContentHash, Revision, TakeId};
 
         let requests = vec![
-            ClientRequest::Capability,
+            ClientRequest::capability(),
             ClientRequest::Status,
             ClientRequest::Cue(CueRequest {
                 take_id: TakeId("t".into()),

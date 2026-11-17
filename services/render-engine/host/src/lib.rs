@@ -35,9 +35,25 @@ use gx_control_transport::Client;
 #[derive(Debug)]
 pub enum SupervisorError {
     DataRoot(Refusal),
-    ReservedSpawnArgument { argument: &'static str },
-    Spawn { program: String, source: io::Error },
-    WorkerUnavailable { source: io::Error, detail: String },
+    ReservedSpawnArgument {
+        argument: &'static str,
+    },
+    Spawn {
+        program: String,
+        source: io::Error,
+    },
+    WorkerUnavailable {
+        source: io::Error,
+        detail: String,
+    },
+    /// Something answers on the control port and cannot be used by this host: it
+    /// refused the connection by name (a credential this host does not hold, or
+    /// a protocol it does not speak). Not "nothing is listening", so no second
+    /// worker is started beside it (2.20).
+    EngineUnusable {
+        endpoint: SocketAddr,
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for SupervisorError {
@@ -49,6 +65,10 @@ impl fmt::Display for SupervisorError {
             }
             Self::Spawn { program, source } => write!(f, "cannot spawn {program}: {source}"),
             Self::WorkerUnavailable { detail, .. } => f.write_str(detail),
+            Self::EngineUnusable { endpoint, source } => write!(
+                f,
+                "an engine answers at {endpoint} and refuses this host, so none is started beside it: {source}"
+            ),
         }
     }
 }
@@ -57,7 +77,9 @@ impl Error for SupervisorError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::DataRoot(refusal) => Some(refusal),
-            Self::Spawn { source, .. } | Self::WorkerUnavailable { source, .. } => Some(source),
+            Self::Spawn { source, .. }
+            | Self::WorkerUnavailable { source, .. }
+            | Self::EngineUnusable { source, .. } => Some(source),
             Self::ReservedSpawnArgument { .. } => None,
         }
     }
@@ -105,6 +127,15 @@ impl Supervised {
 // No `Drop` impl that terminates `child`. That absence is the feature: the
 // host outlives its own lifetime only by *not* owning the engine's.
 
+/// Whether a failed connect says that nothing is listening: the operating
+/// system's own refusal of the connection (or no answer in time), as opposed to
+/// an answer from an engine that then refused this client, which the transport
+/// reports without an operating-system error code (2.20).
+pub fn nothing_is_listening(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::TimedOut
+        || (error.kind() == io::ErrorKind::ConnectionRefused && error.raw_os_error().is_some())
+}
+
 /// Ensure an engine is reachable, adopting one that is and spawning one that
 /// is not.
 ///
@@ -141,13 +172,25 @@ pub fn ensure_with_journal(
 
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
 
-    // Adopt: something is already answering the capability exchange here.
-    if let Ok(client) = Client::connect(addr) {
-        return Ok(Supervised {
-            client,
-            provenance: Provenance::Adopted,
-            child: None,
-        });
+    // Adopt: something is already answering the capability exchange here. If
+    // something answers and refuses us (a credential we do not hold, a protocol
+    // we do not speak), it is there, and a second worker beside it would fail to
+    // bind and hide why: say so by name instead.
+    match Client::connect(addr) {
+        Ok(client) => {
+            return Ok(Supervised {
+                client,
+                provenance: Provenance::Adopted,
+                child: None,
+            })
+        }
+        Err(error) if nothing_is_listening(&error) => {}
+        Err(source) => {
+            return Err(SupervisorError::EngineUnusable {
+                endpoint: addr,
+                source,
+            })
+        }
     }
 
     // Nothing there: start one, then adopt the child we just made. Both the

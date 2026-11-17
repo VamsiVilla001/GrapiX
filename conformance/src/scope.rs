@@ -58,7 +58,7 @@ fn every_request() -> Vec<ClientRequest> {
     let take_id = TakeId("conformance/published".into());
     let pin = Some(ContentHash("a".repeat(64)));
     vec![
-        ClientRequest::Capability,
+        ClientRequest::capability(),
         ClientRequest::Status,
         ClientRequest::Performance,
         ClientRequest::Render(RenderRequest {

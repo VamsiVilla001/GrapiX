@@ -514,7 +514,7 @@ mod log_tests {
             let hostile = Envelope::new(
                 MessageId("req.1.not a valid.id".into()),
                 Sequence(1),
-                ClientRequest::Capability,
+                ClientRequest::capability(),
             );
             raw.write_all(&encode(&hostile).expect("encode"))
                 .expect("write");

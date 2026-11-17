@@ -38,6 +38,12 @@ pub mod validate;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Wire protocol version 8 (2.20) added the client's own protocol to the
+/// `capability` request (`protocol`; optional, so a client that does not say is
+/// still served). The engine refuses a different one by name
+/// (`protocolMismatch`), and a client refuses an engine whose capability reply
+/// reports a different one, on connect. Before this the version was a number
+/// each side wrote down and nobody compared.
 /// Wire protocol version 7 (2.19) added the `stop` request, its `stopping`
 /// reply, the `stop` scope and the `stopRefusedProgramOnAir` refusal: a client
 /// holding that scope asks the engine to stop in order, and the engine refuses
@@ -50,7 +56,7 @@ use ts_rs::TS;
 /// reply, and Program frames the render loop missed in the performance report.
 /// Version 4 (11.38) pinned cue and take to a content hash. A mismatch is an
 /// error code, never a negotiation.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Stable identity of a published scene. Survives every republish.
 #[derive(

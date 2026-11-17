@@ -1,0 +1,14 @@
+# 1. First run (H1 to H6). The runner then stopped at H7: its cleanup command (a process listing) took over 60 s and raised, not a test. message.rs was restored byte-identical by the runner and checked against its backup.
+H1 the client does not compare the protocol the engine reports: exit=101 failing=['a_client_refuses_an_engine_that_reports_another_protocol_and_says_both'] restored_identical=True
+H2 the client refuses only an engine on an older protocol: exit=101 failing=['a_client_refuses_an_engine_that_reports_another_protocol_and_says_both'] restored_identical=True
+H3 the engine ignores the protocol a client states: exit=101 failing=['engine::tests::the_engine_refuses_a_client_that_states_another_protocol_by_name'] restored_identical=True
+H3c the same, seen by the conformance run against the real worker: exit=1 failing=['a client that states another protocol is refused by name, with both versions'] restored_identical=True
+H4 the mock ignores the protocol a client states: exit=101 failing=['tests::the_mock_refuses_a_client_that_states_another_protocol_by_name'] restored_identical=True
+H5 the engine refuses a client that does not state a protocol: exit=101 failing=['engine::tests::the_engine_refuses_a_client_that_states_another_protocol_by_name'] restored_identical=True
+H6 the mismatch names the two versions the wrong way round: exit=101 failing=['engine::tests::the_engine_refuses_a_client_that_states_another_protocol_by_name'] restored_identical=True
+
+# 2. After the runner tolerated a slow cleanup: H7 to H10.
+H7 a client of this build does not state its protocol: exit=101 failing=['message::tests::the_capability_request_names_the_protocol_and_one_that_does_not_still_reads'] restored_identical=True
+H8 the host takes any failed connect for nothing listening: exit=101 failing=['an_engine_on_another_protocol_is_named_and_no_worker_is_started_beside_it', 'an_engine_that_refuses_the_host_is_named_and_no_worker_is_started_beside_it'] restored_identical=True
+H9 the host takes a refusal by name for the system's own refusal: exit=101 failing=['only_the_systems_own_refusal_or_silence_says_nothing_is_listening'] restored_identical=True
+H10 the protocol is not raised: exit=101 failing=['tests::the_tool_schema_is_versioned_with_the_protocol'] restored_identical=True
