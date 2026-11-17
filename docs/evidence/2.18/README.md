@@ -60,7 +60,7 @@ a small `unsafe` block to close it (17 Nov 2026). This row is that fix.
 ## Mutations
 
 14, one at a time, each restored byte-identical, each made a named check fail
-(`mutations.log`, the runner's own output: the first run of 13, then the reruns
+(`mutations.txt`, the runner's own output: the first run of 13, then the reruns
 on the handler as changed after review, D6 added; the runner writes to a file, kills the
 process tree on timeout and sweeps scratch engines).
 
