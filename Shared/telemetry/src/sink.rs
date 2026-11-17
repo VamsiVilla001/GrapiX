@@ -192,6 +192,10 @@ pub fn start(config: LogConfig) -> io::Result<LogGuard> {
         file: None,
     };
     files.next()?;
+    // 2.16: looked for once this process's own file exists and is held, so that
+    // two runs starting at the same moment each see the other's (and list it as
+    // running); its own file is passed over by name.
+    let earlier = find_earlier(&directory, &config.process, &files.stem);
     let writer_shared = Arc::clone(&shared);
     #[cfg(test)]
     let delay = config.writer_delay;
@@ -204,7 +208,9 @@ pub fn start(config: LogConfig) -> io::Result<LogGuard> {
         shared: Arc::clone(&shared),
         sender,
     };
-    // The first record says what this file is; the second, what was swept.
+    // The first record says what this file is, and which runs of this process
+    // were still running when it started (2.16: what a later start reads to know
+    // which kills no start has named yet); the second, what was swept.
     layer.offer(
         tracing::Level::INFO,
         "gx_telemetry::sink",
@@ -215,6 +221,7 @@ pub fn start(config: LogConfig) -> io::Result<LogGuard> {
                 "directory".to_owned(),
                 Value::from(directory.display().to_string()),
             ),
+            ("running".to_owned(), Value::from(earlier.running)),
         ]),
     );
     if expired > 0 {
@@ -223,6 +230,14 @@ pub fn start(config: LogConfig) -> io::Result<LogGuard> {
             "gx_telemetry::sink",
             "log.expired",
             Map::from_iter([("files".to_owned(), Value::from(expired))]),
+        );
+    }
+    for found in earlier.unfinished {
+        layer.offer(
+            tracing::Level::WARN,
+            "gx_telemetry::sink",
+            "log.previous_unfinished",
+            found.into_fields(),
         );
     }
     Ok(LogGuard {
@@ -403,7 +418,7 @@ impl Files {
         let path = self
             .directory
             .join(format!("{}-{}.jsonl", self.stem, self.part));
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = open_as_writer(&path)?;
         self.file = Some(BufWriter::new(file));
         self.written = 0;
         Ok(())
@@ -546,6 +561,305 @@ fn remove_expired(directory: &Path, retention: Duration) -> u64 {
         }
     }
     removed
+}
+
+/// What a start found among the earlier runs of its process (2.16).
+#[derive(Debug, Default)]
+struct Earlier {
+    /// Runs that are gone without `log.stop` and that no earlier start can have
+    /// named, oldest first: one `log.previous_unfinished` each.
+    unfinished: Vec<Unfinished>,
+    /// Runs still holding their file, as `<process>-<start>-<pid>`, oldest first:
+    /// this start's `log.start` lists them as `running`.
+    running: Vec<String>,
+}
+
+/// One earlier run's files: the first part (which opens with its `log.start`)
+/// and the last (which says how it ended).
+#[derive(Debug, Default)]
+struct Run {
+    first: Option<(u32, PathBuf)>,
+    last: Option<(u32, PathBuf)>,
+}
+
+/// What the first line of a run says about its own start.
+enum Head {
+    /// A `log.start` with `running`: the runs it found still running (2.16 on).
+    Listed(Vec<String>),
+    /// A `log.start` without the list: written before 2.16.
+    Unlisted,
+    /// No whole first line, or not a `log.start`: killed before it wrote one,
+    /// or its first part was removed by the retention sweep.
+    Missing,
+}
+
+/// The first line of `path`, as a [`Head`].
+fn head(path: &Path) -> Head {
+    use std::io::{BufRead, BufReader, Read};
+    let Ok(file) = File::open(path) else {
+        return Head::Missing;
+    };
+    // A first line cut off by a kill is not whole JSON, so it does not parse.
+    let mut line = String::new();
+    if BufReader::new(file.take(64 * 1024))
+        .read_line(&mut line)
+        .is_err()
+    {
+        return Head::Missing;
+    }
+    let Ok(record) = serde_json::from_str::<Value>(&line) else {
+        return Head::Missing;
+    };
+    if record["event"] != "log.start" {
+        return Head::Missing;
+    }
+    match record["fields"]["running"].as_array() {
+        Some(names) => Head::Listed(
+            names
+                .iter()
+                .filter_map(|name| name.as_str().map(str::to_owned))
+                .collect(),
+        ),
+        None => Head::Unlisted,
+    }
+}
+
+/// An earlier run of this process whose last file does not end in `log.stop`,
+/// and which is not still running (2.16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Unfinished {
+    /// The run's last file, by name.
+    file: String,
+    /// The run's start, as it is in the file name (`20261116T114105Z`).
+    started: String,
+    pid: u32,
+    /// What the file's last whole record says; `None` for a file with none.
+    last_seq: Option<u64>,
+    last_ts: Option<String>,
+    last_event: Option<String>,
+}
+
+impl Unfinished {
+    fn into_fields(self) -> Map<String, Value> {
+        Map::from_iter([
+            ("file".to_owned(), Value::from(self.file)),
+            ("started".to_owned(), Value::from(self.started)),
+            ("predecessor_pid".to_owned(), Value::from(self.pid)),
+            ("last_seq".to_owned(), Value::from(self.last_seq)),
+            ("last_ts".to_owned(), Value::from(self.last_ts)),
+            ("last_event".to_owned(), Value::from(self.last_event)),
+        ])
+    }
+}
+
+/// `<process>-<UTC start>-<pid>-<part>.jsonl` as (process, start, pid, part).
+/// The process name may itself contain dashes; the other three never do.
+fn parse_name(name: &str) -> Option<(&str, &str, u32, u32)> {
+    let mut fields = name.strip_suffix(".jsonl")?.rsplitn(4, '-');
+    let part = fields.next()?.parse().ok()?;
+    let pid = fields.next()?.parse().ok()?;
+    let started = fields.next()?;
+    let process = fields.next()?;
+    Some((process, started, pid, part))
+}
+
+/// Windows sharing flags. A writer opens its file allowing others to read it and
+/// nothing else, so another process asking to write to it is refused exactly
+/// while the writer has it open (2.16).
+#[cfg(windows)]
+const SHARE_READ: u32 = 1;
+#[cfg(windows)]
+const SHARE_ALL: u32 = 1 | 2 | 4;
+#[cfg(windows)]
+const ERROR_SHARING_VIOLATION: i32 = 32;
+
+/// Open a log file for appending and keep it held, so that [`held_by_a_writer`]
+/// can tell a process that is still running from one that is gone.
+fn open_as_writer(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(SHARE_READ);
+    }
+    let file = options.open(path)?;
+    // Elsewhere an advisory shared lock does the same. A filesystem that cannot
+    // lock only loses the distinction, never a line.
+    #[cfg(not(windows))]
+    let _ = file.lock_shared();
+    Ok(file)
+}
+
+/// Whether some process has `path` open as a log writer right now. A process
+/// that was killed holds nothing: the system closed its files with it, and a
+/// process id that has since been reused by something else changes nothing.
+fn held_by_a_writer(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        match OpenOptions::new()
+            .append(true)
+            .share_mode(SHARE_ALL)
+            .open(path)
+        {
+            Err(error) => error.raw_os_error() == Some(ERROR_SHARING_VIOLATION),
+            Ok(_) => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        File::open(path)
+            .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
+    }
+}
+
+/// The last whole record of a file: the last line that is a JSON object. A line
+/// cut off by a kill, and the fragment a tail read starts in, are skipped.
+fn last_record(path: &Path) -> Option<Value> {
+    use std::io::{Read, Seek, SeekFrom};
+    const TAIL_BYTES: u64 = 64 * 1024;
+    let mut file = File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(TAIL_BYTES)))
+        .ok()?;
+    let mut tail = Vec::new();
+    file.take(TAIL_BYTES).read_to_end(&mut tail).ok()?;
+    String::from_utf8_lossy(&tail)
+        .lines()
+        .rev()
+        .find_map(|line| {
+            serde_json::from_str::<Value>(line)
+                .ok()
+                .filter(Value::is_object)
+        })
+}
+
+/// The earlier runs of `process` that a start must name, and those still
+/// running (2.16). A kill is named once, by the first start after it, whether
+/// or not runs of the process overlap, without reading every file:
+///
+/// Walking back from the newest run, the walk stops at the newest that lists,
+/// in its `log.start`, the runs it found still running. Every run that was
+/// already gone when that run started was named by it then, so the only runs
+/// that can still be unnamed are that run, the runs it listed, and any newer
+/// run passed on the way (one killed before it wrote its first line). Runs that
+/// started in the same second are taken together, since their order is not
+/// known. Each of these is probed: a run still holding its file is running
+/// (listed by this start in turn); one that is gone without `log.stop` is named.
+///
+/// Files from before 2.16 have no list. The walk then stops at the first such
+/// run that is gone, as the old rule did, so the first start after the upgrade
+/// names one run, not every old one; every older run is probed so that the
+/// ones still running are listed and named when they end.
+fn find_earlier(directory: &Path, process: &str, own: &str) -> Earlier {
+    use std::collections::{BTreeMap, BTreeSet};
+    type Key = (String, u32);
+    // The race this order closes (two starts, each scanning before the other's
+    // file exists) cannot be staged in a test, so the tests check the order.
+    #[cfg(test)]
+    assert!(
+        directory.join(format!("{own}-1.jsonl")).exists(),
+        "a start looks at earlier runs only once its own file exists"
+    );
+    // One entry per run, (start, pid), with its first and last parts.
+    let mut runs: BTreeMap<Key, Run> = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Earlier::default();
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some((owner, started, pid, part)) = parse_name(&name) else {
+            continue;
+        };
+        if owner != process {
+            continue;
+        }
+        // This start's own file, opened just before: not an earlier run.
+        if format!("{owner}-{started}-{pid}") == own {
+            continue;
+        }
+        let run = runs.entry((started.to_owned(), pid)).or_default();
+        if run.last.as_ref().is_none_or(|(last, _)| part >= *last) {
+            run.last = Some((part, entry.path()));
+        }
+        if run.first.as_ref().is_none_or(|(first, _)| part < *first) {
+            run.first = Some((part, entry.path()));
+        }
+    }
+    let name_of = |(started, pid): &Key| format!("{process}-{started}-{pid}");
+    let held = |run: &Run| -> bool {
+        run.last
+            .as_ref()
+            .is_some_and(|(_, path)| held_by_a_writer(path))
+    };
+
+    let mut candidates: BTreeSet<&Key> = BTreeSet::new();
+    let mut stop_at: Option<&str> = None;
+    let mut unlisted = false;
+    for (key, run) in runs.iter().rev() {
+        if stop_at.is_some_and(|second| second != key.0) {
+            break;
+        }
+        candidates.insert(key);
+        let Some((_, first)) = &run.first else {
+            continue;
+        };
+        match head(first) {
+            Head::Listed(names) => {
+                candidates.extend(runs.keys().filter(|other| names.contains(&name_of(other))));
+                stop_at.get_or_insert(&key.0);
+            }
+            Head::Unlisted if !held(run) => {
+                stop_at.get_or_insert(&key.0);
+                unlisted = true;
+            }
+            Head::Unlisted | Head::Missing => {}
+        }
+    }
+    if unlisted {
+        let older: Vec<&Key> = runs
+            .iter()
+            .filter(|&(key, run)| !candidates.contains(key) && held(run))
+            .map(|(key, _)| key)
+            .collect();
+        candidates.extend(older);
+    }
+
+    let mut earlier = Earlier::default();
+    for key in candidates {
+        let run = &runs[key];
+        let Some((_, path)) = &run.last else {
+            continue;
+        };
+        if held(run) {
+            earlier.running.push(name_of(key));
+            continue;
+        }
+        let last = last_record(path);
+        let event = last
+            .as_ref()
+            .and_then(|record| record["event"].as_str())
+            .map(str::to_owned);
+        if event.as_deref() == Some("log.stop") {
+            continue;
+        }
+        earlier.unfinished.push(Unfinished {
+            file: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            started: key.0.clone(),
+            pid: key.1,
+            last_seq: last.as_ref().and_then(|record| record["seq"].as_u64()),
+            last_ts: last
+                .as_ref()
+                .and_then(|record| record["ts"].as_str())
+                .map(str::to_owned),
+            last_event: event,
+        });
+    }
+    earlier
 }
 
 /// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
@@ -911,6 +1225,488 @@ mod tests {
             tracing::info!(event = "engine.late");
         });
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // --- 2.16: a start names the earlier run that left no stop record ---------------
+
+    /// The start stamp of every fabricated run: far in the future, so it sorts
+    /// after any real file this process writes in the same folder.
+    const LATER: &str = "29990101T000000Z";
+
+    fn record(seq: u64, event: &str) -> String {
+        serde_json::json!({
+            "ts": format!("2999-01-01T00:00:{seq:02}.000000Z"),
+            "seq": seq,
+            "pid": 4242,
+            "process": "worker",
+            "event": event,
+        })
+        .to_string()
+    }
+
+    /// An earlier run's file, as a process that ended left it: `lines` whole
+    /// records and then `tail`, which may be a line cut off in the middle.
+    fn earlier_run(directory: &Path, name: &str, lines: &[String], tail: &str) -> PathBuf {
+        let folder = directory.join("engine");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join(name);
+        let mut text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        text.push_str(tail);
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    /// Start and finish a sink for `engine/worker`; the records it wrote.
+    fn start_and_finish(directory: &Path, process: &str) -> Vec<Value> {
+        let guard = start(LogConfig::new("engine", process, directory)).unwrap();
+        guard.finish().unwrap();
+        // Only this process's own files: an earlier run's file may end in a
+        // line that was cut off, which is the point of some tests.
+        let mut files: Vec<PathBuf> = std::fs::read_dir(directory.join("engine"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(parse_name)
+                    .is_some_and(|(_, _, pid, _)| pid == std::process::id())
+            })
+            .collect();
+        files.sort();
+        files
+            .iter()
+            .flat_map(|path| {
+                std::fs::read_to_string(path)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn unfinished(records: &[Value]) -> Vec<&Value> {
+        records
+            .iter()
+            .filter(|r| r["event"] == "log.previous_unfinished")
+            .collect()
+    }
+
+    /// A 2.16 `log.start`, listing the runs it found still running.
+    fn listed_start(running: &[&str]) -> String {
+        serde_json::json!({
+            "ts": "2999-01-01T00:00:01.000000Z",
+            "seq": 1,
+            "pid": 4242,
+            "process": "worker",
+            "event": "log.start",
+            "fields": { "running": running },
+        })
+        .to_string()
+    }
+
+    /// The files named by this start's `log.previous_unfinished` records.
+    fn named_files(records: &[Value]) -> Vec<String> {
+        unfinished(records)
+            .iter()
+            .map(|r| r["fields"]["file"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    /// What this start's `log.start` lists as still running.
+    fn listed_running(records: &[Value]) -> Vec<String> {
+        let start = records.iter().find(|r| r["event"] == "log.start").unwrap();
+        start["fields"]["running"]
+            .as_array()
+            .expect("log.start lists the runs still running")
+            .iter()
+            .map(|name| name.as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_start_names_an_earlier_run_that_left_no_stop_record() {
+        let dir = scratch("unfinished");
+        let name = format!("worker-{LATER}-4242-1.jsonl");
+        earlier_run(
+            &dir,
+            &name,
+            &[
+                record(1, "log.start"),
+                record(2, "engine.heartbeat"),
+                record(3, "engine.heartbeat"),
+            ],
+            "",
+        );
+        let records = start_and_finish(&dir, "worker");
+        let events: Vec<&str> = records
+            .iter()
+            .map(|r| r["event"].as_str().unwrap())
+            .collect();
+        assert_eq!(events, ["log.start", "log.previous_unfinished", "log.stop"]);
+        assert!(listed_running(&records).is_empty(), "nothing was running");
+        let named = &records[1];
+        assert_eq!(named["level"], "warn");
+        let fields = &named["fields"];
+        assert_eq!(fields["file"], name.as_str());
+        assert_eq!(fields["started"], LATER);
+        assert_eq!(fields["predecessor_pid"], 4242);
+        assert_eq!(fields["last_seq"], 3);
+        assert_eq!(fields["last_ts"], "2999-01-01T00:00:03.000000Z");
+        assert_eq!(fields["last_event"], "engine.heartbeat");
+    }
+
+    #[test]
+    fn an_earlier_run_that_finished_is_not_named() {
+        let dir = scratch("finished");
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start"), record(2, "log.stop")],
+            "",
+        );
+        assert!(unfinished(&start_and_finish(&dir, "worker")).is_empty());
+    }
+
+    #[test]
+    fn an_earlier_run_still_holding_its_file_is_not_called_unfinished() {
+        let dir = scratch("alive");
+        let path = earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start"), record(2, "engine.heartbeat")],
+            "",
+        );
+        // Another engine, still running: it holds its file as the sink does.
+        let holder = open_as_writer(&path).unwrap();
+        let beside = start_and_finish(&dir, "worker");
+        assert!(
+            unfinished(&beside).is_empty(),
+            "a running sibling is not a killed predecessor"
+        );
+        assert_eq!(
+            listed_running(&beside),
+            [format!("worker-{LATER}-4242")],
+            "the start lists it as running"
+        );
+        // Once it is gone, with no stop record, the next start names it.
+        drop(holder);
+        let after = start_and_finish(&dir, "worker");
+        let named = unfinished(&after);
+        assert_eq!(named.len(), 1, "named once it no longer holds its file");
+        assert_eq!(named[0]["fields"]["last_seq"], 2);
+    }
+
+    /// Runs from before 2.16 list nothing in their `log.start`: the walk stops at
+    /// the first that is gone, as the old rule did.
+    #[test]
+    fn before_2_16_only_the_newest_run_that_is_gone_decides() {
+        let dir = scratch("newest");
+        let older = "worker-29980101T000000Z-4241-1.jsonl".to_owned();
+        let newer = format!("worker-{LATER}-4242-1.jsonl");
+        earlier_run(&dir, &older, &[record(1, "log.start")], "");
+        earlier_run(
+            &dir,
+            &newer,
+            &[record(1, "log.start"), record(2, "engine.heartbeat")],
+            "",
+        );
+        let records = start_and_finish(&dir, "worker");
+        let named = unfinished(&records);
+        assert_eq!(named.len(), 1, "one kill is named once");
+        assert_eq!(named[0]["fields"]["file"], newer.as_str());
+
+        // A newer run that finished hides the older one that did not: its own
+        // start named it already.
+        let dir = scratch("newest-finished");
+        earlier_run(&dir, &older, &[record(1, "log.start")], "");
+        earlier_run(
+            &dir,
+            &newer,
+            &[record(1, "log.start"), record(2, "log.stop")],
+            "",
+        );
+        assert!(unfinished(&start_and_finish(&dir, "worker")).is_empty());
+    }
+
+    #[test]
+    fn the_last_part_of_a_rotated_run_is_the_one_that_decides() {
+        let dir = scratch("parts");
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-2.jsonl"),
+            &[record(2, "engine.heartbeat"), record(3, "log.stop")],
+            "",
+        );
+        assert!(
+            unfinished(&start_and_finish(&dir, "worker")).is_empty(),
+            "part 1 has no stop record because the run went on into part 2"
+        );
+        let dir = scratch("parts-killed");
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start")],
+            "",
+        );
+        let second = format!("worker-{LATER}-4242-2.jsonl");
+        earlier_run(&dir, &second, &[record(2, "engine.heartbeat")], "");
+        let named = start_and_finish(&dir, "worker");
+        assert_eq!(unfinished(&named)[0]["fields"]["file"], second.as_str());
+    }
+
+    #[test]
+    fn a_line_cut_off_by_a_kill_is_skipped_and_an_empty_file_is_named_too() {
+        let dir = scratch("cut");
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start"), record(2, "engine.heartbeat")],
+            r#"{"ts":"2999-01-01T00:00:09.000000Z","seq":9,"ev"#,
+        );
+        let named = start_and_finish(&dir, "worker");
+        assert_eq!(unfinished(&named)[0]["fields"]["last_seq"], 2);
+
+        let dir = scratch("empty");
+        earlier_run(&dir, &format!("worker-{LATER}-4242-1.jsonl"), &[], "");
+        let named = start_and_finish(&dir, "worker");
+        let fields = &unfinished(&named)[0]["fields"];
+        assert!(fields["last_seq"].is_null() && fields["last_event"].is_null());
+    }
+
+    #[test]
+    fn another_process_name_is_not_mistaken_for_this_one() {
+        let dir = scratch("names");
+        // `shell` is another process; `worker-2` is another whose name starts
+        // with this one's.
+        earlier_run(
+            &dir,
+            &format!("shell-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            &format!("worker-2-{LATER}-4242-1.jsonl"),
+            &[record(1, "log.start")],
+            "",
+        );
+        assert!(unfinished(&start_and_finish(&dir, "worker")).is_empty());
+        assert_eq!(
+            parse_name("worker-2-29990101T000000Z-4242-7.jsonl"),
+            Some(("worker-2", "29990101T000000Z", 4242, 7))
+        );
+        assert_eq!(parse_name("notes.txt"), None);
+        assert_eq!(parse_name("worker-x-1.jsonl"), None);
+    }
+
+    /// Two runs overlap: X starts, Y starts beside it (and lists X as running),
+    /// X is killed, Y ends in order. The next start is the first after X's death
+    /// and names X, though the newest run, Y, finished.
+    #[test]
+    fn with_overlapping_runs_a_kill_is_named_by_the_first_start_after_it() {
+        let dir = scratch("overlap");
+        let x = "worker-29980101T000000Z-4241".to_owned();
+        earlier_run(
+            &dir,
+            &format!("{x}-1.jsonl"),
+            &[listed_start(&[]), record(2, "engine.heartbeat")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[listed_start(&[&x]), record(2, "log.stop")],
+            "",
+        );
+        let records = start_and_finish(&dir, "worker");
+        assert_eq!(named_files(&records), [format!("{x}-1.jsonl")]);
+        assert_eq!(unfinished(&records)[0]["fields"]["last_seq"], 2);
+    }
+
+    /// X is killed while Y runs; Z starts after X's death, names it, and lists Y.
+    /// While Y and Z still run, a further start names nothing: X was named once.
+    #[test]
+    fn a_kill_named_once_is_not_named_again_while_its_siblings_run() {
+        let dir = scratch("once");
+        let x = "worker-29970101T000000Z-4240".to_owned();
+        let y = "worker-29980101T000000Z-4241".to_owned();
+        let z = format!("worker-{LATER}-4242");
+        earlier_run(
+            &dir,
+            &format!("{x}-1.jsonl"),
+            &[listed_start(&[]), record(2, "engine.heartbeat")],
+            "",
+        );
+        let y_file = earlier_run(
+            &dir,
+            &format!("{y}-1.jsonl"),
+            &[listed_start(&[&x]), record(2, "engine.heartbeat")],
+            "",
+        );
+        let z_file = earlier_run(
+            &dir,
+            &format!("{z}-1.jsonl"),
+            &[listed_start(&[&y]), record(2, "log.previous_unfinished")],
+            "",
+        );
+        let y_holds = open_as_writer(&y_file).unwrap();
+        let z_holds = open_as_writer(&z_file).unwrap();
+        let records = start_and_finish(&dir, "worker");
+        assert!(named_files(&records).is_empty(), "X was named by Z already");
+        assert_eq!(listed_running(&records), [y.as_str(), z.as_str()]);
+        // Once Y is gone too, the next start names Y, and only Y.
+        drop(y_holds);
+        let records = start_and_finish(&dir, "worker");
+        assert_eq!(named_files(&records), [format!("{y}-1.jsonl")]);
+        drop(z_holds);
+    }
+
+    /// The newest run was killed before it wrote its first line: it is named,
+    /// and the walk goes on past it to the newest run that lists what it found.
+    #[test]
+    fn a_run_killed_before_its_first_line_is_named_and_passed_over() {
+        let dir = scratch("first-line");
+        let k = "worker-29970101T000000Z-4240".to_owned();
+        earlier_run(
+            &dir,
+            &format!("{k}-1.jsonl"),
+            &[listed_start(&[]), record(2, "engine.heartbeat")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            "worker-29980101T000000Z-4241-1.jsonl",
+            &[listed_start(&[&k]), record(2, "log.stop")],
+            "",
+        );
+        let empty = format!("worker-{LATER}-4242-1.jsonl");
+        earlier_run(&dir, &empty, &[], r#"{"ts":"2999-01-01T00:00:00"#);
+        let records = start_and_finish(&dir, "worker");
+        assert_eq!(named_files(&records), [format!("{k}-1.jsonl"), empty]);
+    }
+
+    /// The newest run has no list (a build from before 2.16) and is gone, so the
+    /// walk stops there, naming no backlog; an older run behind it that still
+    /// holds its file (as only a 2.16 writer does, so: a downgrade, or a newer
+    /// build started first) is listed, so that it is named when it ends. A
+    /// pre-2.16 writer does not hold its file and cannot be told from a dead one.
+    #[test]
+    fn a_run_with_no_list_stops_the_walk_and_held_runs_behind_it_are_listed() {
+        let dir = scratch("upgrade");
+        // Dated before this test's own starts, as old runs are: the second start
+        // below must find the first one's list as the newest.
+        let old = "worker-20000101T000000Z-4240".to_owned();
+        let older_file = earlier_run(
+            &dir,
+            &format!("{old}-1.jsonl"),
+            &[record(1, "log.start")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            "worker-20000102T000000Z-4241-1.jsonl",
+            &[record(1, "log.start")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            "worker-20000103T000000Z-4242-1.jsonl",
+            &[record(1, "log.start"), record(2, "log.stop")],
+            "",
+        );
+        let holder = open_as_writer(&older_file).unwrap();
+        let records = start_and_finish(&dir, "worker");
+        assert!(named_files(&records).is_empty(), "no backlog is named");
+        assert_eq!(listed_running(&records), [old.as_str()]);
+        // That start is now an earlier run. Two starts of one process within a
+        // second share a file name (a real process never starts twice), so its
+        // file is renamed as if it began the day after the runs above.
+        let engine = dir.join("engine");
+        let mine = std::fs::read_dir(&engine)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(parse_name)
+                    .is_some_and(|(_, _, pid, _)| pid == std::process::id())
+            })
+            .unwrap();
+        let earlier = format!("worker-20000104T000000Z-{}-1.jsonl", std::process::id());
+        std::fs::rename(&mine, engine.join(earlier)).unwrap();
+        // It ends without a stop record: the next start names it.
+        drop(holder);
+        let records = start_and_finish(&dir, "worker");
+        assert_eq!(named_files(&records), [format!("{old}-1.jsonl")]);
+    }
+
+    /// A long run rotated into a second part: its list is in its first part's
+    /// `log.start`, and that is the one read.
+    #[test]
+    fn a_rotated_runs_list_is_read_from_its_first_part() {
+        let dir = scratch("rotated-list");
+        let k = "worker-29970101T000000Z-4240".to_owned();
+        earlier_run(
+            &dir,
+            &format!("{k}-1.jsonl"),
+            &[listed_start(&[]), record(2, "engine.heartbeat")],
+            "",
+        );
+        earlier_run(
+            &dir,
+            "worker-29980101T000000Z-4241-1.jsonl",
+            &[record(1, "log.start"), record(2, "log.stop")],
+            "",
+        );
+        let rotated = format!("worker-{LATER}-4242");
+        earlier_run(
+            &dir,
+            &format!("{rotated}-1.jsonl"),
+            &[listed_start(&[&k])],
+            "",
+        );
+        let second = earlier_run(
+            &dir,
+            &format!("{rotated}-2.jsonl"),
+            &[record(2, "engine.heartbeat")],
+            "",
+        );
+        // Still running, in its second part; it found K running when it started.
+        let holder = open_as_writer(&second).unwrap();
+        let records = start_and_finish(&dir, "worker");
+        assert_eq!(named_files(&records), [format!("{k}-1.jsonl")]);
+        assert_eq!(listed_running(&records), [rotated.as_str()]);
+        drop(holder);
+    }
+
+    /// Two runs that started in the same second cannot be ordered: both are
+    /// taken as newest, so a kill of either is named.
+    #[test]
+    fn runs_that_started_in_the_same_second_are_taken_together() {
+        let dir = scratch("same-second");
+        earlier_run(
+            &dir,
+            &format!("worker-{LATER}-4242-1.jsonl"),
+            &[listed_start(&[]), record(2, "log.stop")],
+            "",
+        );
+        let other = format!("worker-{LATER}-4241-1.jsonl");
+        earlier_run(
+            &dir,
+            &other,
+            &[listed_start(&[]), record(2, "engine.heartbeat")],
+            "",
+        );
+        assert_eq!(named_files(&start_and_finish(&dir, "worker")), [other]);
     }
 
     #[test]

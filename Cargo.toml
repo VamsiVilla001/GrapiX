@@ -60,6 +60,10 @@ schemars = { version = "1", default-features = false, features = ["derive", "std
 # one over the original — which would make a `.gpxpkg` manifest (1.8) wrong.
 serde_json       = { version = "1", features = ["float_roundtrip"] }
 sha2             = "0.10"
+# 2.16: lets the render worker write `engine.stop` when Ctrl+C ends it.
+# Downloaded with the user's approval (16 Nov 2026), exact version pinned.
+# `#![forbid(unsafe_code)]` rules out a hand-written console control handler.
+ctrlc            = "=3.5.2"
 hmac             = "0.12"
 ttf-parser       = "0.25"
 ts-rs            = { version = "10", features = ["serde-json-impl"] }

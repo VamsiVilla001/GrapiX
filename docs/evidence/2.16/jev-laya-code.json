@@ -1,0 +1,205 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 40346,
+    "output_tokens": 0,
+    "state_tokens": 5711,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "task": "Review this code from GrapiX row 2.16 for defects. Each process writes JSON Lines logs named <process>-<UTC start to the second>-<pid>-<part>.jsonl. At start, a sink opens its own file, then names (log.previous_unfinished) every earlier run of its process that is gone without log.stop and that no earlier start can have named, and lists in its log.start the runs still running. The engine catches Ctrl+C with the ctrlc crate and writes engine.stop then log.stop. Named limits, not defects: races at the same instant may repeat a naming; a wall clock stepped backwards can reorder runs; a window close is not orderly; the non-Windows lock path is not run on this machine.",
+    "start": "--- Shared/telemetry/src/sink.rs\npub fn start(config: LogConfig) -> io::Result<LogGuard> {\n    let directory = config.directory.join(&config.product);\n    std::fs::create_dir_all(&directory)?;\n    let expired = remove_expired(&directory, config.retention);\n    let (sender, receiver) = sync_channel(config.queue.max(1));\n    let started = Instant::now();\n    let shared = Arc::new(Shared {\n        process: config.process.clone(),\n        pid: std::process::id(),\n        started,\n        issued: AtomicU64::new(0),\n    });\n    let stem = format!(\n        \"{}-{}-{}\",\n        config.process,\n        compact_utc(SystemTime::now()),\n        std::process::id()\n    );\n    let mut files = Files {\n        directory: directory.clone(),\n        stem,\n        part: 0,\n        max_bytes: config.max_file_bytes.max(1),\n        written: 0,\n        file: None,\n    };\n    files.next()?;\n    // 2.16: looked for once this process's own file exists and is held, so that\n    // two runs starting at the same moment each see the other's (and list it as\n    // running); its own file is passed over by name.\n    let earlier = find_earlier(&directory, &config.process, &files.stem);\n    let writer_shared = Arc::clone(&shared);\n    #[cfg(test)]\n    let delay = config.writer_delay;\n    #[cfg(not(test))]\n    let delay: Option<Duration> = None;\n    let writer = std::thread::Builder::new()\n        .name(format!(\"gx-log-{}\", config.process))\n        .spawn(move || write_loop(receiver, files, &writer_shared, delay))?;\n    let layer = JsonLayer {\n        shared: Arc::clone(&shared),\n        sender,\n    };\n    // The first record says what this file is, and which runs of this process\n    // were still running when it started (2.16: what a later start reads to know\n    // which kills no start has named yet); the second, what was swept.\n    layer.offer(\n        tracing::Level::INFO,\n        \"gx_telemetry::sink\",\n        \"log.start\",\n        Map::from_iter([\n            (\"product\".to_owned(), Value::from(config.product.clone())),\n            (\n                \"directory\".to_owned(),\n                Value::from(directory.display().to_string()),\n            ),\n            (\"running\".to_owned(), Value::from(earlier.running)),\n        ]),\n    );\n    if expired > 0 {\n        layer.offer(\n            tracing::Level::INFO,\n            \"gx_telemetry::sink\",\n            \"log.expired\",\n            Map::from_iter([(\"files\".to_owned(), Value::from(expired))]),\n        );\n    }\n    for found in earlier.unfinished {\n        layer.offer(\n            tracing::Level::WARN,\n            \"gx_telemetry::sink\",\n            \"log.previous_unfinished\",\n            found.into_fields(),\n        );\n    }\n    Ok(LogGuard {\n        stop: layer.sender.clone(),\n        layer: Some(layer),\n        writer: Some(writer),\n        directory,\n    })\n}\n\n",
+    "probe": "--- Shared/telemetry/src/sink.rs\n/// Windows sharing flags. A writer opens its file allowing others to read it and\n/// nothing else, so another process asking to write to it is refused exactly\n/// while the writer has it open (2.16).\n#[cfg(windows)]\nconst SHARE_READ: u32 = 1;\n#[cfg(windows)]\nconst SHARE_ALL: u32 = 1 | 2 | 4;\n#[cfg(windows)]\nconst ERROR_SHARING_VIOLATION: i32 = 32;\n\n/// Open a log file for appending and keep it held, so that [`held_by_a_writer`]\n/// can tell a process that is still running from one that is gone.\nfn open_as_writer(path: &Path) -> io::Result<File> {\n    let mut options = OpenOptions::new();\n    options.create(true).append(true);\n    #[cfg(windows)]\n    {\n        use std::os::windows::fs::OpenOptionsExt;\n        options.share_mode(SHARE_READ);\n    }\n    let file = options.open(path)?;\n    // Elsewhere an advisory shared lock does the same. A filesystem that cannot\n    // lock only loses the distinction, never a line.\n    #[cfg(not(windows))]\n    let _ = file.lock_shared();\n    Ok(file)\n}\n\n/// Whether some process has `path` open as a log writer right now. A process\n/// that was killed holds nothing: the system closed its files with it, and a\n/// process id that has since been reused by something else changes nothing.\nfn held_by_a_writer(path: &Path) -> bool {\n    #[cfg(windows)]\n    {\n        use std::os::windows::fs::OpenOptionsExt;\n        match OpenOptions::new()\n            .append(true)\n            .share_mode(SHARE_ALL)\n            .open(path)\n        {\n            Err(error) => error.raw_os_error() == Some(ERROR_SHARING_VIOLATION),\n            Ok(_) => false,\n        }\n    }\n    #[cfg(not(windows))]\n    {\n        File::open(path)\n            .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))\n    }\n}\n\n",
+    "walk": "--- Shared/telemetry/src/sink.rs\n/// What a start found among the earlier runs of its process (2.16).\n#[derive(Debug, Default)]\nstruct Earlier {\n    /// Runs that are gone without `log.stop` and that no earlier start can have\n    /// named, oldest first: one `log.previous_unfinished` each.\n    unfinished: Vec<Unfinished>,\n    /// Runs still holding their file, as `<process>-<start>-<pid>`, oldest first:\n    /// this start's `log.start` lists them as `running`.\n    running: Vec<String>,\n}\n\n/// One earlier run's files: the first part (which opens with its `log.start`)\n/// and the last (which says how it ended).\n#[derive(Debug, Default)]\nstruct Run {\n    first: Option<(u32, PathBuf)>,\n    last: Option<(u32, PathBuf)>,\n}\n\n/// What the first line of a run says about its own start.\nenum Head {\n    /// A `log.start` with `running`: the runs it found still running (2.16 on).\n    Listed(Vec<String>),\n    /// A `log.start` without the list: written before 2.16.\n    Unlisted,\n    /// No whole first line, or not a `log.start`: killed before it wrote one,\n    /// or its first part was removed by the retention sweep.\n    Missing,\n}\n\n/// The first line of `path`, as a [`Head`].\nfn head(path: &Path) -> Head {\n    use std::io::{BufRead, BufReader, Read};\n    let Ok(file) = File::open(path) else {\n        return Head::Missing;\n    };\n    // A first line cut off by a kill is not whole JSON, so it does not parse.\n    let mut line = String::new();\n    if BufReader::new(file.take(64 * 1024))\n        .read_line(&mut line)\n        .is_err()\n    {\n        return Head::Missing;\n    }\n    let Ok(record) = serde_json::from_str::<Value>(&line) else {\n        return Head::Missing;\n    };\n    if record[\"event\"] != \"log.start\" {\n        return Head::Missing;\n    }\n    match record[\"fields\"][\"running\"].as_array() {\n        Some(names) => Head::Listed(\n            names\n                .iter()\n                .filter_map(|name| name.as_str().map(str::to_owned))\n                .collect(),\n        ),\n        None => Head::Unlisted,\n    }\n}\n\n\n--- Shared/telemetry/src/sink.rs\nfn find_earlier(directory: &Path, process: &str, own: &str) -> Earlier {\n    use std::collections::{BTreeMap, BTreeSet};\n    type Key = (String, u32);\n    // The race this order closes (two starts, each scanning before the other's\n    // file exists) cannot be staged in a test, so the tests check the order.\n    #[cfg(test)]\n    assert!(\n        directory.join(format!(\"{own}-1.jsonl\")).exists(),\n        \"a start looks at earlier runs only once its own file exists\"\n    );\n    // One entry per run, (start, pid), with its first and last parts.\n    let mut runs: BTreeMap<Key, Run> = BTreeMap::new();\n    let Ok(entries) = std::fs::read_dir(directory) else {\n        return Earlier::default();\n    };\n    for entry in entries.flatten() {\n        let name = entry.file_name().to_string_lossy().into_owned();\n        let Some((owner, started, pid, part)) = parse_name(&name) else {\n            continue;\n        };\n        if owner != process {\n            continue;\n        }\n        // This start's own file, opened just before: not an earlier run.\n        if format!(\"{owner}-{started}-{pid}\") == own {\n            continue;\n        }\n        let run = runs.entry((started.to_owned(), pid)).or_default();\n        if run.last.as_ref().is_none_or(|(last, _)| part >= *last) {\n            run.last = Some((part, entry.path()));\n        }\n        if run.first.as_ref().is_none_or(|(first, _)| part < *first) {\n            run.first = Some((part, entry.path()));\n        }\n    }\n    let name_of = |(started, pid): &Key| format!(\"{process}-{started}-{pid}\");\n    let held = |run: &Run| -> bool {\n        run.last\n            .as_ref()\n            .is_some_and(|(_, path)| held_by_a_writer(path))\n    };\n\n    let mut candidates: BTreeSet<&Key> = BTreeSet::new();\n    let mut stop_at: Option<&str> = None;\n    let mut unlisted = false;\n    for (key, run) in runs.iter().rev() {\n        if stop_at.is_some_and(|second| second != key.0) {\n            break;\n        }\n        candidates.insert(key);\n        let Some((_, first)) = &run.first else {\n            continue;\n        };\n        match head(first) {\n            Head::Listed(names) => {\n                candidates.extend(runs.keys().filter(|other| names.contains(&name_of(other))));\n                stop_at.get_or_insert(&key.0);\n            }\n            Head::Unlisted if !held(run) => {\n                stop_at.get_or_insert(&key.0);\n                unlisted = true;\n            }\n            Head::Unlisted | Head::Missing => {}\n        }\n    }\n    if unlisted {\n        let older: Vec<&Key> = runs\n            .iter()\n            .filter(|&(key, run)| !candidates.contains(key) && held(run))\n            .map(|(key, _)| key)\n            .collect();\n        candidates.extend(older);\n    }\n\n    let mut earlier = Earlier::default();\n    for key in candidates {\n        let run = &runs[key];\n        let Some((_, path)) = &run.last else {\n            continue;\n        };\n        if held(run) {\n            earlier.running.push(name_of(key));\n            continue;\n        }\n        let last = last_record(path);\n        let event = last\n            .as_ref()\n            .and_then(|record| record[\"event\"].as_str())\n            .map(str::to_owned);\n        if event.as_deref() == Some(\"log.stop\") {\n            continue;\n        }\n        earlier.unfinished.push(Unfinished {\n            file: path\n                .file_name()\n                .map(|name| name.to_string_lossy().into_owned())\n                .unwrap_or_default(),\n            started: key.0.clone(),\n            pid: key.1,\n            last_seq: last.as_ref().and_then(|record| record[\"seq\"].as_u64()),\n            last_ts: last\n                .as_ref()\n                .and_then(|record| record[\"ts\"].as_str())\n                .map(str::to_owned),\n            last_event: event,\n        });\n    }\n    earlier\n}\n\n",
+    "interrupt": "--- services/render-engine/worker/src/main.rs\ntype SharedLog = Arc<Mutex<Option<gx_telemetry::sink::LogGuard>>>;\n\n/// Why the engine stopped when a console control event ended it. The handler is\n/// the same for each event and is not told which, so the reason names them all.\nconst INTERRUPT_REASON: &str =\n    \"a console control event (Ctrl+C, Ctrl+Break, window close, logoff or shutdown)\";\n\n/// Write the log out and end it. The lock is held while the log finishes, so an\n/// interrupt that arrives during a normal exit waits for it instead of ending\n/// the process in the middle of the last lines.\nfn finish_log(log: &SharedLog) {\n    let Ok(mut slot) = log.lock() else { return };\n    if let Some(guard) = slot.take() {\n        let _ = guard.finish();\n    }\n}\n\nfn log_directory(log: &SharedLog) -> Option<String> {\n    let slot = log.lock().ok()?;\n    slot.as_ref()\n        .map(|guard| guard.directory().display().to_string())\n}\n\n/// What an interrupt does to the record: say why the engine stopped, then write\n/// the log out. The handler then ends the process.\nfn record_interrupt(log: &SharedLog) {\n    tracing::info!(event = \"engine.stop\", reason = INTERRUPT_REASON);\n    finish_log(log);\n}\n\n/// Make Ctrl+C an orderly stop, on record. Without a handler a Windows process\n/// ended from the console runs none of its own code, so the log has no\n/// `engine.stop` and no `log.stop`, and the file of an engine that was stopped\n/// on purpose looks like the file of one that died. `#![forbid(unsafe_code)]`\n/// rules out a hand-written console handler; this is the `ctrlc` crate.\n///\n/// Ctrl+C and Ctrl+Break end the engine with `engine.stop`, `log.stop` and exit\n/// code 0 (run live, `docs/evidence/2.16`). A console window close, logoff or\n/// shutdown reach the same handler, but Windows ends the process as soon as the\n/// crate's system handler returns, which is before this one has finished: the\n/// file usually ends at `engine.stop` without `log.stop`, and the next start names\n/// it as unfinished. That is a limit of the crate, not something to hide.\nfn install_interrupt_handler(log: &SharedLog) {\n    let log = Arc::clone(log);\n    let installed = ctrlc::set_handler(move || {\n        record_interrupt(&log);\n        std::process::exit(0);\n    });\n    if let Err(error) = installed {\n        eprintln!(\n            \"cannot watch for Ctrl+C ({error}): an interrupt will end the engine without a stop record\"\n        );\n        tracing::warn!(event = \"engine.interrupt_handler_failed\", detail = %error);\n    }\n}\n\n"
+  },
+  "questions": {
+    "walk_misses_a_kill": {
+      "type": "noul",
+      "instructions": "In find_earlier, apart from the named limits, is there a case where a run that was killed (gone without log.stop) is never named by any later start?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    },
+    "walk_repeats_a_kill": {
+      "type": "noul",
+      "instructions": "In find_earlier, apart from the named limits, is there a case where the same kill is named by two different starts?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    },
+    "walk_false_alarm": {
+      "type": "noul",
+      "instructions": "In find_earlier, is there a case where a run that is still running, or one that ended with log.stop, is named?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    },
+    "probe_defect": {
+      "type": "noul",
+      "instructions": "In open_as_writer / held_by_a_writer, is there a defect on Windows?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    },
+    "start_defect": {
+      "type": "noul",
+      "instructions": "In start(), is there a defect in the order of opening the own file, scanning, and writing log.start and the namings?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    },
+    "interrupt_defect": {
+      "type": "noul",
+      "instructions": "In the engine interrupt code, is there a defect (deadlock, lost log lines, wrong exit)?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    },
+    "cost_defect": {
+      "type": "noul",
+      "instructions": "Does the walk read or open many files at each start in an ordinary folder (hundreds of earlier runs, a few running)?",
+      "criteria": {
+        "true": "Yes, there is such a defect.",
+        "false": "No such defect."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "walk_misses_a_kill",
+      "jev": 0.77,
+      "laya": 0.9309,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.77
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9309,
+        "confidence": 0.9309,
+        "answer_confidence": 0.9309,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "walk_repeats_a_kill",
+      "jev": 0.68,
+      "laya": 0.9211,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.68
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9211,
+        "confidence": 0.9211,
+        "answer_confidence": 0.9211,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "walk_false_alarm",
+      "jev": 0.61,
+      "laya": 0.9253,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.61
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9253,
+        "confidence": 0.9253,
+        "answer_confidence": 0.9253,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "probe_defect",
+      "jev": 0.39,
+      "laya": 0.9453,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.39
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9453,
+        "confidence": 0.9453,
+        "answer_confidence": 0.9453,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "start_defect",
+      "jev": 0.49,
+      "laya": 0.9358,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.49
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9358,
+        "confidence": 0.9358,
+        "answer_confidence": 0.9358,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "interrupt_defect",
+      "jev": 0.38,
+      "laya": 0.9409,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.38
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9409,
+        "confidence": 0.9409,
+        "answer_confidence": 0.9409,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "cost_defect",
+      "jev": 0.65,
+      "laya": 0.9129,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.65
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9129,
+        "confidence": 0.9129,
+        "answer_confidence": 0.9129,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

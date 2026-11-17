@@ -1,0 +1,111 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 2947,
+    "output_tokens": 0,
+    "state_tokens": 906,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.16 design consult: which earlier runs a start names when runs of one process overlap",
+    "done_when": "An engine ended by Ctrl+C or a stop request writes `engine.stop` with its reason and finishes its log; a process killed without a stop record is named by the next start of the same process as `log.previous_unfinished` (the file, its last sequence number and its last timestamp), so a killed engine, shell or MCP server is never indistinguishable from one still running. Catching Ctrl+C needs the `ctrlc` crate or a stop request on the control plane: the crate is a download: the user approved `ctrlc` for this row on 16 Nov 2026.",
+    "context": "\nGrapiX writes one JSON Lines log per process run, named <process>-<UTC start, to the second>-<pid>-<part>.jsonl, in a\nproduct folder (engine/, mcp/, editor/, playout/). Files older than the retention period (14 days by default) are removed\nwhen a sink starts. A writer holds its file open allowing only reading, so a probe can tell a run that is still running\n(its file is held) from one that is gone (the system closed its files), with no process-id check.\n\nRow 2.16 as built: when a sink starts, before its own file exists, it lists the earlier runs of the same process, walks\nthem newest START first, skips runs still holding their file, and looks at the first run that is gone: if its last file\ndoes not end with log.stop it writes log.previous_unfinished (warn) naming it; either way it stops there. It reads one\ntail of at most 64 KB per run it looks at.\n\nRuns of one process can overlap: two MCP servers for two agent clients (Claude and Codex each start their own\neditor-mcp), or two engines. With overlap the rule has two gaps, found on review after the row's evidence was gathered:\n1. A missed kill: X starts 10:00, Y starts 11:00, X is killed 11:15, Y ends in order 11:30, Z starts 12:00. Z looks at\n   Y (newest start, finished) and stops: X's kill is never named by any start.\n2. A repeat: while a newer sibling is still running, every new start skips it and names the same old kill again.\nRuns one after another (the usual case for an engine and the shells) have neither gap: the next start names a kill once.\n\nA run's time of death is not recorded anywhere: a quiet process (an idle MCP server) can be killed hours after its last\nrecord, so ordering runs by their last record (or file modification time) cannot tell whether a later run started\nbefore or after the death.\n\nOptions:\n(a) Keep the rule. Name both gaps as limits in the evidence. Row 2.14 (the diagnostic bundle, next in the queue) lists\n    every run in the retention window that is gone without log.stop, so nothing is lost for diagnosis.\n(b) Order runs by their last record instead of their start. Cheap. Fixes the missed kill when X died after Y's last\n    record, but still misses a quiet X killed after a newer run started, and still repeats.\n(c) Name every run that is gone without log.stop and that no other run's file has already named: each start reads the\n    tail of every dead run of the process in the folder, and the first few KB of every newer run (where a\n    log.previous_unfinished naming it would be), and writes one record per unnamed kill. Complete and named once, but\n    the start reads every file of that process in the retention window (hundreds of files for an MCP server started per\n    agent session), and adds tests and mutations to a row whose evidence is otherwise gathered.\n"
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Which option should 2.16 take before it is committed?",
+      "criteria": {
+        "a_keep_and_name": "(a) keep the rule, name both gaps, 2.14 lists every unfinished run",
+        "b_last_record_order": "(b) order runs by their last record",
+        "c_name_every_unnamed": "(c) name every unnamed dead unfinished run, reading every file"
+      }
+    },
+    "gap_breaks_done_when": {
+      "type": "noul",
+      "instructions": "Does gap 1 (the missed kill with overlapping runs) mean the done-when is not met if the row is closed with option (a)?",
+      "criteria": {
+        "true": "Yes, the done-when is not met with (a).",
+        "false": "No, with the gaps named and 2.14 listing every unfinished run, the row can close."
+      }
+    },
+    "c_cost_acceptable": {
+      "type": "noul",
+      "instructions": "Is the start-up cost of option (c), reading every log file of that process in the retention window at each start, acceptable for a broadcast product?",
+      "criteria": {
+        "true": "Yes, acceptable.",
+        "false": "No, a start should not read every file."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "choice",
+      "jev": "a_keep_and_name",
+      "laya": "c_name_every_unnamed",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "a_keep_and_name",
+        "confidence": 0.62,
+        "probabilities": {
+          "a_keep_and_name": 0.75,
+          "b_last_record_order": 0.01,
+          "c_name_every_unnamed": 0.24
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "c_name_every_unnamed",
+        "probabilities": {
+          "a_keep_and_name": 0.2738,
+          "b_last_record_order": 0.31,
+          "c_name_every_unnamed": 0.4162
+        },
+        "confidence": 0.0146,
+        "answer_confidence": 0.4162,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "gap_breaks_done_when",
+      "jev": 0.53,
+      "laya": 0.9858,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.53
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9858,
+        "confidence": 0.9858,
+        "answer_confidence": 0.9858,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "c_cost_acceptable",
+      "jev": 0.2,
+      "laya": 0.7884,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.2
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.7884,
+        "confidence": 0.7884,
+        "answer_confidence": 0.7884,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,335 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 83515,
+    "output_tokens": 0,
+    "state_tokens": 7509,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.16: process end on record: engine.stop on Ctrl+C, and a start that finds its predecessor's log unfinished says so",
+    "done_when": "An engine ended by Ctrl+C or a stop request writes `engine.stop` with its reason and finishes its log; a process killed without a stop record is named by the next start of the same process as `log.previous_unfinished` (the file, its last sequence number and its last timestamp), so a killed engine, shell or MCP server is never indistinguishable from one still running. Catching Ctrl+C needs the `ctrlc` crate or a stop request on the control plane: the crate is a download: the user approved `ctrlc` for this row on 16 Nov 2026.",
+    "evidence": "# 2.16 \u2014 Process end on record: `engine.stop` on Ctrl+C, and a start that finds its predecessor's log unfinished says so\n\nBuild-plan row `2.16` (ADR-0004), 16 Nov 2026. Done when: an engine ended by\nCtrl+C or a stop request writes `engine.stop` with its reason and finishes its\nlog; a process killed without a stop record is named by the next start of the\nsame process as `log.previous_unfinished` (the file, its last sequence number and\nits last timestamp), so a killed engine, shell or MCP server is never\nindistinguishable from one still running.\n\n## What was built\n\n- **`engine.stop` on a console interrupt** (`services/render-engine/worker/src/main.rs`).\n  The worker installs a handler with the `ctrlc` crate (the user approved it for\n  this row on 16 Nov 2026; `#![forbid(unsafe_code)]` rules out a hand-written\n  console handler). The handler writes `engine.stop` (info, with its reason),\n  finishes the log (so `log.stop` is the last line, nothing queued is lost) and\n  ends the process with exit code 0. The log guard is now a shared slot\n  (`Arc<Mutex<Option<LogGuard>>>`), and whoever ends the process holds the lock\n  while the log finishes, so an interrupt during a normal exit waits for it.\n- **`log.previous_unfinished`** (`Shared/telemetry/src/sink.rs`, so every process\n  that logs through the sink has it: the engine, the host, both shells, the MCP\n  servers). When a sink starts, before it creates its own file, it looks at the\n  earlier runs of the same process name in the same product folder (file names are\n  `<process>-<UTC start>-<pid>-<part>.jsonl`). Each run that is gone without\n  `log.stop` and that no earlier start can have named gets one warn record in the\n  new file: `file`, `started`, `predecessor_pid`, `last_seq`, `last_ts` and\n  `last_event` (the last whole record: a line cut off by the kill is skipped). A\n  kill is named once, by the first start after it, **whether or not runs of the\n  process overlap** (two MCP servers for two agent clients, two engines).\n- **How a start knows what is still unnamed, without reading every file.** Each\n  `log.start` now lists, as `running`, the runs of its process that were still\n  running when it started (`<process>-<start>-<pid>`). Walking back from the newest\n  run, a start stops at the newest that has such a list: every run already gone\n  when that run started was named by it then, so only that run, the runs it\n  listed, and any newer run passed on the way (one killed before it wrote its first\n  line) can still be unnamed. It probes just those, names each that is gone\n  without `log.stop`, and lists those still running in its own `log.start`. Runs\n  that started in the same second are taken together, since their order is not\n  known. The cost is one directory listing, one first-line read, and a probe and a\n  64 KB tail read per candidate (usually none to three). Files written before 2.16\n  have no list: the walk then stops at the first such run that is gone, as the\n  first rule did, so the first start after the upgrade names one run, not every\n  old one, and lists every older run still running so that it is named when it\n  ends.\n- **Running is told from killed by the file, not by the process id.** A log writer\n  now opens its file allowing others to read it and nothing else (Windows\n  `FILE_SHARE_READ`; an advisory shared lock elsewhere). Another process that asks\n  to write to it is refused exactly while the writer has it open, and the system\n  closes a killed process's files, so the probe cannot be fooled by a reused\n  process id and needs no `unsafe` and no crate. A second engine started beside\n  a running one is not told it has a dead predecessor. A side effect: while a\n  writer has its file open, nothing else can delete or rename it, so the retention\n  sweep of another process can no longer remove a live run's file from under it\n  (before, Windows would have let it, and the writer's later lines would have gone\n  with the file).\n\n## Executed\n\n**Live** (`live-check.mjs`; result in `live-check-result.json`): real engines,\neach started in its own console window with `GX_LOG_DIR` in a scratch folder.\nCtrl+C is raised in the engine's console by a helper that attaches to it, as a\nkeystroke would. All 22 checks pass with Ctrl+C and again with Ctrl+Break (17 Nov\n2026, on the final code: the redesigned walk, after the mutation run, on rebuilt\nunmutated binaries; the default run is the one recorded):\n\n- engine A, interrupted: it ends on its own with exit code 0 and its last two\n  records are `engine.stop` (info; reason \"a console control event \u2026\") and\n  `log.stop`;\n- engine B, started after A: no `log.previous_unfinished` (A finished); then it is\n  killed outright and its file has neither `engine.stop` nor `log.stop`;\n- engine C, started after B: `log.previous_unfinished` at warn naming B's file,\n  B's pid, and B's last sequence number and last timestamp exactly as they are\n  in B's file; it does not name A;\n- the same three runs for **the Editor's MCP server, the Playout shell and the\n  Editor shell** (4 checks each, real binaries, scratch store, package and\n  WebView2 folders): the first run ends in order (the MCP server's input is\n  closed; a shell's window is asked to close, as its close button does) and its\n  file ends with `mcp.stop` / `playout.stop` / `editor.stop` and `log.stop`; the\n  next start does not name it; the second run is killed and writes no stop\n  record; the third start names it at warn with its pid, last sequence number and\n  last timestamp exactly as in its file. So an ordinary restart of a shell or an\n  MCP server raises no false alarm, and a killed one is named.\n\n**Tests added.** `gx-telemetry` sink (13): a start names an earlier run that left\nno stop record (every field) and lists nothing running; one that finished is not\nnamed; one still holding its file is not called unfinished, is listed as running,\nand is named once it no longer holds it; with overlapping runs a kill is named by\nthe first start after it although the newest run finished; a kill named once is\nnot named again while its siblings run, and the start lists them; a run killed\nbefore its first line is named and the walk goes on past it; a rotated run's list\nis read from its first part; runs that started in the same second are taken\ntogether; before 2.16 (no lists) only the newest run that is gone decides, a newer\nfinished run hides an older unfinished one, and an older run still running is\nlisted and named when it ends; the last part of a rotated run says how it ended; a\nline cut off by a kill is skipped and an empty file is named too; another process\nname, including one that starts with this one's, is not mistaken for it. The\nworker binary (1): an interrupt leaves `log.start`, `engine.stop` (info, its\nreason), `log.stop`, and takes the guard. The worker over real processes (1,\n`log_file`): a second engine started beside a running one is not named and lists\nthe first as running; after both are killed a third names **both**, once each, at\nwarn, with file, a last sequence number of at least 2 and a last timestamp, and no\n`engine.stop` is invented for either. The engines it starts are held by a guard\nthat kills them when it is dropped, so a failed assertion never leaves one running\n(see the mutation run below for why).\n\n**Mutations** on the final code (one at a time, each restored byte-identical and\nconfirmed so; runner kept outside the repo). **24 of 24 make a named check fail**\n(up to three of the failing checks are listed; sink tests are `sink::tests::\u2026`):\n\n[Table condensed for this review: 24 mutations, each made at least one named check fail and was restored byte-identical: A1 a start never looks at earlier runs; A2 the probe never sees a writer (a running sibling is called killed); A3 every earlier run is taken for a running one; A4 `log.stop` is not recognised as an ending; A5 the walk starts from the oldest run; A6 the first part found, not the last, says how a run ended; A6b the last part, not the first, is read for the list; A7 a writer shares its file for writing (`FILE_SHARE_READ` \u2192 all); A7b the same, against the real engine binary; A8 the first line of the tail is taken for the last record; A9 a process whose name starts with this one's is taken for it; A10 the finding is written at info, not warn; A11 the runs a start found running are not followed; A12 the walk does not stop at a run with a list; A13 runs that started in the same second are not taken together; A14 a run from before 2.16 does not stop the walk; A15 older runs still running are not listed after an unlisted stop; A16 a run with no first line stops the walk; A17 a start does not list the runs still running; A17b the same, against the real engine binary; B1 an interrupt writes no `engine.stop`; B2 an interrupt does not finish the log; B3 the handler does not record the interrupt (live); B4 the handler exits with code 1 (live).]\n\nWhile writing these, a check in the first-line reader (a line with no newline is\nnot a first line) was found to be one no test can reach: a line cut off by a kill\nis never whole JSON, so it fails to parse anyway. It was removed rather than kept\nuntested.\n\n**The harness incident.** The first mutation run (on the first rule, 15\nmutations) hung on A7b for about ten hours (16\u201317 Nov). The mutation was caught\n(the test failed), but the test killed its engines only after its assertions, so\nthe two it had started kept running; they held the runner's captured output open,\nso the runner never returned, and `sink.rs` stayed mutated until it was found,\nstopped and restored from its backup (byte-identical). Fixed twice: the test's\nguard above, and a runner that writes output to a file, kills the process tree on\na timeout and stops any engine left in a test scratch folder. That run's other 14\nmutations all failed named checks; it was superseded by the run above on the\nredesigned code. B3 and B4 overwrite `live-check-result.json` with failing runs,\nso after each mutation run the binaries were rebuilt unmutated and the live check\nrerun (`--break`, then the default) before anything was recorded.\n\n## Review, and the redesign it led to (17 Nov 2026)\n\n**First slice review** (`jev-laya-slice-before-redesign.json`, Jev 1.14.0 and\nlaya-multilingual at max_len 8192, 6,733 tokens, nothing truncated), on the first\nrule (only the newest run that is gone decides). Jev: Ctrl+C orderly 0.97, every\nprocess named after a kill 0.96, no false alarm 0.92, the stop-request reading\nacceptable 0.89, mutations can fail 0.95; the probe can be fooled 0.23, the close\nlimit breaks the done-when 0.29, silent substitution 0.25; weakest point: the\nnon-Windows path not run (0.77); **must fix 0.44**. Laya answered 0.97 to 0.99 on\nevery yes/no question, the contrary ones included (the probe can be fooled 0.99, a\ndefect to fix 0.97), so its yes/no answers carry no signal here; its weakest point\nsplit thinly (only the engine has a handler 0.25, the non-Windows path 0.22).\n\nJev's undecided `must_fix` led to a second look at the first rule, which found two\ngaps when runs of one process overlap (realistic for MCP servers: Claude and Codex\neach start their own `editor-mcp`). **A missed kill:** X starts, Y starts beside\nit, X is killed, Y ends in order; the next start looked only at Y and stopped, so\nX's kill was never named. **A repeat:** while a newer sibling still ran, every new\nstart skipped it and named the same old kill again. Runs one after another had\nneither gap, which is all the first evidence exercised.\n\n**Design consults** (`jev-laya-design.json`, then `jev-laya-design2.json` with a\nfourth option added). Options: (a) keep the rule and name the gaps, (b) order runs\nby their last record (fails for a quiet run killed long after its last line), (c)\nname every unnamed kill by reading every file of the process in the retention\nwindow, (d) the `running` list in `log.start` described above. First round: Jev\n(a) 0.75, (c) 0.24, (c)'s cost acceptable 0.20, the gap breaks the done-when 0.53;\nLaya (c) 0.42, (b) 0.31, (a) 0.27. Second round, with (d): **Jev (d) 0.96**, (d)\nsound 0.77, (c)'s cost acceptable 0.15; **Laya (c) 0.43**, (d) 0.19, (d) sound\n0.97 (on its saturated scale). **Decided by hand: (d).** Laya's preference is for\nnaming every kill, which (d) does; Jev's objection to (c) is its cost, which (d)\ndoes not have. The split is reported, not resolved by either.\n\n## Limits and readings\n\n1. **Console window close, logoff and shutdown are not orderly.** The same handler\n   is called for them, and on a window close it writes `engine.stop`, but Windows\n   ends the process as soon as the `ctrlc` crate's system-level handler returns,\n   which is before the engine has finished its log. Run live (`--close`): the file\n   ended at `engine.stop` with no `log.stop`, the exit status was\n   `STATUS_CONTROL_C_EXIT`, and the next engine named it (`last_event:\n   engine.stop`). Holding the system handler open would need `unsafe` code. So the\n   reason text names the events the handler is called for, not a promise about\n   them, and only Ctrl+C and Ctrl+Break are claimed as orderly.\n2. **Only the engine has a handler.** The shells already write `editor.stop` and\n   `playout.stop` when their window closes, and the MCP servers and the host write\n   theirs when they end by their own code (2.12). A Ctrl+C on the engine host or\n   on an MCP server process ends it with no stop record, and the next start of\n   that process names it.\n3. **Ctrl+C can be inherited as ignored.** A process started by one that has\n   Ctrl+C ignored ignores it too, and the harness this was run from had it set:\n   the first live run found the engine still running 20 seconds after the\n   keystroke. The live script now clears the flag in the shell that launches the\n   engine, as an ordinary terminal has it. An engine launched by something that\n   ignores Ctrl+C gets no Ctrl+C, so it simply has no console interrupt to record.\n4. **Races.** Two starts at the same moment may both name the same kill. A run\n   killed in the microseconds between writing its `log.start` and writing its\n   `log.previous_unfinished` records loses those namings (the next start names\n   the run itself, not the ones it would have named). A new process that starts\n   in the microseconds between one rotated part closing and the next opening could\n   see the run as unfinished. Off Windows, two probes of the same file at the same\n   moment can each see the other's probe as a writer, which gives a repeat, never\n   a miss. A run whose list names a run that the retention sweep has since removed\n   has nothing left to name. A run from before 2.16 that was already gone when the\n   upgrade's first start ran, and was not the newest, is not named (by design: no\n   backlog).\n5. **The non-Windows probe has been compiled but not run.** Only the Windows\n   target is installed here (a Linux target would be a download). The two\n   non-Windows bodies (`lock_shared` in the writer, `try_lock` \u2192\n   `TryLockError::WouldBlock` in the probe) were compiled verbatim, without their\n   `cfg`, in a scratch program with `-D warnings` and build cleanly; both calls are\n   stable since Rust 1.89, the workspace minimum. They cannot be exercised here:\n   on Windows a byte-range lock needs a handle opened for reading or writing, and\n   the writer's handle is append-only, so `lock_shared` fails and the probe sees no\n   holder. Windows does not use that path (it uses the share mode above). On Linux\n   and macOS std locks with `flock`, which does not depend on how the file was\n   opened. Row 0.3's CI is where the path is first run. A filesystem without\n   advisory locks gives the probe no holder to see, so there a running sibling\n   could be named as unfinished.\n6. **\"Or a stop request\".** The done-when names an engine \"ended by Ctrl+C or a\n   stop request\". The plan row offers a stop request on the control plane as the\n   other way to catch an interrupt, if the crate were not approved; it was, and\n   the control protocol has no stop request (the host never stops a worker, by\n   design: 2.12). So there is no stop request to test. The one other way the\n   engine ends by its own code, its control listener stopping, writes\n   `engine.stop` with its reason and finishes the log (2.12, unchanged). A stop\n   request, if one is added, would end through the same `finish_log`.\n7. The as-run record (12.11) is a separate file with its own integrity rules and\n   is not touched by this row.\n",
+    "code": "--- Shared/telemetry/src/sink.rs (excerpt, new code)\n/// Windows sharing flags. A writer opens its file allowing others to read it and\n/// nothing else, so another process asking to write to it is refused exactly\n/// while the writer has it open (2.16).\n#[cfg(windows)]\nconst SHARE_READ: u32 = 1;\n#[cfg(windows)]\nconst SHARE_ALL: u32 = 1 | 2 | 4;\n#[cfg(windows)]\nconst ERROR_SHARING_VIOLATION: i32 = 32;\n\n/// Open a log file for appending and keep it held, so that [`held_by_a_writer`]\n/// can tell a process that is still running from one that is gone.\nfn open_as_writer(path: &Path) -> io::Result<File> {\n    let mut options = OpenOptions::new();\n    options.create(true).append(true);\n    #[cfg(windows)]\n    {\n        use std::os::windows::fs::OpenOptionsExt;\n        options.share_mode(SHARE_READ);\n    }\n    let file = options.open(path)?;\n    // Elsewhere an advisory shared lock does the same. A filesystem that cannot\n    // lock only loses the distinction, never a line.\n    #[cfg(not(windows))]\n    let _ = file.lock_shared();\n    Ok(file)\n}\n\n/// Whether some process has `path` open as a log writer right now. A process\n/// that was killed holds nothing: the system closed its files with it, and a\n/// process id that has since been reused by something else changes nothing.\nfn held_by_a_writer(path: &Path) -> bool {\n    #[cfg(windows)]\n    {\n        use std::os::windows::fs::OpenOptionsExt;\n        match OpenOptions::new()\n            .append(true)\n            .share_mode(SHARE_ALL)\n            .open(path)\n        {\n            Err(error) => error.raw_os_error() == Some(ERROR_SHARING_VIOLATION),\n            Ok(_) => false,\n        }\n    }\n    #[cfg(not(windows))]\n    {\n        File::open(path)\n            .is_ok_and(|file| matches!\n--- Shared/telemetry/src/sink.rs (excerpt, new code)\nfn find_earlier(directory: &Path, process: &str) -> Earlier {\n    use std::collections::{BTreeMap, BTreeSet};\n    type Key = (String, u32);\n    // One entry per run, (start, pid), with its first and last parts.\n    let mut runs: BTreeMap<Key, Run> = BTreeMap::new();\n    let Ok(entries) = std::fs::read_dir(directory) else {\n        return Earlier::default();\n    };\n    for entry in entries.flatten() {\n        let name = entry.file_name().to_string_lossy().into_owned();\n        let Some((owner, started, pid, part)) = parse_name(&name) else {\n            continue;\n        };\n        if owner != process {\n            continue;\n        }\n        let run = runs.entry((started.to_owned(), pid)).or_default();\n        if run.last.as_ref().is_none_or(|(last, _)| part >= *last) {\n            run.last = Some((part, entry.path()));\n        }\n        if run.first.as_ref().is_none_or(|(first, _)| part < *first) {\n            run.first = Some((part, entry.path()));\n        }\n    }\n    let name_of = |(started, pid): &Key| format!(\"{process}-{started}-{pid}\");\n    let held = |run: &Run| -> bool {\n        run.last\n            .as_ref()\n            .is_some_and(|(_, path)| held_by_a_writer(path))\n    };\n\n    let mut candidates: BTreeSet<&Key> = BTreeSet::new();\n    let mut stop_at: Option<&str> = None;\n    let mut unlisted = false;\n    for (key, run) in runs.iter().rev() {\n        if stop_at.is_some_and(|second| second != key.0) {\n            break;\n        }\n        candidates.insert(key);\n        let Some((_, first)) = &run.first else {\n            continue;\n        };\n        match head(first) {\n            Head::Listed(names) => {\n                candidates.extend(runs.keys().filter(|other| names.contains(&name_of(other))));\n                stop_at.get_or_insert(&key.0);\n            }\n            Head::Unlisted if !held(run) => {\n                stop_at.get_or_insert(&key.0);\n                unlisted = true;\n            }\n            Head::Unlisted | Head::Missing => {}\n        }\n    }\n    if unlisted {\n        let older: Vec<&Key> = runs\n            .iter()\n            .filter(|&(key, run)| !candidates.contains(key) && held(run))\n            .map(|(key, _)| key)\n            .collect();\n        candidates.extend(older);\n    }\n\n    let mut earlier = Earlier::default();\n    for key in candidates {\n        let run = &runs[key];\n        let Some((_, path)) = &run.last else {\n            continue;\n        };\n        if held(run) {\n            earlier.running.push(name_of(key));\n            continue;\n        }\n        let last = last_record(path);\n        let event = last\n            .as_ref()\n            .and_then(|record| record[\"event\"].as_str())\n            .map(str::to_owned);\n        if event.as_deref() == Some(\"log.stop\") {\n            continue;\n        }\n        earlier.unfinished.push(Unfinished {\n            file: path\n                .file_name()\n                .map(|name| name.to_string_lossy().into_owned())\n                .unwrap_or_default(),\n         \n--- services/render-engine/worker/src/main.rs (excerpt, new code)\ntype SharedLog = Arc<Mutex<Option<gx_telemetry::sink::LogGuard>>>;\n\n/// Why the engine stopped when a console control event ended it. The handler is\n/// the same for each event and is not told which, so the reason names them all.\nconst INTERRUPT_REASON: &str =\n    \"a console control event (Ctrl+C, Ctrl+Break, window close, logoff or shutdown)\";\n\n/// Write the log out and end it. The lock is held while the log finishes, so an\n/// interrupt that arrives during a normal exit waits for it instead of ending\n/// the process in the middle of the last lines.\nfn finish_log(log: &SharedLog) {\n    let Ok(mut slot) = log.lock() else { return };\n    if let Some(guard) = slot.take() {\n        let _ = guard.finish();\n    }\n}\n\nfn log_directory(log: &SharedLog) -> Option<String> {\n    let slot = log.lock().ok()?;\n    slot.as_ref()\n        .map(|guard| guard.directory().display().to_string())\n}\n\n/// What an interrupt does to the record: say why the engine stopped, then write\n/// the log out. The handler then ends the process.\nfn record_interrupt(log: &SharedLog) {\n    tracing::info!(event = \"engine.stop\", reason = INTERRUPT_REASON);\n    finish_log(log);\n}\n\n/// Make Ctrl+C an orderly stop, on record. Without a handler a Windows process\n/// ended from the console runs none of its own code, so the lo"
+  },
+  "questions": {
+    "ctrl_c_orderly": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from runs of the real engine, that Ctrl+C (and Ctrl+Break) end it with engine.stop carrying its reason, then log.stop as the last record, and exit code 0?",
+      "criteria": {
+        "true": "Yes, executed on the real engine.",
+        "false": "No, only claimed or only unit-tested."
+      }
+    },
+    "killed_named_every_process": {
+      "type": "noul",
+      "instructions": "Does the evidence show, from runs of the real binaries, that a killed engine, a killed shell and a killed MCP server are each named by the next start of the same process with the file (or pid), the last sequence number and the last timestamp?",
+      "criteria": {
+        "true": "Yes, for the engine, both shells and the MCP server, executed.",
+        "false": "No, at least one of them is only claimed."
+      }
+    },
+    "overlap_named_once": {
+      "type": "noul",
+      "instructions": "With runs of one process overlapping (two MCP servers, two engines), does the code name every kill exactly once, by the first start after it, as the evidence claims, and do the tests and the real-engine test show it?",
+      "criteria": {
+        "true": "Yes, the code does it and checks that ran show it.",
+        "false": "No, a kill can be missed or repeated beyond the named races, or it is only claimed."
+      }
+    },
+    "no_false_alarm": {
+      "type": "noul",
+      "instructions": "Does the evidence show that a process still running is never named as unfinished, and that a run which ended in order is not named by the next start?",
+      "criteria": {
+        "true": "Yes, both are shown by checks that ran.",
+        "false": "No, one of them is not shown."
+      }
+    },
+    "probe_can_be_fooled": {
+      "type": "noul",
+      "instructions": "On Windows, can the running-or-killed probe in this code be fooled: call a running writer killed, or call a killed one running because its process id was reused?",
+      "criteria": {
+        "true": "Yes, a case fools it.",
+        "false": "No, it is decided by the file being held, which a reused pid does not change."
+      }
+    },
+    "stop_request_reading_ok": {
+      "type": "noul",
+      "instructions": "The done-when says \"ended by Ctrl+C or a stop request\". The evidence (limit 6) says the plan offered a stop request only as the alternative to the ctrlc crate, the crate was approved, and the control protocol has no stop request. Is that an acceptable, openly named reading of the done-when?",
+      "criteria": {
+        "true": "Yes, acceptable and named.",
+        "false": "No, the row needs a stop request built before it is done."
+      }
+    },
+    "close_limit_breaks_done_when": {
+      "type": "noul",
+      "instructions": "Does limit 1 (a console window close, logoff or shutdown writes engine.stop but not log.stop, and the next start names it) break the done-when?",
+      "criteria": {
+        "true": "Yes, the done-when is not met because of it.",
+        "false": "No, the done-when asks for Ctrl+C, which is orderly, and the limit is named."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named in the evidence?",
+      "criteria": {
+        "true": "Yes, something is approximated or skipped silently.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each run alone, each made a named check fail, each file restored identical, and the harness incident and its fix recorded?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, a mutation survived, does not name what failed, or the incident is hidden."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "unix_not_run": "The non-Windows probe is compiled but never run.",
+        "close_not_orderly": "A window close, logoff or shutdown is not orderly.",
+        "no_stop_request": "There is no stop request to test.",
+        "only_engine_handler": "Only the engine catches Ctrl+C; the host and MCP servers do not.",
+        "redesign_late": "The naming rule was redesigned after review, so its evidence is newer than the rest.",
+        "harness_incident": "The mutation run hung and had to be rerun.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "ctrl_c_orderly",
+      "jev": 0.98,
+      "laya": 0.9924,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9924,
+        "confidence": 0.9924,
+        "answer_confidence": 0.9924,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "killed_named_every_process",
+      "jev": 0.96,
+      "laya": 0.9915,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9915,
+        "confidence": 0.9915,
+        "answer_confidence": 0.9915,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "overlap_named_once",
+      "jev": 0.72,
+      "laya": 0.992,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.72
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.992,
+        "confidence": 0.992,
+        "answer_confidence": 0.992,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "no_false_alarm",
+      "jev": 0.93,
+      "laya": 0.9877,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9877,
+        "confidence": 0.9877,
+        "answer_confidence": 0.9877,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "probe_can_be_fooled",
+      "jev": 0.21,
+      "laya": 0.987,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.21
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.987,
+        "confidence": 0.987,
+        "answer_confidence": 0.987,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stop_request_reading_ok",
+      "jev": 0.88,
+      "laya": 0.9882,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.88
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9882,
+        "confidence": 0.9882,
+        "answer_confidence": 0.9882,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "close_limit_breaks_done_when",
+      "jev": 0.32,
+      "laya": 0.9913,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.32
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9913,
+        "confidence": 0.9913,
+        "answer_confidence": 0.9913,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.28,
+      "laya": 0.9893,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.28
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9893,
+        "confidence": 0.9893,
+        "answer_confidence": 0.9893,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.95,
+      "laya": 0.9889,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9889,
+        "confidence": 0.9889,
+        "answer_confidence": 0.9889,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "unix_not_run",
+      "laya": "only_engine_handler",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "unix_not_run",
+        "confidence": 0.87,
+        "probabilities": {
+          "none": 0,
+          "unix_not_run": 0.89,
+          "close_not_orderly": 0.09,
+          "no_stop_request": 0,
+          "only_engine_handler": 0.01,
+          "redesign_late": 0.01,
+          "harness_incident": 0,
+          "vague_record": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "only_engine_handler",
+        "probabilities": {
+          "none": 0.0889,
+          "unix_not_run": 0.0924,
+          "close_not_orderly": 0.0662,
+          "no_stop_request": 0.0655,
+          "only_engine_handler": 0.3927,
+          "redesign_late": 0.0797,
+          "harness_incident": 0.0894,
+          "vague_record": 0.1252
+        },
+        "confidence": 0.1161,
+        "answer_confidence": 0.3927,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.64,
+      "laya": 0.9797,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.64
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9797,
+        "confidence": 0.9797,
+        "answer_confidence": 0.9797,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

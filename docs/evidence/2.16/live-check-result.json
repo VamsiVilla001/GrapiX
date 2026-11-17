@@ -1,0 +1,209 @@
+{
+  "checks": [
+    {
+      "name": "the Ctrl+C was delivered",
+      "ok": true,
+      "detail": "helper exit 0"
+    },
+    {
+      "name": "engine A ended on its own after the interrupt, with exit code 0",
+      "ok": true,
+      "detail": "exit 0"
+    },
+    {
+      "name": "engine A wrote engine.stop at info with its reason",
+      "ok": true,
+      "detail": "{\"event\":\"engine.stop\",\"fields\":{\"reason\":\"a console control event (Ctrl+C, Ctrl+Break, window close, logoff or shutdown)\"},\"level\":\"info\",\"mono\":4276586500,\"pid\":131256,\"process\":\"worker\",\"seq\":196,\"target\":\"gx_render_worker\",\"ts\":\"2026-11-17T03:23:28.599695Z\",\"version\":\"0.1.0\"}"
+    },
+    {
+      "name": "engine A's last two records are engine.stop and log.stop",
+      "ok": true,
+      "detail": "frame.late, frame.late, engine.stop, log.stop"
+    },
+    {
+      "name": "engine A started with no predecessor to name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "engine B did not name A, which finished",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "a killed engine writes no stop record",
+      "ok": true,
+      "detail": "frame.late, frame.late"
+    },
+    {
+      "name": "engine C names engine B's file",
+      "ok": true,
+      "detail": "{\"file\":\"worker-20261117T032329Z-123312-1.jsonl\",\"last_event\":\"frame.late\",\"last_seq\":31,\"last_ts\":\"2026-11-17T03:23:30.843900Z\",\"predecessor_pid\":123312,\"started\":\"20261117T032329Z\"}"
+    },
+    {
+      "name": "it gives B's last sequence number and last timestamp",
+      "ok": true,
+      "detail": "31 2026-11-17T03:23:30.843900Z against 31 2026-11-17T03:23:30.843900Z"
+    },
+    {
+      "name": "it logs the finding at warn",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the Editor's MCP server ended in order, with mcp.stop and log.stop last",
+      "ok": true,
+      "detail": "mcp.start, mcp.stop, log.stop"
+    },
+    {
+      "name": "the Editor's MCP server: the next start does not name a run that ended in order",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "the Editor's MCP server: a killed run writes no stop record",
+      "ok": true,
+      "detail": "log.start, mcp.start"
+    },
+    {
+      "name": "the Editor's MCP server: the next start names the killed run at warn, with its pid, last sequence number and last timestamp",
+      "ok": true,
+      "detail": "{\"file\":\"editor-mcp-20261117T032332Z-128896-1.jsonl\",\"last_event\":\"mcp.start\",\"last_seq\":2,\"last_ts\":\"2026-11-17T03:23:32.670548Z\",\"predecessor_pid\":128896,\"started\":\"20261117T032332Z\"} against pid 128896 seq 2 ts 2026-11-17T03:23:32.670548Z"
+    },
+    {
+      "name": "the Playout shell ended in order, with playout.stop and log.stop last",
+      "ok": true,
+      "detail": "operator.connect, playout.stop, log.stop"
+    },
+    {
+      "name": "the Playout shell: the next start does not name a run that ended in order",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "the Playout shell: a killed run writes no stop record",
+      "ok": true,
+      "detail": "log.start, playout.start"
+    },
+    {
+      "name": "the Playout shell: the next start names the killed run at warn, with its pid, last sequence number and last timestamp",
+      "ok": true,
+      "detail": "{\"file\":\"shell-20261117T032336Z-131056-1.jsonl\",\"last_event\":\"playout.start\",\"last_seq\":2,\"last_ts\":\"2026-11-17T03:23:36.679453Z\",\"predecessor_pid\":131056,\"started\":\"20261117T032336Z\"} against pid 131056 seq 2 ts 2026-11-17T03:23:36.679453Z"
+    },
+    {
+      "name": "the Editor shell ended in order, with editor.stop and log.stop last",
+      "ok": true,
+      "detail": "editor.start, editor.stop, log.stop"
+    },
+    {
+      "name": "the Editor shell: the next start does not name a run that ended in order",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "the Editor shell: a killed run writes no stop record",
+      "ok": true,
+      "detail": "log.start, editor.start"
+    },
+    {
+      "name": "the Editor shell: the next start names the killed run at warn, with its pid, last sequence number and last timestamp",
+      "ok": true,
+      "detail": "{\"file\":\"shell-20261117T032339Z-130500-1.jsonl\",\"last_event\":\"editor.start\",\"last_seq\":2,\"last_ts\":\"2026-11-17T03:23:39.195406Z\",\"predecessor_pid\":130500,\"started\":\"20261117T032339Z\"} against pid 130500 seq 2 ts 2026-11-17T03:23:39.195406Z"
+    }
+  ],
+  "engineA": {
+    "pid": 131256,
+    "tail": [
+      {
+        "event": "frame.late",
+        "level": "info",
+        "fields": {
+          "interval_us": 20000,
+          "render_us": 24880
+        }
+      },
+      {
+        "event": "engine.stop",
+        "level": "info",
+        "fields": {
+          "reason": "a console control event (Ctrl+C, Ctrl+Break, window close, logoff or shutdown)"
+        }
+      },
+      {
+        "event": "log.stop",
+        "level": "info",
+        "fields": {
+          "lastSeq": 196
+        }
+      }
+    ]
+  },
+  "engineC": {
+    "named": {
+      "event": "log.previous_unfinished",
+      "fields": {
+        "file": "worker-20261117T032329Z-123312-1.jsonl",
+        "last_event": "frame.late",
+        "last_seq": 31,
+        "last_ts": "2026-11-17T03:23:30.843900Z",
+        "predecessor_pid": 123312,
+        "started": "20261117T032329Z"
+      },
+      "level": "warn",
+      "mono": 10615700,
+      "pid": 130956,
+      "process": "worker",
+      "seq": 2,
+      "target": "gx_telemetry::sink",
+      "ts": "2026-11-17T03:23:31.570987Z",
+      "version": "0.1.0"
+    }
+  },
+  "others": [
+    {
+      "process": "the Editor's MCP server",
+      "ended_in_order_with": [
+        "mcp.stop",
+        "log.stop"
+      ],
+      "named": {
+        "file": "editor-mcp-20261117T032332Z-128896-1.jsonl",
+        "last_event": "mcp.start",
+        "last_seq": 2,
+        "last_ts": "2026-11-17T03:23:32.670548Z",
+        "predecessor_pid": 128896,
+        "started": "20261117T032332Z"
+      }
+    },
+    {
+      "process": "the Playout shell",
+      "ended_in_order_with": [
+        "playout.stop",
+        "log.stop"
+      ],
+      "named": {
+        "file": "shell-20261117T032336Z-131056-1.jsonl",
+        "last_event": "playout.start",
+        "last_seq": 2,
+        "last_ts": "2026-11-17T03:23:36.679453Z",
+        "predecessor_pid": 131056,
+        "started": "20261117T032336Z"
+      }
+    },
+    {
+      "process": "the Editor shell",
+      "ended_in_order_with": [
+        "editor.stop",
+        "log.stop"
+      ],
+      "named": {
+        "file": "shell-20261117T032339Z-130500-1.jsonl",
+        "last_event": "editor.start",
+        "last_seq": 2,
+        "last_ts": "2026-11-17T03:23:39.195406Z",
+        "predecessor_pid": 130500,
+        "started": "20261117T032339Z"
+      }
+    }
+  ]
+}

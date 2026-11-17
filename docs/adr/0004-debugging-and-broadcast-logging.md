@@ -204,6 +204,17 @@ rejections and `console.error` reach the shell's file through `cmd_log` with ids
 one operator gesture:** an Editor edit and the publish that carries it to the engine have two ids; row `2.17` is proposed
 for one id across both. Evidence: `docs/evidence/2.13/README.md`.
 
+## As built, row 2.16 (17 November 2026)
+
+The engine catches Ctrl+C and Ctrl+Break (the `ctrlc` crate, user-approved) and writes `engine.stop` with its reason before
+`log.stop`; a console window close, logoff or shutdown writes `engine.stop` but not `log.stop`. Every sink, so every
+process, adds two things at start. `log.start` carries `running`: the runs of the same process whose files were held (still
+running) when it started. Then one `log.previous_unfinished` (warn: `file`, `started`, `predecessor_pid`, `last_seq`,
+`last_ts`, `last_event`) for each earlier run that is gone without `log.stop` and that no earlier start can have named: a
+start walks back only to the newest run with a `running` list, since every run already gone then was named by it. A log
+writer holds its file against other writers (Windows `FILE_SHARE_READ`; an advisory shared lock elsewhere), which is how a
+running run is told from a killed one without trusting a process id. Evidence: `docs/evidence/2.16/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

@@ -13,6 +13,7 @@ gx-control-transport = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
 gx-telemetry = { workspace = true }
+ctrlc = { workspace = true }
 serde = { workspace = true }
 ts-rs = { workspace = true }
 cosmic-text = "0.15"

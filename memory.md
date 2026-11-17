@@ -118,6 +118,43 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-17 — 2.16 done: `engine.stop` on Ctrl+C, and every kill named once by the next start (Claude)
+
+**Resume here.** 2.16 is done. Next is **2.14** (diagnostic bundle `gx-diag` plus the shell menu item), then **2.15** (named
+operator login for Playout), then **12.11** (as-run record). Still open for the user: row **2.17** (one id from an Editor
+edit to the engine) and whether to coalesce runs of `frame.late` / `frame.missed` (a debug engine wrote 207 255 lines in 90
+minutes).
+
+What was built. `services/render-engine/worker/src/main.rs`: a `ctrlc` 3.5.2 handler (user-approved 16 Nov; exact pin;
+`Cargo.lock` gains `ctrlc` and its Unix-only `nix 0.31.3`) writes `engine.stop` (info, reason) and finishes the log while
+holding the shared `Arc<Mutex<Option<LogGuard>>>`, then exits 0. `Shared/telemetry/src/sink.rs`: a writer opens its file
+allowing only reading (`FILE_SHARE_READ`; `lock_shared` elsewhere), so a probe tells running from killed by whether the file
+is held, never by pid. Each `log.start` now has a `running` field (the runs of its process still running at that start); a
+start opens its own file first, then walks back to the newest run with such a list and probes only that run, the runs it
+listed and any newer ones, naming each that is gone without `log.stop` (`log.previous_unfinished`, warn: file, started,
+predecessor_pid, last_seq, last_ts, last_event). Files from before 2.16 (no list) stop the walk at the first dead one, so
+the upgrade names one old run, not twenty.
+
+How it got there (17 Nov). The first rule (only the newest dead run decides) passed every check but Jev's `must_fix` was
+0.44; a second look found it missed a kill when runs overlap (X killed, newer Y finished) and repeated one while a sibling
+ran. Two Jev/Laya design consults: Jev chose the `running` list (0.96), Laya leaned to reading every file (0.43); decided by
+hand for the list. The next review (`must_fix` 0.64) led to a start-up race (two starts scanning before either file
+existed); fixed by opening the own file first. Laya answered 0.97-0.99 on every yes/no question, contraries included, all
+day: no signal from it on yes/no; its choices were split thinly.
+
+Verified: telemetry 34/34 (13 for 2.16), worker bin 1/1, `log_file` 2/2 (two overlapping killed engines named once each);
+live `docs/evidence/2.16/live-check.mjs` 22/22 for Ctrl+C and Ctrl+Break (engine, Editor MCP server, Playout and Editor
+shells); 26 of 26 mutations fail named checks; npm run check exit 0 (60 Node, 424 Editor, 959 Rust, conformance 610/0/9).
+
+**The mutation-run hang (16-17 Nov).** The first run hung ten hours on A7b: the `log_file` test killed its engines only
+after its assertions, so a failing assertion left two engines alive holding the runner's captured pipes, and `sink.rs`
+stayed mutated. Fixed: an `Engine` guard that kills on drop; a runner that writes to a file, kills the tree on timeout and
+sweeps test-scratch engines. Check a background runner's log timestamp, not only that it is still running.
+
+Limits named in the evidence: window close / logoff / shutdown are not orderly (Windows ends the process when `ctrlc`'s
+system handler returns); only the engine has a handler; Ctrl+C can be inherited as ignored; the non-Windows probe is
+compiled (scratch, `-D warnings`) but not run; races and a backwards clock step; no stop request exists to test.
+
 ## 2026-11-16 — 2.13 done: correlation ids end to end, and front-end capture through `cmd_log` (Claude)
 
 **Resume here.** 2.13 is done, on a named reading (below). Next is **2.16** (engine.stop on Ctrl+C with the `ctrlc` crate the
