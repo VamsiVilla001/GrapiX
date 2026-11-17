@@ -1,0 +1,17 @@
+Gate for row 2.21, first run (18 Nov 2026, about 00:26 local): npm run check exit 1.
+Conformance: 630 passed, 1 failed, 9 skipped. The one failure, as printed:
+
+FAIL  no log file has a gap in its sequence that a log.lost record does not state - C:\Users\CG\AppData\Local\Temp\gx-conformance-logs-3137288-1794941749860849600\engine\worker-20261117T185605Z-3138188-1.jsonl: seq Some(48) where 50 was due
+
+The engine's own log file around it (lines 47 to 51 of that file, unedited):
+
+{"epoch":1,"event":"frame.late","fields":{"interval_us":20000,"render_us":27055},"frame":49,"level":"info","mono":1023488600,"pid":3138188,"process":"worker","seq":47,"target":"gx_render_worker::log","ts":"2026-11-17T18:56:06.698604Z","version":"0.1.0"}
+{"event":"log.lost","fields":{"count":1,"fromSeq":48,"toSeq":48},"level":"warn","mono":1024231000,"pid":3138188,"process":"worker","seq":null,"target":"gx_telemetry::sink","ts":"2026-11-17T18:56:06.699349Z","version":"0.1.0"}
+{"event":"control.disconnected","fields":{"peer":"127.0.0.1:65200","reason":"closed by the client","requests":11},"level":"info","mono":1024147800,"pid":3138188,"process":"worker","seq":49,"target":"gx_control_transport::server","ts":"2026-11-17T18:56:06.699262Z","version":"0.1.0"}
+{"event":"control.disconnected","fields":{"peer":"127.0.0.1:65201","reason":"closed by the client","requests":3},"level":"info","mono":1024137800,"pid":3138188,"process":"worker","seq":48,"target":"gx_control_transport::server","ts":"2026-11-17T18:56:06.699255Z","version":"0.1.0"}
+
+Reading: two connection threads each took a sequence number (48, 49) and queued their lines in the other
+order. The writer saw 49 after 47, wrote log.lost for 48, wrote 49, and then 48 arrived and was written.
+The record log.lost names was not lost. Not in this row's code (Shared/telemetry/src/sink.rs, row 2.11:
+offer() takes the number, builds the line, then queues it, with nothing holding the order between the two).
+Proposed as row 2.25. The gate was run again on the same tree; see README.

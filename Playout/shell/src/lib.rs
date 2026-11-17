@@ -38,7 +38,7 @@ use gx_control_transport::{Client, Token};
 use serde::{Deserialize, Serialize};
 
 /// The control-plane endpoint Playout connects to by default.
-pub const DEFAULT_CONTROL_ENDPOINT: &str = "127.0.0.1:4400";
+pub const DEFAULT_CONTROL_ENDPOINT: &str = gx_contracts::endpoints::DEFAULT_CONTROL_ENDPOINT;
 
 /// Everything the Playout shell can fail at, named.
 ///

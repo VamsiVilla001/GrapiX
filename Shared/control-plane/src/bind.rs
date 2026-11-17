@@ -8,7 +8,7 @@
 //! about which unauthenticated endpoints are safe (invariants 27 and 52).
 
 use std::io::{self, Read, Write};
-use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
@@ -366,14 +366,38 @@ fn platform_bind(addr: SocketAddr) -> Result<TcpListener, BindRefusal> {
 /// Why a bind was refused.
 #[derive(Debug)]
 pub enum BindRefusal {
-    NonLoopbackWithoutToken { addr: SocketAddr },
-    TokenTooWeak { length: usize, minimum: usize },
-    PortReserved { port: u16, reason: &'static str },
-    InvalidLocalEndpoint { detail: String },
-    LocalParentNotPrivate { path: PathBuf },
-    LocalEndpointOccupied { path: PathBuf },
-    StaleLocalEndpointNotSocket { path: PathBuf },
-    StaleLocalEndpointUnverified { path: PathBuf },
+    NonLoopbackWithoutToken {
+        addr: SocketAddr,
+    },
+    /// A plane that verifies no credential was asked to listen off loopback
+    /// (the control plane never is: it verifies one).
+    PlaneCannotAuthenticate {
+        plane: Plane,
+        addr: SocketAddr,
+    },
+    TokenTooWeak {
+        length: usize,
+        minimum: usize,
+    },
+    PortReserved {
+        port: u16,
+        reason: &'static str,
+    },
+    InvalidLocalEndpoint {
+        detail: String,
+    },
+    LocalParentNotPrivate {
+        path: PathBuf,
+    },
+    LocalEndpointOccupied {
+        path: PathBuf,
+    },
+    StaleLocalEndpointNotSocket {
+        path: PathBuf,
+    },
+    StaleLocalEndpointUnverified {
+        path: PathBuf,
+    },
     UnsupportedLocalPlatform,
     Io(std::io::Error),
 }
@@ -388,6 +412,11 @@ impl std::fmt::Display for BindRefusal {
             Self::TokenTooWeak { length, minimum } => {
                 write!(f, "token is {length} bytes, minimum is {minimum}")
             }
+            Self::PlaneCannotAuthenticate { plane, addr } => write!(
+                f,
+                "refusing to bind {addr}: the {} verifies no credential, so it listens on loopback only",
+                plane.name()
+            ),
             Self::PortReserved { port, reason } => write!(f, "port {port} is reserved: {reason}"),
             Self::InvalidLocalEndpoint { detail } => {
                 write!(f, "invalid local control endpoint: {detail}")
@@ -417,6 +446,22 @@ impl std::fmt::Display for BindRefusal {
         }
     }
 }
+impl From<ListenRefusal> for BindRefusal {
+    fn from(refusal: ListenRefusal) -> Self {
+        match refusal {
+            ListenRefusal::PortReserved { port, reason } => Self::PortReserved { port, reason },
+            ListenRefusal::TokenTooWeak { length, minimum } => {
+                Self::TokenTooWeak { length, minimum }
+            }
+            ListenRefusal::NonLoopbackWithoutToken { addr, .. } => {
+                Self::NonLoopbackWithoutToken { addr }
+            }
+            ListenRefusal::PlaneCannotAuthenticate { plane, addr } => {
+                Self::PlaneCannotAuthenticate { plane, addr }
+            }
+        }
+    }
+}
 impl std::error::Error for BindRefusal {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         if let Self::Io(error) = self {
@@ -427,13 +472,10 @@ impl std::error::Error for BindRefusal {
     }
 }
 
-pub const MINIMUM_TOKEN_BYTES: usize = 32;
-pub const ENGINE_CONTROL_PORT: u16 = 4400;
-const RESERVED: &[(u16, &str)] = &[
-    (4200, "belonged to the retired v2 daemon"),
-    (4100, "project API"),
-    (4300, "playout-control"),
-];
+// The ports and the one bind policy live in `gx_contracts::endpoints` (2.21), so
+// the asset plane and the MCP HTTP server ask the same question this does.
+use gx_contracts::endpoints::{check_listen, ListenRefusal, Plane};
+pub use gx_contracts::endpoints::{ENGINE_CONTROL_PORT, MINIMUM_TOKEN_BYTES};
 
 /// Decide whether the engine may listen at an endpoint.
 pub fn check_endpoint(endpoint: &Endpoint, token: Option<&str>) -> Result<(), BindRefusal> {
@@ -477,20 +519,10 @@ pub fn check_local_bind(path: &Path, token: Option<&str>) -> Result<(), BindRefu
     Ok(())
 }
 
-/// Decide whether the engine may listen at a TCP address.
+/// Decide whether the engine may listen at a TCP address: the control plane's
+/// case of [`check_listen`], the one bind policy.
 pub fn check_bind(addr: SocketAddr, token: Option<&str>) -> Result<(), BindRefusal> {
-    if let Some((port, reason)) = RESERVED.iter().find(|(port, _)| *port == addr.port()) {
-        return Err(BindRefusal::PortReserved {
-            port: *port,
-            reason,
-        });
-    }
-    check_token(token)?;
-    if token.is_some() || is_loopback(addr.ip()) {
-        Ok(())
-    } else {
-        Err(BindRefusal::NonLoopbackWithoutToken { addr })
-    }
+    check_listen(Plane::Control, addr, token).map_err(BindRefusal::from)
 }
 fn check_token(token: Option<&str>) -> Result<(), BindRefusal> {
     if let Some(token) = token {
@@ -503,17 +535,12 @@ fn check_token(token: Option<&str>) -> Result<(), BindRefusal> {
     }
     Ok(())
 }
-fn is_loopback(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => v4.is_loopback(),
-        IpAddr::V6(v6) => v6.is_loopback(),
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use gx_contracts::endpoints::is_loopback;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     fn addr(ip: &str, port: u16) -> SocketAddr {
         SocketAddr::new(ip.parse().unwrap(), port)
     }
@@ -555,7 +582,7 @@ mod tests {
     }
     #[test]
     fn burned_and_borrowed_ports_are_refused() {
-        for (port, _) in RESERVED {
+        for (port, _) in gx_contracts::endpoints::RESERVED_PORTS {
             assert!(matches!(
                 check_bind(addr("127.0.0.1", *port), None),
                 Err(BindRefusal::PortReserved { .. })

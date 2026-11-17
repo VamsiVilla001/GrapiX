@@ -1,0 +1,306 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 73850,
+    "output_tokens": 0,
+    "state_tokens": 7309,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.21: one bind policy for every listener",
+    "done_when": "Every listener a product opens passes through one bind policy (`gx_contracts::endpoints::check_listen`): a port\nreserved for another product is refused by name on every plane; a token under 32 bytes is refused; the control\nplane may leave loopback only with a token; the asset plane and the MCP HTTP server verify no credential, so\nthey listen on loopback only, token or not, until rows 2.24 and 2.23 give them one; an engine started with\n`--bind IP` listens for control on that interface and a test reaches it over this machine's own address, while\n`--lan` stays a declaration of how assets reach the engine; the repeated `127.0.0.1:4400` and `:4401` literals\ncome from one constants module; the architecture guard refuses a socket bind outside the listed bind sites (and\na listed site that does not ask the policy) and an engine host:port literal outside that module.",
+    "evidence": "# 2.21 \u2014 one bind policy for every listener (17 to 18 Nov 2026)\n\nThe OSI layering audit (`docs/audit/osi-layering-2026-11-17.md`, findings 3, 4 and 10) found that only the\ncontrol plane asked a bind policy before it opened a socket. The asset plane bound its own listener and asked\nnobody; the MCP HTTP server hard-coded loopback but took any port; `--lan` changed a label and no interface;\nand the engine's `127.0.0.1:4400` and `:4401` were written out in both shells, a launcher and the worker.\n\n## Done-when\n\n> Every listener a product opens passes through one bind policy (`gx_contracts::endpoints::check_listen`): a port\n> reserved for another product is refused by name on every plane; a token under 32 bytes is refused; the control\n> plane may leave loopback only with a token; the asset plane and the MCP HTTP server verify no credential, so\n> they listen on loopback only, token or not, until rows 2.24 and 2.23 give them one; an engine started with\n> `--bind IP` listens for control on that interface and a test reaches it over this machine's own address, while\n> `--lan` stays a declaration of how assets reach the engine; the repeated `127.0.0.1:4400` and `:4401` literals\n> come from one constants module; the architecture guard refuses a socket bind outside the listed bind sites (and\n> a listed site that does not ask the policy) and an engine host:port literal outside that module.\n\n**This is not the done-when first proposed for the row.** Three things changed, each decided by hand with Jev\nand Laya consulted first (`jev-laya-design.json`), and each is named here and in the plan row:\n\n1. **A plane that verifies no credential may not leave loopback even with a token.** The proposal said \"a bind\n   off loopback without a token is refused\" for the asset plane and the MCP HTTP server \"as for the control\n   plane\". But those two never check a token, so a token configured on them protects nothing and would only\n   make the listener look protected. Jev: refuse until authenticated, 1.00, and the safest option, 0.94.\n2. **`--lan` was not made to bind.** The proposal said an engine started with `--lan` \"binds its declared\n   interface\". Conformance and tests start engines with `--lan` on loopback to exercise the LAN transfer path\n   without a second machine, so `--lan` stays what it is (a declaration of how assets arrive) and a new\n   `--bind IP` chooses the control plane's interface. Jev chose this at only 0.42; Laya chose \"`--lan` implies\n   bind\" at 0.14. Neither is a clear answer, so this one is my decision and is reported as that.\n3. **The guard checks for `Playout/web` and the Playout shell \"as it does the Editor\" were not done.** They are\n   a different kind of rule (R1, R4, R9) from the two this row adds, and they have no row yet.\n\nLaya disagreed with Jev on all five design questions (0.14 to 0.43 confidence, no truncation); it preferred\nauthenticating now, which is rows 2.23 and 2.24 and needs the user's decision on the credential.\n\n## What was built\n\n- **`Shared/contracts/src/endpoints.rs`** (new, in the lowest crate so every plane can use it): the ports\n  (`ENGINE_CONTROL_PORT` 4400, `ENGINE_ASSET_PORT` 4401), the default endpoints, `MINIMUM_TOKEN_BYTES`,\n  `RESERVED_PORTS` (4200, 4100, 4300), `Plane { Control, Asset, McpHttp }` with `authenticates()` (only\n  `Control` today: the one line that changes with 2.24 and 2.23), `check_listen(plane, addr, token)` and\n  `check_listen_io` (the same as an `io::Error`, `PermissionDenied`, with the plane named first).\n- **Control plane** (`Shared/control-plane/src/bind.rs`): `check_bind` is now the control plane's case of\n  `check_listen`; the constants are re-exported; `BindRefusal` gains `PlaneCannotAuthenticate`.\n- **Asset plane**: `check_asset_listen`, asked first by `AssetPublishServer::bind` and `AssetTransferServer::bind`.\n- **MCP HTTP** (`services/mcp-server/src/wire.rs`): `check_http_listen`, asked by `serve_http` before it binds\n  (so `--http 4100` is refused by name) and by `serve_http_listener` in place of its own loopback comparison.\n- **Worker**: `--bind IP` for the control plane (the policy requires a token off loopback); the asset plane\n  stays on `127.0.0.1` and the start line says so; `engine.start` records `bind`; the usage text says what\n  `--bind` and `--lan` each mean.\n- **One place for the endpoints**: the Playout and Editor shells, the mock editor's usage text and\n  `tools/launch-shells.mjs` read them from `endpoints.rs`. `tools/serve-web.mjs` now binds `127.0.0.1` (it\n  listened on every interface).\n- **Guard** (`tools/check-boundaries.mjs`): **R10** a `TcpListener::bind` or `UdpSocket::bind` outside the four\n  listed bind sites is refused, and a listed site that never calls a `check_*listen(` is refused; **R11** an\n  engine `host:4400` or `host:4401` literal outside `endpoints.rs` is refused, in Rust and in the Editor and\n  Playout TypeScript. `conformance/` is exempt from both (it binds scratch sockets for the processes it tests).\n\nNo download. No wire or protocol-version change.\n\n## What was run\n\n- **The policy** (`endpoints.rs`, 8 tests): loopback needs no token on any plane; the control plane leaves\n  loopback with a token and not without (`192.168.1.50`, `10.0.0.4`, `0.0.0.0`, `::`); the asset plane and the MCP\n  HTTP transport are refused off loopback with or without a token, and the message names the plane and says why;\n  each reserved port is refused by name on every plane; a short token is refused; the default endpoints agree\n  with the port constants and the engine's own ports are not reserved; an `io` refusal is `PermissionDenied`\n  and names the plane first.\n- **Control plane** (`bind.rs`, 8 tests, unchanged in what they ask): they pass through the shared policy.\n- **Asset plane** (2 new tests): `AssetPublishServer::bind` and `AssetTransferServer::bind` refuse `0.0.0.0`,\n  `192.168.1.50`, `::` and port 4100 (the publish server also 4200 and 4300), `PermissionDenied`, naming the asset\n  plane and the reason; loopback on a free port binds. `192.168.1.50` is not an address of this machine, so the\n  refusal is shown to come from the policy and not from a bind that could not succeed anyway.\n- **MCP HTTP** (2 new tests, 1 changed): the policy names the transport and allows `127.0.0.1` and `::1` only;\n  `serve_http` on 4100, 4200 or 4300 is refused before anything binds; a listener bound to `0.0.0.0` is refused.\n- **A real engine process** (`services/render-engine/worker/tests/bind.rs`, 6 tests, each starts\n  `gx-render-worker`):\n  - `--bind 0.0.0.0` without a token: `engine.bind_failed` names \"non-loopback control plane requires a token\",\n    exit code 1, and no `engine.start` is ever written.\n  - `--bind 0.0.0.0` with a token: the control plane's recorded address is not loopback, the asset plane's is,\n    `engine.start` records `bind`, and a client with a credential for the secret gets a status reply.\n  - **`--bind <this machine's own network address>` with a token** (the address the system would send from, found\n    without sending anything): the control plane is on that address and answers a credentialed client over it;\n    it refuses a connection on `127.0.0.1`; the asset plane refuses a connection on the network address and\n    accepts one on loopback. On this machine the test printed `RAN: bound and reached over this machine's own\n    network address`.\n  - by default both planes are on loopback; `--asset-port 4100` is refused naming the asset plane and the reserved\n    port, exit 1; `--bind the-lan` is a usage error, exit 2.\n- **Guard** (`tools/tests/check-boundaries.test.mjs`, 9 new cases, 33 in all with the real tree): a bind outside\n  the list (std and tokio forms) is refused; a listed site that does not ask is refused; a listed site that asks\n  and the conformance harness are allowed; the engine's control and asset endpoints written out are refused in\n  Rust and in a front end; `endpoints.rs` is where they are written. **On the real tree the new rule found one\n  literal I had missed**, in the mock editor's usage text, now taken from `endpoints`.\n- **The launcher's port lines**, cut from `tools/launch-shells.mjs` and run as they are: control 4400, asset 4401,\n  and a constant that is not there throws by name. The launcher itself was not started (it opens both shells).\n- **Gate** (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`). **The first run failed**, exit 1, on\n  one conformance check that is not this row's: \"no log file has a gap in its sequence that a log.lost record\n  does not state\". In the engine's log, `log.lost` named number 48, then 49 was written, then 48. Cause, read in\n  the code and not guessed: the log sink (row 2.11) takes a record's number, builds the line and then queues it,\n  so two threads logging microseconds apart can queue in the other order, and the writer states the late one as\n  lost and then writes it. This is a defect in the sink, not load, and it is **not fixed here**: the failing lines\n  are kept in `gate-first-run-failure.txt` and it is proposed as row 2.25. The gate was then run again on the\n  same tree: `FMT_OK`, clippy exit 0, `npm run check`\n  exit 0 (69 Node tests, 424 Editor tests, 1030 Rust tests with 38 ignored, conformance 631 passed, 0 failed,\n  9 skipped). One pass after one failure does not show the race is gone; it shows this row's tree passes when\n  the race does not happen.\n\n## Mutations\n\n25, one at a time, each restored byte-identical, each made a named check fail (`mutations.txt`).\n**One did not on its first run.** H2 (the MCP listener serves any address) made the mutated transport serve the\n`0.0.0.0` listener for ever, so the one test that would notice hung until the runner killed it at its 25 minute\nlimit. A hung test is not a named failure. The test now shuts the listener down after 5 seconds and fails by\nassertion, and H2 run again fails it by name. W4 was added after the reach test, to show that test can fail.\n\n[Condensed: 25 mutations, each restored byte-identical: P1 a plane that verifies no credential may leave loopback with a token; P2 every plane is said to verify a credential; P3 a reserved port is not refused; P4 port 4100 is no longer reserved; P5 the asset port constant drifts from the default endpoint; P6 a short token is accepted; P7 the unspecified address counts as loopback; P8 an io refusal does not name the plane; P9 an io refusal is not `PermissionDenied`; A1 the publish server binds without asking the policy; A2 the publish server asks as the control plane; A3 the transfer server binds without asking the policy; A3g the same, seen by the guard on the real tree; H1 the MCP HTTP transport takes any port; H2 the MCP HTTP listener serves any address; C1 the control plane asks the policy as another plane; W1 the worker ignores where `--bind` says; W2 the worker lets the asset plane follow `--bind`; W3 the worker parses `--bind` and drops it; W4 the worker binds every interface when `--bind` names one; G1 the guard stops listing the MCP server as a bind site; G2 the guard no longer asks a listed site to call the policy; G3 the guard forgets the asset port; G4 the guard no longer watches for binds outside the list; G5 the real tree writes the engine endpoint out again.]\n\n## Limits and readings\n\n1. **The asset plane and the MCP HTTP server cannot leave loopback.** A LAN engine started with `--bind` is\n   reachable for control only; publishing to it over a network waits for row 2.24, and MCP over a network for\n   2.23. Both need the user's decision on the credential.\n2. **`--lan` still chooses no interface.** It is a declaration, as before; the usage text now says so.\n3. **The host adopts an engine through loopback.** An engine bound to one specific address (not `0.0.0.0`) does\n   not answer on loopback, so `gx-engine-host` cannot adopt it. No row yet.\n4. **The launcher reads the ports with a regular expression** over `endpoints.rs` and has no test; it fails by\n   name if the constant is renamed.\n5. **The guard scans `.rs`, `.ts` and `.tsx`.** The `.mjs` tools and `Playout/web/*.js` are not scanned, so R11\n   does not see a literal there. R10 matches `TcpListener::bind` and `UdpSocket::bind` by name: a socket opened\n   another way (a raw socket crate) is not seen.\n6. **A real-process test that binds off loopback can raise the Windows firewall prompt** the first time\n   `gx-render-worker.exe` listens on a network address. The tests connect from this machine and do not depend on\n   the answer.\n7. **The reach test needs a network address.** On a machine with none it prints `NOT RUN` and returns; it is\n   not counted as shown there.\n",
+    "code": "--- Shared/contracts/src/endpoints.rs (new; the policy)\n/// The planes that listen. A plane is a logical channel, not an OSI layer.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum Plane {\n    /// The engine's control plane: tokens verified once per connection.\n    Control,\n    /// The engine's asset plane: publishes and fetches of scene packages.\n    Asset,\n    /// An MCP server's HTTP transport.\n    McpHttp,\n}\n\nimpl Plane {\n    /// What the plane is called in a refusal.\n    pub const fn name(self) -> &'static str {\n        match self {\n            Self::Control => \"control plane\",\n            Self::Asset => \"asset plane\",\n            Self::McpHttp => \"MCP HTTP transport\",\n        }\n    }\n\n    /// Whether the plane verifies a credential on the connections it accepts.\n    /// Only the control plane does today; this is the one line that changes\n    /// when the asset plane (2.24) or the MCP HTTP transport (2.23) learns to.\n    pub const fn authenticates(self) -> bool {\n        matches!(self, Self::Control)\n    }\n}\n\n/// Why a plane may not listen where it asked to.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum ListenRefusal {\n    /// The port is one no GrapiX listener may take.\n    PortReserved { port: u16, reason: &'static str },\n    /// The token is shorter than [`MINIMUM_TOKEN_BYTES`].\n    TokenTooWeak { length: usize, minimum: usize },\n    /// A plane that verifies credentials was asked to listen off loopback\n    /// with none configured.\n    NonLoopbackWithoutToken { plane: Plane, addr: SocketAddr },\n    /// A plane that verifies no credential was asked to listen off loopback.\n    PlaneCannotAuthenticate { plane: Plane, addr: SocketAddr },\n}\n\nimpl fmt::Display for ListenRefusal {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Self::PortReserved { port, reason } => write!(f, \"port {port} is reserved: {reason}\"),\n            Self::TokenTooWeak { length, minimum } => {\n                write!(f, \"token is {length} bytes, minimum is {minimum}\")\n            }\n            Self::NonLoopbackWithoutToken { plane, addr } => write!(\n                f,\n                \"refusing to bind {addr}: a non-loopback {} requires a token\",\n                plane.name()\n            ),\n            Self::PlaneCannotAuthenticate { plane, addr } => write!(\n                f,\n                \"refusing to bind {addr}: the {} verifies no credential, so it listens on loopback only (a token cannot protect a plane that never checks it)\",\n                plane.name()\n            ),\n        }\n    }\n}\n\nimpl std::error::Error for ListenRefusal {}\n\n/// Whether an address is the machine talking to itself.\npub fn is_loopback(ip: IpAddr) -> bool {\n    match ip {\n        IpAddr::V4(v4) => v4.is_loopback(),\n        IpAddr::V6(v6) => v6.is_loopback(),\n    }\n}\n\n/// Whether `plane` may listen at `addr`, holding `token`. The one bind policy.\npub fn check_listen(\n    plane: Plane,\n    addr: SocketAddr,\n    token: Option<&str>,\n) -> Result<(), ListenRefusal> {\n    if let Some((port, reason)) = RESERVED_PORTS.iter().find(|(port, _)| *port == addr.port()) {\n        return Err(ListenRefusal::PortReserved {\n            port: *port,\n            reason,\n        });\n    }\n    if let Some(token) = token {\n        if token.len() < MINIMUM_TOKEN_BYTES {\n            return Err(ListenRefusal::TokenTooWeak {\n                length: token.len(),\n                minimum: MINIMUM_TOKEN_BYTES,\n            });\n        }\n    }\n    if is_loopback(addr.ip()) {\n        return Ok(());\n    }\n    if !plane.authenticates() {\n        return Err(ListenRefusal::PlaneCannotAuthenticate { plane, addr });\n    }\n \n--- Shared/asset-plane/src/publish.rs (changed)\ndiff --git a/Shared/asset-plane/src/publish.rs b/Shared/asset-plane/src/publish.rs\nindex 0ecfb78..f58fb35 100644\n--- a/Shared/asset-plane/src/publish.rs\n+++ b/Shared/asset-plane/src/publish.rs\n@@ -219,4 +219,12 @@ pub struct AssetPublishServer<P: AssetPublishPeer> {\n \n+/// The asset plane's case of the one bind policy (2.21): it verifies no\n+/// credential today, so it listens on loopback only, and on no reserved port.\n+/// The refusal is `PermissionDenied`, naming the plane and the reason.\n+pub(crate) fn check_asset_listen(addr: SocketAddr) -> io::Result<()> {\n+    gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::Asset, addr, None)\n+}\n+\n impl<P: AssetPublishPeer> AssetPublishServer<P> {\n     pub fn bind(addr: SocketAddr, peer: Arc<Mutex<P>>) -> io::Result<Self> {\n+        check_asset_listen(addr)?;\n         Ok(Self {\n@@ -863,2 +871,45 @@ \n--- services/mcp-server/src/wire.rs (changed)\ndiff --git a/services/mcp-server/src/wire.rs b/services/mcp-server/src/wire.rs\nindex d007cf8..1ebcaf1 100644\n--- a/services/mcp-server/src/wire.rs\n+++ b/services/mcp-server/src/wire.rs\n@@ -255,2 +255,3 @@ impl Server {\n     pub fn serve_http(self, port: u16, on_bound: impl FnOnce(SocketAddr)) -> std::io::Result<()> {\n+        check_http_listen(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))?;\n         let runtime = runtime()?;\n@@ -270,2 +271,9 @@ impl Server {\n \n+/// The MCP HTTP transport's case of the one bind policy (2.21): it verifies no\n+/// credential, so it listens on loopback only and on no reserved port. A\n+/// refusal is `PermissionDenied`, naming the transport and the reason.\n+fn check_http_listen(addr: SocketAddr) -> std::io::Result<()> {\n+    gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::McpHttp, addr, None)\n+}\n+\n /// Serve stateless streamable HTTP on a listener already bound to 127.0.0.1,\n@@ -282,8 +290,3 @@ pub async fn serve_http_listener(\n     let local = listener.local_addr()?;\n-    if local.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST) {\n-        return Err(std::io::Error::new(\n-            std::io::ErrorKind::PermissionDenied,\n-            format!(\"the MCP HTTP transport binds 127.0.0.1 only, not {local}\"),\n-        ));\n-    }\n+  \n--- services/render-engine/worker/src/main.rs (changed)\ndiff --git a/services/render-engine/worker/src/main.rs b/services/render-engine/worker/src/main.rs\nindex 057abd1..8a1ac52 100644\n--- a/services/render-engine/worker/src/main.rs\n+++ b/services/render-engine/worker/src/main.rs\n@@ -29,2 +29,3 @@ fn main() {\n     let mut port = ENGINE_CONTROL_PORT;\n+    let mut bind_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);\n     let mut token: Option<String> = None;\n@@ -43,2 +44,6 @@ fn main() {\n             },\n+            \"--bind\" => match args.next().and_then(|ip| ip.parse::<IpAddr>().ok()) {\n+                Some(ip) => bind_ip = ip,\n+                None => return usage(\"--bind needs an IP address such as 192.168.1.50\"),\n+            },\n             \"--asset-port\" => match args.next().and_then(|p| p.parse::<u16>().ok()) {\n@@ -169,3 +174,7 @@ fn main() {\n \n-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);\n+    // 2.21: the control plane listens where --bind says (loopback unless told),\n+    // and the bind policy decides whether it may: off loopback it needs a token.\n+    // The asset plane stays on loopback whatever --bind says, until it verifies\n+    // a credential of its own (2.24).\n+    let addr = SocketAddr::new(bind_ip, port);\n     let asset_port = match asset_port.or_else(|| port.checked_add(1)) {\n@@ -211,2 +220,5 @@ fn main() {\n     println!(\"  listening on {control}\");\n+    if !gx_contracts::endpoints::is_loopback(bind_ip) {\n+        println!(\"  the asset plane stays on loopback: it verifies no credential yet\");\n+    }\n     let assets = match asset_server.local_addr() {\n@@ -233,2 +245,3 @@ fn main() {\n         assets = %assets,\n+        bind = %bind_ip,\n         token_required = token.is_some(),\n@@ -499,5 +512,9 @@ fn usage(problem: &str) {\n     eprintln!(\n-        \"gx-render-worker [--port N] [--asset-port N] [--recovery-journal PATH] \\\n+        \"gx-render-worker [--port N] [--bind IP] [--asset-port N] [--recovery-journal PATH] \\\n          [--lan] [--package-dir DIR] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET]\"\n     );\n+    eprintln!(\"  --bind IP  the control plane's interface (default 127.0.0.1); off loopback a token is required\");\n+    eprintln!(\"             the asset plane stays on "
+  },
+  "questions": {
+    "every_listener_asks": {
+      "type": "noul",
+      "instructions": "Does the evidence show that every listener a product opens (the control plane, both asset-plane servers, the MCP HTTP server) asks the one bind policy before it binds, with a test for each and a guard rule that fails the build when a new bind site appears or a listed one stops asking?",
+      "criteria": {
+        "true": "Yes, each is shown and guarded.",
+        "false": "No, a listener or the guard is not shown."
+      }
+    },
+    "meets_done_when": {
+      "type": "noul",
+      "instructions": "Is the done-when as written in the evidence met by what was run?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "done_when_change_honest": {
+      "type": "noul",
+      "instructions": "The done-when was changed from the one first proposed (a plane with no credential check may not leave loopback even with a token; --lan was not made to bind, --bind was added; the Playout guard checks were not done). Is each change named openly, with its reason, rather than passed off as the original criterion?",
+      "criteria": {
+        "true": "Yes, each change is named with its reason.",
+        "false": "No, a change is hidden or unexplained."
+      }
+    },
+    "loopback_only_right": {
+      "type": "noul",
+      "instructions": "Is refusing a non-loopback bind for a plane that verifies no credential, even when a token is configured, the right rule until that plane can authenticate?",
+      "criteria": {
+        "true": "Yes: a token the plane never checks protects nothing.",
+        "false": "No: it should follow the control plane's token rule now."
+      }
+    },
+    "reach_shown": {
+      "type": "noul",
+      "instructions": "Does the evidence show a real engine process bound to a network address being reached over that address for control, not answering on loopback, and its asset plane not answering on the network address?",
+      "criteria": {
+        "true": "Yes, shown with a real process.",
+        "false": "No, it is only asserted or only shown on loopback."
+      }
+    },
+    "policy_hole": {
+      "type": "noul",
+      "instructions": "Reading the policy code: is there an address or a plane for which check_listen allows a listener that verifies no credential to be reached from another machine (for example an unspecified address, an IPv6 form, or a mapped address treated as loopback)?",
+      "criteria": {
+        "true": "Yes, such a case exists.",
+        "false": "No such case is visible."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being named in the limits?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, every gap is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, and is the one mutation that first showed only as a hung test (not a named failure) reported with what was done about it?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "asset_mcp_loopback_only": "The asset plane and the MCP HTTP server cannot leave loopback, so a LAN engine cannot be published to yet.",
+        "lan_still_a_label": "--lan still chooses no interface.",
+        "guard_by_name": "The guard matches bind calls by name and does not scan .mjs or Playout/web JavaScript.",
+        "host_cannot_adopt": "The host cannot adopt an engine bound to one specific address.",
+        "reach_needs_network": "The reach test does not run on a machine with no network address.",
+        "launcher_untested": "The launcher reads the ports by regular expression and has no test in the gate."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "every_listener_asks",
+      "jev": 0.86,
+      "laya": 0.9868,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.86
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9868,
+        "confidence": 0.9868,
+        "answer_confidence": 0.9868,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "meets_done_when",
+      "jev": 0.75,
+      "laya": 0.9792,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.75
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9792,
+        "confidence": 0.9792,
+        "answer_confidence": 0.9792,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "done_when_change_honest",
+      "jev": 0.93,
+      "laya": 0.9735,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9735,
+        "confidence": 0.9735,
+        "answer_confidence": 0.9735,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "loopback_only_right",
+      "jev": 0.9,
+      "laya": 0.9718,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.9
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9718,
+        "confidence": 0.9718,
+        "answer_confidence": 0.9718,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "reach_shown",
+      "jev": 0.96,
+      "laya": 0.9763,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9763,
+        "confidence": 0.9763,
+        "answer_confidence": 0.9763,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "policy_hole",
+      "jev": 0.33,
+      "laya": 0.9708,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.33
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9708,
+        "confidence": 0.9708,
+        "answer_confidence": 0.9708,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.52,
+      "laya": 0.9769,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.52
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9769,
+        "confidence": 0.9769,
+        "answer_confidence": 0.9769,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.97,
+      "laya": 0.9791,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9791,
+        "confidence": 0.9791,
+        "answer_confidence": 0.9791,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "launcher_untested",
+      "laya": "none",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "launcher_untested",
+        "confidence": 0.48,
+        "probabilities": {
+          "none": 0,
+          "asset_mcp_loopback_only": 0.02,
+          "lan_still_a_label": 0.02,
+          "guard_by_name": 0.25,
+          "host_cannot_adopt": 0.01,
+          "reach_needs_network": 0.15,
+          "launcher_untested": 0.55
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "none",
+        "probabilities": {
+          "none": 0.2765,
+          "asset_mcp_loopback_only": 0.0945,
+          "lan_still_a_label": 0.231,
+          "guard_by_name": 0.0775,
+          "host_cannot_adopt": 0.0866,
+          "reach_needs_network": 0.1092,
+          "launcher_untested": 0.1246
+        },
+        "confidence": 0.0604,
+        "answer_confidence": 0.2765,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.71,
+      "laya": 0.9354,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.71
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9354,
+        "confidence": 0.9354,
+        "answer_confidence": 0.9354,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -17,8 +17,10 @@ import { createConnection } from "node:net";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const CONTROL_PORT = 4400;
-const ASSET_PORT = 4401;
+import { enginePorts } from "./engine-ports.mjs";
+
+// The ports are the engine's, from the one place that names them (2.21).
+const { control: CONTROL_PORT, asset: ASSET_PORT } = enginePorts();
 const ENGINE_READY_TIMEOUT_MS = 20_000;
 // The one folder the Editor writes its packages into and a co-located engine
 // reads them from by path (5.10). The engine is started with it as

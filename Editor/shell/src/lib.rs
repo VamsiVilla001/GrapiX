@@ -67,7 +67,7 @@ use serde::{Deserialize, Serialize};
 /// The control port plus one, matching the worker's own default. Exposed to
 /// the web layer as a starting value, never as a silent fallback: a failed
 /// connection is reported with the address it tried.
-pub const DEFAULT_ASSET_ENDPOINT: &str = "127.0.0.1:4401";
+pub const DEFAULT_ASSET_ENDPOINT: &str = gx_contracts::endpoints::DEFAULT_ASSET_ENDPOINT;
 
 /// The shell's one piece of state: the workspace every command runs against.
 ///

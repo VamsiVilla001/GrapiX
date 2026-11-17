@@ -36,4 +36,4 @@ createServer(async (request, response) => {
   } catch {
     response.writeHead(404).end("not found");
   }
-}).listen(port, () => console.log(`serving ${root} on http://127.0.0.1:${port}`));
+}).listen(port, "127.0.0.1", () => console.log(`serving ${root} on http://127.0.0.1:${port}`));

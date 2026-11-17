@@ -27,6 +27,7 @@ use gx_render_worker::Engine;
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut port = ENGINE_CONTROL_PORT;
+    let mut bind_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut token: Option<String> = None;
     let mut asset_port = None;
     let mut recovery_path: Option<PathBuf> = None;
@@ -40,6 +41,10 @@ fn main() {
             "--port" => match args.next().and_then(|p| p.parse::<u16>().ok()) {
                 Some(p) => port = p,
                 None => return usage("--port needs a number"),
+            },
+            "--bind" => match args.next().and_then(|ip| ip.parse::<IpAddr>().ok()) {
+                Some(ip) => bind_ip = ip,
+                None => return usage("--bind needs an IP address such as 192.168.1.50"),
             },
             "--asset-port" => match args.next().and_then(|p| p.parse::<u16>().ok()) {
                 Some(p) => asset_port = Some(p),
@@ -167,7 +172,11 @@ fn main() {
         println!("  requiring a token on every connection");
     }
 
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    // 2.21: the control plane listens where --bind says (loopback unless told),
+    // and the bind policy decides whether it may: off loopback it needs a token.
+    // The asset plane stays on loopback whatever --bind says, until it verifies
+    // a credential of its own (2.24).
+    let addr = SocketAddr::new(bind_ip, port);
     let asset_port = match asset_port.or_else(|| port.checked_add(1)) {
         Some(asset_port) => asset_port,
         None => return usage("--port leaves no asset-plane port"),
@@ -209,6 +218,9 @@ fn main() {
         ),
     };
     println!("  listening on {control}");
+    if !gx_contracts::endpoints::is_loopback(bind_ip) {
+        println!("  the asset plane stays on loopback: it verifies no credential yet");
+    }
     let assets = match asset_server.local_addr() {
         Ok(bound) => bound,
         Err(error) => fatal(
@@ -231,6 +243,7 @@ fn main() {
         locality = ?locality,
         control = %control,
         assets = %assets,
+        bind = %bind_ip,
         token_required = token.is_some(),
         log_directory = log_directory(&log).as_deref(),
     );
@@ -497,9 +510,13 @@ fn usage(problem: &str) {
         eprintln!("error: {problem}");
     }
     eprintln!(
-        "gx-render-worker [--port N] [--asset-port N] [--recovery-journal PATH] \
+        "gx-render-worker [--port N] [--bind IP] [--asset-port N] [--recovery-journal PATH] \
          [--lan] [--package-dir DIR] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET]"
     );
+    eprintln!("  --bind IP  the control plane's interface (default 127.0.0.1); off loopback a token is required");
+    eprintln!("             the asset plane stays on 127.0.0.1 until it verifies a credential");
+    eprintln!("  --lan      declares that assets reach this engine over the network, not by path;");
+    eprintln!("             it does not choose an interface: that is --bind");
     std::process::exit(if problem.is_empty() { 0 } else { 2 });
 }
 

@@ -253,6 +253,7 @@ impl Server {
     /// interface but loopback. `on_bound` learns the bound address (port 0
     /// picks a free one) before the first request is accepted.
     pub fn serve_http(self, port: u16, on_bound: impl FnOnce(SocketAddr)) -> std::io::Result<()> {
+        check_http_listen(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))?;
         let runtime = runtime()?;
         let listener =
             runtime.block_on(tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)))?;
@@ -268,6 +269,13 @@ impl Server {
     }
 }
 
+/// The MCP HTTP transport's case of the one bind policy (2.21): it verifies no
+/// credential, so it listens on loopback only and on no reserved port. A
+/// refusal is `PermissionDenied`, naming the transport and the reason.
+fn check_http_listen(addr: SocketAddr) -> std::io::Result<()> {
+    gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::McpHttp, addr, None)
+}
+
 /// Serve stateless streamable HTTP on a listener already bound to 127.0.0.1,
 /// until `shutdown` is cancelled.
 ///
@@ -280,12 +288,7 @@ pub async fn serve_http_listener(
     shutdown: CancellationToken,
 ) -> std::io::Result<()> {
     let local = listener.local_addr()?;
-    if local.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("the MCP HTTP transport binds 127.0.0.1 only, not {local}"),
-        ));
-    }
+    check_http_listen(local)?;
     let config = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
         .with_json_response(true)
@@ -557,20 +560,74 @@ mod tests {
         }
     }
 
+    /// 2.21: the transport asks the one bind policy. It verifies no credential,
+    /// so no interface but loopback is allowed it, token or not, and the message
+    /// names the transport and the reason.
+    #[test]
+    fn the_http_policy_names_the_transport_and_allows_loopback_only() {
+        for ip in ["0.0.0.0", "192.168.1.50", "::"] {
+            let addr = SocketAddr::new(ip.parse().unwrap(), 4500);
+            let refused = check_http_listen(addr).expect_err("off loopback is refused");
+            assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied, "{ip}");
+            let said = refused.to_string();
+            assert!(
+                said.contains("MCP HTTP transport") && said.contains("verifies no credential"),
+                "{ip}: {said}"
+            );
+        }
+        for ip in ["127.0.0.1", "::1"] {
+            check_http_listen(SocketAddr::new(ip.parse().unwrap(), 4500))
+                .expect("loopback is allowed");
+        }
+    }
+
+    /// 2.21: `--http` no longer takes any port at all: a reserved one is refused
+    /// by name before anything binds.
+    #[test]
+    fn the_http_transport_refuses_a_reserved_port_before_it_binds() {
+        for port in [4100, 4200, 4300] {
+            let refused = Server::new(Vec::new())
+                .serve_http(port, |_| panic!("nothing listens on a reserved port"))
+                .expect_err("a reserved port is refused");
+            assert_eq!(
+                refused.kind(),
+                std::io::ErrorKind::PermissionDenied,
+                "{port}"
+            );
+            assert!(
+                refused
+                    .to_string()
+                    .contains(&format!("port {port} is reserved")),
+                "{port}: {refused}"
+            );
+        }
+    }
+
     #[test]
     fn the_http_transport_refuses_a_listener_off_loopback() {
         // 0.0.0.0 is the address a careless caller would pass to "listen on
         // everything"; it must not be served.
         let runtime = runtime().unwrap();
         let (service, _jobs) = McpService::pair();
+        // A transport that served this listener would serve it for ever; the
+        // shutdown ends it after a few seconds so the failure is a failed
+        // assertion, not a hung test.
+        let shutdown = CancellationToken::new();
+        let end = shutdown.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            end.cancel();
+        });
         let refused = runtime
             .block_on(async {
                 let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
                     .await
                     .unwrap();
-                serve_http_listener(service, listener, CancellationToken::new()).await
+                serve_http_listener(service, listener, shutdown).await
             })
-            .expect_err("only 127.0.0.1 is served");
+            .expect_err(
+                "only 127.0.0.1 is served: this listener was served until it was shut down",
+            );
         assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }

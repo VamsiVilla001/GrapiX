@@ -64,9 +64,10 @@ fn parse(
         match argument.as_str() {
             "--asset-engine" => {
                 engine = Some(next(&mut args, "--asset-engine")?.parse().map_err(|_| {
-                    EditorError::Usage(
-                        "--asset-engine needs a socket address such as 127.0.0.1:4401".into(),
-                    )
+                    EditorError::Usage(format!(
+                        "--asset-engine needs a socket address such as {}",
+                        gx_contracts::endpoints::DEFAULT_ASSET_ENDPOINT
+                    ))
                 })?)
             }
             "--scene" => {

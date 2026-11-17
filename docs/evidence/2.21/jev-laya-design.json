@@ -1,0 +1,232 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 6803,
+    "output_tokens": 0,
+    "state_tokens": 1213,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics (Rust, Windows first). An engine process listens on a control plane (TCP, port 4400, tokens verified per connection) and an asset plane (TCP, control port + 1, publishes and fetches scene packages). Two MCP servers can listen on HTTP. A bind policy (check_bind) exists in the control-plane crate: reserved ports are refused; a token (at least 32 bytes) must be configured to listen off loopback; loopback needs none.",
+    "audit_findings": "A layering audit found: (3) the asset plane binds its own TcpListener and bypasses the bind policy, and it verifies no credential; (4) the engine's --lan flag only declares a locality (it changes timing lead and the media codecs offered), both listeners stay bound to 127.0.0.1 whatever it says, so a LAN engine cannot be reached over a LAN; (10) the same host:port literals (127.0.0.1:4400 and :4401) are repeated in both shells, a launcher script and the worker's port+1 rule, and the MCP server accepts any port with --http while the guard only greps the literal 4100.",
+    "row": "2.21 (proposed): every listener a product opens passes through the bind policy; a bind off loopback without a token is refused by name for the asset plane and the MCP HTTP server as for the control plane; an engine started with --lan binds its declared interface (and is reached over it in a test) instead of only labelling itself; the repeated literals come from one constants module; the architecture guard refuses a socket bind or a host:port literal outside the allow-listed places.",
+    "constraints": "The asset plane and the MCP HTTP server verify NO credential today (separate rows 2.24 and 2.23 will add that; they need the user's decision). If the policy lets them listen off loopback because a token is configured, they would accept anyone on the network while claiming to be protected. Conformance and tests start engines with --lan on loopback to exercise the LAN transfer path (chunked upload, compressed media) without a second machine. Editor-side crates may not depend on the control-plane client (a guard rule), so shared constants must live in a crate they may use (gx-contracts is the lowest crate). Windows first; no other platform is built or run.",
+    "options_offloopback": {
+      "refuse_until_authenticated": "A: the asset plane and the MCP HTTP server go through the same bind function but declare that they cannot authenticate yet; the policy refuses any non-loopback bind for such a plane by name (\"this plane verifies no credential: loopback only until it does\"). Reserved ports and loopback behave as for the control plane. When rows 2.23/2.24 add verification, the plane declares it can authenticate and the same token rule applies.",
+      "same_rule_with_token": "B: the asset plane and the MCP HTTP server use the control plane's rule exactly: a token configured permits a bind off loopback. They do not yet check the token, so this is a policy in name only until 2.23 and 2.24.",
+      "authenticate_now": "C: add credential verification to the asset plane and the MCP HTTP server in this row, so the same token rule is true; this enlarges the row into rows 2.23 and 2.24."
+    },
+    "options_lan": {
+      "label_plus_bind_flag": "A: --lan stays a declaration of locality (tests keep using it on loopback); a new --bind <ip> chooses the control plane's interface through the bind policy (a token is required off loopback); the asset plane stays on loopback until it can authenticate, and the worker says so at start, so a LAN engine is reachable for control but not yet for publishes.",
+      "lan_implies_bind": "B: --lan means \"bind the machine's LAN interface\": it requires --bind, and a --lan engine on loopback is no longer possible; tests that exercise the LAN path over loopback need another switch.",
+      "derive_from_bind": "C: remove the --lan flag; locality is derived from the bind address (loopback is co-located, anything else is LAN); the tests that exercise the LAN path on loopback need a test-only override."
+    },
+    "options_constants": {
+      "contracts_endpoints_module": "A: a small module in gx-contracts holds the ports and default endpoints (control 4400, asset 4401, the reserved list); every crate that needs one imports it; the control-plane bind module re-exports for compatibility.",
+      "keep_in_bind_rs": "B: leave the ports in the control-plane bind module and make the shells depend on that crate for them.",
+      "per_crate": "C: leave each crate with its own constants and add a test that they agree."
+    },
+    "options_guard": {
+      "allow_list_of_bind_sites": "A: the guard fails the build if a socket bind (TcpListener::bind and its tokio form) appears in product code outside an allow-listed set of files, and if a host:port literal for the engine ports appears outside the endpoints module and tests; a new listener must be added to the list on purpose.",
+      "literal_only": "B: the guard only flags host:port literals and reserved ports, and leaves bind calls unwatched.",
+      "none": "C: no new guard rule; rely on review."
+    }
+  },
+  "questions": {
+    "offloopback": {
+      "type": "choice",
+      "instructions": "What should the asset plane and the MCP HTTP server do about a bind off loopback in this row?",
+      "criteria": {
+        "refuse_until_authenticated": "A: the asset plane and the MCP HTTP server go through the same bind function but declare that they cannot authenticate yet; the policy refuses any non-loopback bind for such a plane by name (\"this plane verifies no credential: loopback only until it does\"). Reserved ports and loopback behave as for the control plane. When rows 2.23/2.24 add verification, the plane declares it can authenticate and the same token rule applies.",
+        "same_rule_with_token": "B: the asset plane and the MCP HTTP server use the control plane's rule exactly: a token configured permits a bind off loopback. They do not yet check the token, so this is a policy in name only until 2.23 and 2.24.",
+        "authenticate_now": "C: add credential verification to the asset plane and the MCP HTTP server in this row, so the same token rule is true; this enlarges the row into rows 2.23 and 2.24."
+      }
+    },
+    "lan": {
+      "type": "choice",
+      "instructions": "What should the --lan flag mean after this row?",
+      "criteria": {
+        "label_plus_bind_flag": "A: --lan stays a declaration of locality (tests keep using it on loopback); a new --bind <ip> chooses the control plane's interface through the bind policy (a token is required off loopback); the asset plane stays on loopback until it can authenticate, and the worker says so at start, so a LAN engine is reachable for control but not yet for publishes.",
+        "lan_implies_bind": "B: --lan means \"bind the machine's LAN interface\": it requires --bind, and a --lan engine on loopback is no longer possible; tests that exercise the LAN path over loopback need another switch.",
+        "derive_from_bind": "C: remove the --lan flag; locality is derived from the bind address (loopback is co-located, anything else is LAN); the tests that exercise the LAN path on loopback need a test-only override."
+      }
+    },
+    "constants": {
+      "type": "choice",
+      "instructions": "Where should the port constants and default endpoints live?",
+      "criteria": {
+        "contracts_endpoints_module": "A: a small module in gx-contracts holds the ports and default endpoints (control 4400, asset 4401, the reserved list); every crate that needs one imports it; the control-plane bind module re-exports for compatibility.",
+        "keep_in_bind_rs": "B: leave the ports in the control-plane bind module and make the shells depend on that crate for them.",
+        "per_crate": "C: leave each crate with its own constants and add a test that they agree."
+      }
+    },
+    "guard": {
+      "type": "choice",
+      "instructions": "How strict should the new architecture guard rule be?",
+      "criteria": {
+        "allow_list_of_bind_sites": "A: the guard fails the build if a socket bind (TcpListener::bind and its tokio form) appears in product code outside an allow-listed set of files, and if a host:port literal for the engine ports appears outside the endpoints module and tests; a new listener must be added to the list on purpose.",
+        "literal_only": "B: the guard only flags host:port literals and reserved ports, and leaves bind calls unwatched.",
+        "none": "C: no new guard rule; rely on review."
+      }
+    },
+    "safest": {
+      "type": "choice",
+      "instructions": "Which off-loopback option is safest against exposing an unauthenticated plane to a network?",
+      "criteria": {
+        "refuse_until_authenticated": "A: the asset plane and the MCP HTTP server go through the same bind function but declare that they cannot authenticate yet; the policy refuses any non-loopback bind for such a plane by name (\"this plane verifies no credential: loopback only until it does\"). Reserved ports and loopback behave as for the control plane. When rows 2.23/2.24 add verification, the plane declares it can authenticate and the same token rule applies.",
+        "same_rule_with_token": "B: the asset plane and the MCP HTTP server use the control plane's rule exactly: a token configured permits a bind off loopback. They do not yet check the token, so this is a policy in name only until 2.23 and 2.24.",
+        "authenticate_now": "C: add credential verification to the asset plane and the MCP HTTP server in this row, so the same token rule is true; this enlarges the row into rows 2.23 and 2.24."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "offloopback",
+      "jev": "refuse_until_authenticated",
+      "laya": "authenticate_now",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "refuse_until_authenticated",
+        "confidence": 1,
+        "probabilities": {
+          "refuse_until_authenticated": 1,
+          "same_rule_with_token": 0,
+          "authenticate_now": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "authenticate_now",
+        "probabilities": {
+          "refuse_until_authenticated": 0.0364,
+          "same_rule_with_token": 0.1853,
+          "authenticate_now": 0.7783
+        },
+        "confidence": 0.4282,
+        "answer_confidence": 0.7783,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "lan",
+      "jev": "label_plus_bind_flag",
+      "laya": "lan_implies_bind",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "label_plus_bind_flag",
+        "confidence": 0.42,
+        "probabilities": {
+          "label_plus_bind_flag": 0.61,
+          "lan_implies_bind": 0.23,
+          "derive_from_bind": 0.16
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "lan_implies_bind",
+        "probabilities": {
+          "label_plus_bind_flag": 0.1408,
+          "lan_implies_bind": 0.5855,
+          "derive_from_bind": 0.2736
+        },
+        "confidence": 0.1407,
+        "answer_confidence": 0.5855,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "constants",
+      "jev": "contracts_endpoints_module",
+      "laya": "keep_in_bind_rs",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "contracts_endpoints_module",
+        "confidence": 1,
+        "probabilities": {
+          "contracts_endpoints_module": 1,
+          "keep_in_bind_rs": 0,
+          "per_crate": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep_in_bind_rs",
+        "probabilities": {
+          "contracts_endpoints_module": 0.2591,
+          "keep_in_bind_rs": 0.631,
+          "per_crate": 0.1099
+        },
+        "confidence": 0.1961,
+        "answer_confidence": 0.631,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "guard",
+      "jev": "allow_list_of_bind_sites",
+      "laya": "literal_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "allow_list_of_bind_sites",
+        "confidence": 1,
+        "probabilities": {
+          "allow_list_of_bind_sites": 1,
+          "literal_only": 0,
+          "none": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "literal_only",
+        "probabilities": {
+          "allow_list_of_bind_sites": 0.0023,
+          "literal_only": 0.5784,
+          "none": 0.4194
+        },
+        "confidence": 0.3674,
+        "answer_confidence": 0.5784,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "safest",
+      "jev": "refuse_until_authenticated",
+      "laya": "authenticate_now",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "refuse_until_authenticated",
+        "confidence": 0.94,
+        "probabilities": {
+          "refuse_until_authenticated": 0.96,
+          "same_rule_with_token": 0,
+          "authenticate_now": 0.04
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "authenticate_now",
+        "probabilities": {
+          "refuse_until_authenticated": 0.056,
+          "same_rule_with_token": 0.1868,
+          "authenticate_now": 0.7573
+        },
+        "confidence": 0.3763,
+        "answer_confidence": 0.7573,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

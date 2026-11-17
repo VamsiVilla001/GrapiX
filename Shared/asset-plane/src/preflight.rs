@@ -104,6 +104,7 @@ pub struct AssetTransferServer {
 
 impl AssetTransferServer {
     pub fn bind(addr: SocketAddr, store: Arc<Mutex<AssetStore>>) -> io::Result<Self> {
+        crate::publish::check_asset_listen(addr)?;
         Ok(Self {
             listener: TcpListener::bind(addr)?,
             store,
@@ -545,6 +546,37 @@ mod tests {
         let metrics = server.metrics();
         server.serve_in_background();
         (address, metrics, directory)
+    }
+
+    /// 2.21: the transfer server asks the one bind policy before it opens a
+    /// socket, as the publish server does: loopback only, no reserved port.
+    #[test]
+    fn the_transfer_server_asks_the_bind_policy_before_it_opens_a_socket() {
+        let directory = temporary_directory();
+        for (ip, port, because) in [
+            ("0.0.0.0", 0, "verifies no credential"),
+            ("192.168.1.50", 0, "verifies no credential"),
+            ("::", 0, "verifies no credential"),
+            ("127.0.0.1", 4100, "port 4100 is reserved"),
+        ] {
+            let addr = SocketAddr::new(ip.parse().unwrap(), port);
+            let store = Arc::new(Mutex::new(AssetStore::at_root(directory.clone())));
+            let refused = match AssetTransferServer::bind(addr, store) {
+                Ok(_) => panic!("{addr} must be refused"),
+                Err(refused) => refused,
+            };
+            assert_eq!(
+                refused.kind(),
+                io::ErrorKind::PermissionDenied,
+                "{addr}: {refused}"
+            );
+            assert!(
+                refused.to_string().contains("asset plane")
+                    && refused.to_string().contains(because),
+                "{addr}: {refused}"
+            );
+        }
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]

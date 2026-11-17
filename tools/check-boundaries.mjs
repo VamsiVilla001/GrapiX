@@ -31,6 +31,12 @@
 //        consumer asks `gx_media_plane::profile_for` with what the engine
 //        declared. In TypeScript the same rule forbids comparing a value to
 //        "CoLocated" or "Lan".
+//   invariant 41, build-plan 2.21:
+//     R10 a product opens a listening socket only in the listed bind sites,
+//        and each of them asks the one bind policy
+//        (`gx_contracts::endpoints::check_listen`) before it binds
+//     R11 the engine's own host:port (4400, 4401) is written once, in
+//        `Shared/contracts/src/endpoints.rs`
 //
 // `check(files)` is pure over an explicit file set so the rules can be tested
 // with synthetic files; walking the repository happens only from the CLI.
@@ -251,6 +257,24 @@ function at(path, text, index) {
   return `${path}:${line}`;
 }
 
+/**
+ * Where a product may open a listening socket (R10, 2.21). Each asks `check_listen` (the one bind policy,
+ * `gx_contracts::endpoints`) before it binds; a new listener is added here on purpose. The conformance harness
+ * binds scratch sockets for the processes it tests and is not a product listener.
+ */
+const BIND_SITES = new Set([
+  "Shared/control-plane/src/bind.rs",
+  "Shared/asset-plane/src/publish.rs",
+  "Shared/asset-plane/src/preflight.rs",
+  "services/mcp-server/src/wire.rs",
+]);
+const SOCKET_BIND = /\b(?:TcpListener|UdpSocket)::bind\b/;
+const ASKS_THE_POLICY = /\bcheck_(?:\w+_)?listen\s*\(/;
+
+/** The engine's own host:port, written out (R11, 2.21): it is named once, in `endpoints.rs`. */
+const ENGINE_ENDPOINT_HOME = "Shared/contracts/src/endpoints.rs";
+const ENGINE_ENDPOINT = /(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1?\]):(?:4400|4401)\b/;
+
 /** Who may name a `Locality` variant (R9): declarers, the lead, the negotiator, conformance. */
 const LOCALITY_ALLOWED = /^(?:Shared\/contracts\/|Shared\/control-plane\/|Shared\/media-plane\/|Shared\/asset-plane\/|services\/render-engine\/|mocks\/mock-engine\/|conformance\/)/;
 
@@ -372,6 +396,18 @@ export function check(files) {
       if (branch) {
         add(at(path, source.code, branch.index), "a consumer branches on a Locality variant: ask gx_media_plane::profile_for or gx_asset_plane::handoff_for with the declared locality instead (R9, 5.5)");
       }
+      const socket = SOCKET_BIND.exec(source.code);
+      if (socket && !path.startsWith("conformance/")) {
+        if (!BIND_SITES.has(path)) {
+          add(at(path, source.code, socket.index), "a socket is bound outside the listed bind sites: ask gx_contracts::endpoints::check_listen first, then add this file to BIND_SITES on purpose (R10, 2.21)");
+        } else if (!ASKS_THE_POLICY.test(source.code)) {
+          add(at(path, source.code, socket.index), "a listed bind site binds a socket without asking gx_contracts::endpoints::check_listen (R10, 2.21)");
+        }
+      }
+      const written = path === ENGINE_ENDPOINT_HOME || path.startsWith("conformance/") ? null : ENGINE_ENDPOINT.exec(source.text);
+      if (written) {
+        add(at(path, source.text, written.index), `the engine's host:port ${written[0]} is written out: use gx_contracts::endpoints (R11, 2.21)`);
+      }
       const listener = path === "Shared/control-plane/src/bind.rs" ? null : /(?:bind|listen|TcpListener)[^;\n]*\b4100\b/.exec(source.text);
       if (listener) {
         add(at(path, source.text, listener.index), "port 4100 bound outside the control plane: project-api must accept only EditorCommand (R8)");
@@ -380,6 +416,11 @@ export function check(files) {
     const manifest = editorSide && basename(path) === "Cargo.toml" ? CONTROL_PLANE_CLIENTS.exec(scrub(raw, "toml")) : null;
     if (manifest) {
       add(at(path, raw, manifest.index), `Editor-side crate depends on control-plane client ${manifest[0]} (R6, invariant 4)`);
+    }
+    if (/^(?:Editor|Playout)\/.*\.tsx?$/.test(path) && !path.startsWith("Shared/generated-ts/")) {
+      const text = scrub(raw, "ts");
+      const written = ENGINE_ENDPOINT.exec(text);
+      if (written) add(at(path, text, written.index), `the engine's host:port ${written[0]} is written out: ask the shell for the default endpoint (R11, 2.21)`);
     }
     if (/^Editor\/(?:web|src)\/.*\.tsx?$/.test(path)) checkInvokes(path, raw, add);
     if (/^(?:Editor|Playout)\/.*\.tsx?$/.test(path) && !path.startsWith("Shared/generated-ts/")) {

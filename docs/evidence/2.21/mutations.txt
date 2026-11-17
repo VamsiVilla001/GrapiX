@@ -1,0 +1,46 @@
+2.21 mutations: one at a time, each restored byte-identical (restored_identical=True), each must fail a named check.
+Runner: scratch mutate_221.py (list of (name, file, old text, new text, command)); it backs the file up, mutates,
+runs the command, restores in a finally, compares the restored file with the backup byte for byte.
+
+First run, 24 mutations (17 Nov 2026, about 23:10 to 23:59). 23 failed a named check. H2 did not: the mutated
+transport served the 0.0.0.0 listener for ever, the only test that would notice
+(the_http_transport_refuses_a_listener_off_loopback) hung, and the runner killed it at its 25 minute limit
+(exit=timeout, failing=[]). A hung test is not a named failure, so the test was changed to shut the listener
+down after 5 seconds and fail by assertion, and H2 was run again (second block). W4 was added after the reach
+test was written, to show that test can fail.
+
+P1 a plane that verifies no credential may leave loopback with a token: exit=101 failing=['endpoints::tests::a_plane_that_verifies_none_may_not_leave_loopback_token_or_not'] restored_identical=True
+P2 every plane is said to verify a credential: exit=101 failing=['endpoints::tests::only_the_control_plane_verifies_a_credential_today', 'endpoints::tests::a_plane_that_verifies_none_may_not_leave_loopback_token_or_not'] restored_identical=True
+P3 a reserved port is not refused: exit=101 failing=['endpoints::tests::a_reserved_port_is_refused_by_name_on_every_plane_and_address', 'endpoints::tests::an_io_refusal_is_permission_denied_and_names_the_plane_first'] restored_identical=True
+P4 port 4100 is no longer reserved: exit=101 failing=['publish::tests::the_publish_server_asks_the_bind_policy_before_it_opens_a_socket', 'preflight::tests::the_transfer_server_asks_the_bind_policy_before_it_opens_a_socket'] restored_identical=True
+P5 the asset port constant drifts from the default endpoint: exit=101 failing=['endpoints::tests::the_defaults_agree_with_the_ports'] restored_identical=True
+P6 a short token is accepted: exit=101 failing=['endpoints::tests::a_short_token_is_refused_rather_than_padded', 'endpoints::tests::an_io_refusal_is_permission_denied_and_names_the_plane_first'] restored_identical=True
+P7 the unspecified address counts as loopback: exit=101 failing=['endpoints::tests::a_plane_that_verifies_none_may_not_leave_loopback_token_or_not', 'endpoints::tests::a_plane_that_verifies_credentials_may_leave_loopback_with_a_token_and_not_without'] restored_identical=True
+P8 an io refusal does not name the plane: exit=101 failing=['endpoints::tests::an_io_refusal_is_permission_denied_and_names_the_plane_first'] restored_identical=True
+P9 an io refusal is not PermissionDenied: exit=101 failing=['endpoints::tests::an_io_refusal_is_permission_denied_and_names_the_plane_first'] restored_identical=True
+A1 the publish server binds without asking the policy: exit=101 failing=['publish::tests::the_publish_server_asks_the_bind_policy_before_it_opens_a_socket'] restored_identical=True
+A2 the publish server asks as the control plane: exit=101 failing=['preflight::tests::the_transfer_server_asks_the_bind_policy_before_it_opens_a_socket', 'publish::tests::the_publish_server_asks_the_bind_policy_before_it_opens_a_socket'] restored_identical=True
+A3 the transfer server binds without asking the policy: exit=101 failing=['preflight::tests::the_transfer_server_asks_the_bind_policy_before_it_opens_a_socket'] restored_identical=True
+A3g the same, seen by the architecture guard on the real tree: exit=1 failing=['Shared/asset-plane/src/preflight.rs:108: a listed bind site binds a socket without asking gx_contracts::endpoints::check_listen (R10, 2.21)'] restored_identical=True
+H1 the MCP HTTP transport takes any port: exit=101 failing=['wire::tests::the_http_transport_refuses_a_reserved_port_before_it_binds'] restored_identical=True
+H2 the MCP HTTP listener serves any address: exit=timeout failing=[] restored_identical=True
+C1 the control plane asks the policy as another plane: exit=101 failing=['bind::tests::a_network_address_without_a_token_is_refused', 'bind::tests::a_token_permits_a_network_bind'] restored_identical=True
+W1 the worker ignores where --bind says: exit=101 failing=['with_a_token_the_control_plane_leaves_loopback_and_the_asset_plane_does_not', 'off_loopback_without_a_token_the_control_plane_refuses_by_name_and_nothing_listens'] restored_identical=True
+W2 the worker lets the asset plane follow --bind: exit=101 failing=['with_a_token_the_control_plane_leaves_loopback_and_the_asset_plane_does_not'] restored_identical=True
+W3 the worker parses --bind and drops it: exit=101 failing=['with_a_token_the_control_plane_leaves_loopback_and_the_asset_plane_does_not', 'off_loopback_without_a_token_the_control_plane_refuses_by_name_and_nothing_listens'] restored_identical=True
+G1 the guard stops listing the MCP server as a bind site: exit=1 failing=['a listed bind site that asks the policy is allowed', 'the real tree has zero boundary violations'] restored_identical=True
+G2 the guard no longer asks a listed site to call the policy: exit=1 failing=['a listed bind site that never asks the policy is refused'] restored_identical=True
+G3 the guard forgets the asset port: exit=1 failing=["the engine's asset endpoint written out is refused"] restored_identical=True
+G4 the guard no longer watches for binds outside the list: exit=1 failing=['a socket bound outside the listed bind sites is refused', 'a tokio listener outside the listed bind sites is refused', 'a listed bind site that never asks the policy is refused'] restored_identical=True
+G5 the real tree writes the engine endpoint out again: exit=1 failing=["Playout/shell/src/lib.rs:41: the engine's host:port 127.0.0.1:4400 is written out: use gx_contracts::endpoints (R11, 2.21)"] restored_identical=True
+
+Second run (18 Nov 2026), after the test fix and the reach test:
+H2 the MCP HTTP listener serves any address: exit=101 failing=['wire::tests::the_http_transport_refuses_a_listener_off_loopback'] restored_identical=True
+W4 the worker binds every interface when --bind names one: exit=101 failing=['an_engine_bound_to_this_machines_address_is_reached_over_it_and_only_control'] restored_identical=True
+
+
+Third run (18 Nov 2026), after the tools' port module and its test were added:
+L1 the launcher writes the ports out again: exit=1 failing=['the launcher asks for the ports and writes no port number of its own'] restored_identical=True
+L2 a port the module does not name falls back to a default: exit=1 failing=['a constant the module does not name is an error by name, not a default'] restored_identical=True
+
+27 mutations in all; every one fails a named check (H2 on its second run); every file restored byte-identical.

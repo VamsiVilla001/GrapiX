@@ -17,6 +17,7 @@ pub mod control;
 pub mod design_system;
 pub mod drawability;
 pub mod effect;
+pub mod endpoints;
 pub mod enforce;
 pub mod font;
 pub mod font_edit;

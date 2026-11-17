@@ -118,6 +118,57 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-18 — 2.21 done: one bind policy for every listener; a sink race found (Claude)
+
+**A defect found, not fixed (proposed row 2.25).** The first gate run for this row failed one conformance check, "no log file has a gap in
+its sequence that a log.lost record does not state": in the engine's log, `log.lost` named 48, then 49 was written, then 48. It is not load
+and not this row: `offer()` in `Shared/telemetry/src/sink.rs` (row 2.11) takes the sequence number, builds the line and then queues it, so
+two threads logging microseconds apart can queue in the other order, and the writer states the late one as lost and then writes it (and
+after writing the late one it also moves `last` back, so the next line can state a second written record as lost). The failing lines are
+kept in `docs/evidence/2.21/gate-first-run-failure.txt`. The second gate run on the same tree passed. **Row 2.11's "every gap stated
+exactly" is not true under concurrent logging until 2.25 is built**; the user was told and decides whether 2.11 is reopened. Two designs
+to put to Jev and Laya: a short lock around "take the number and queue" (the writer serialises), or a writer that holds an early line
+briefly for the late one and drops a line that arrives after its number was stated lost (the offer path stays wait-free).
+
+**Resume here.** Rows 0.12 (agent protocol files made context-efficient) and 0.13 (the tracker generated from the plan) were added as
+proposed on the user's word (17 Nov: "Yes proceed as per your plan"); 0.12 is docs only and was to follow this commit. Next in the OSI audit order: **2.22** (timeouts, connection caps, acknowledgement eviction, low-latency accepted streams,
+a flush signal so the stop path does not sleep 250 ms), then **2.23** (MCP HTTP authentication) and **2.24** (asset-plane authentication,
+resume, retry), which both need the user's answer on the credential before they are built; then **2.15** (named operator login for
+Playout) and **12.11** (as-run record; its done-when should gain "and the bundle holds it"). Open from this row, no row yet:
+an engine bound to one specific address cannot be adopted by the host (it adopts through loopback); it belongs with the remote-engine work (14.2). The guard's Playout checks that the first proposal of 2.21 asked for are now proposed row **2.26**.
+
+What was built. `Shared/contracts/src/endpoints.rs` (new, the lowest crate so every plane can use it): `ENGINE_CONTROL_PORT` 4400,
+`ENGINE_ASSET_PORT` 4401, `DEFAULT_CONTROL_ENDPOINT`, `DEFAULT_ASSET_ENDPOINT`, `MINIMUM_TOKEN_BYTES`, `RESERVED_PORTS` (4200, 4100,
+4300), `Plane {Control, Asset, McpHttp}` with `authenticates()` (only `Control` is true; this is the one line that changes when rows
+2.24 and 2.23 land), `check_listen(plane, addr, token)` and `check_listen_io` (the same, as `io::Error`, `PermissionDenied`, naming the
+plane first). `Shared/control-plane/src/bind.rs` keeps `check_bind` as the control plane's case and re-exports the constants;
+`BindRefusal` gains `PlaneCannotAuthenticate`. `Shared/asset-plane`: `check_asset_listen`, asked first by `AssetPublishServer::bind` and
+`AssetTransferServer::bind`. `services/mcp-server/src/wire.rs`: `check_http_listen`, asked by `serve_http` and `serve_http_listener`.
+Worker: `--bind IP` (control plane only; the asset plane stays on 127.0.0.1 and the start line says so); `engine.start` records `bind`.
+Playout and Editor shells and `tools/launch-shells.mjs` read the endpoints from the one module; the dev server binds 127.0.0.1.
+`docs/invariants.md` invariant 41 now says one policy answers for every listener. Guard (`tools/check-boundaries.mjs`): **R10** a socket bind outside `BIND_SITES` is refused, and a listed site must call a
+`check_*listen(`; **R11** an engine `host:4400|4401` literal outside `endpoints.rs` and `conformance/` (Rust and the Editor/Playout
+TypeScript) is refused.
+
+**Decisions made by hand (Jev gave no clear answer on `--lan`, 0.42).** A plane that verifies no credential does not leave loopback even
+with a token. `--lan` stays a declaration; `--bind` is the interface. The reach test connects to a 0.0.0.0 listener and to this
+machine's own address when it has one.
+
+Verified: gate on the final tree: fmt and clippy -D warnings clean, `npm run check` exit 0 (72 Node, 424 Editor, 1030 Rust with 38 ignored, conformance 631/0/9) on the fourth run; the first failed on the log-sink race (row 2.25), the third on the load-sensitive timed check while a CPU model ran beside it; 27 of 27 mutations fail a named check (one, H2, only after its test was given a way out of a hang); tools' port module `tools/engine-ports.mjs` with 3 tests (the launcher asks it); worker `tests/bind.rs` (6 real-process tests, one bound to and reached over this machine's own network address); endpoints (8), bind (8), asset-plane (2), MCP (2 new, 1 changed) unit tests;
+guard 33 cases plus the real tree.
+
+**Process lessons.** (1) A test that asserts the plane's name found a real gap at once: a reserved-port refusal did not say which plane
+refused. (2) A done-when that names a mechanism ("`--lan` binds") can be wrong about the design; change it in the plan and the Done
+note openly instead of building to the letter. (3) A mutation whose only witness is a test that hangs is not caught: H2 sat for the runner's 25 minute limit. A test of "this must be
+refused" needs its own way out (a shutdown after a few seconds) so it fails by assertion. (4) Leave the tree alone while the
+mutation runner holds it; prepare the next steps in scratch files. (5) Run nothing heavy beside the gate: I ran the Laya model on the CPU during
+the third gate run and the timed check "headless renders while Program runs" counted one late frame of 155; the fourth run, alone,
+passed. Four gate runs for one row is the cost of two intermittent failures, one of them a real defect (2.25).
+
+Limits named: the asset plane and the MCP HTTP server cannot leave loopback until they authenticate; a specific-IP `--bind` engine is not
+adoptable by the host (it adopts through loopback); the tools read the ports from the Rust source by pattern (tested); `.mjs` tools
+are not scanned by the guard; the reach test prints NOT RUN and returns on a machine with no network address; a real-process test that binds off loopback can raise the Windows firewall prompt the first time.
+
 ## 2026-11-17 — 2.20 done: the wire version enforced on connect; OSI audit rows 2.21 to 2.24 added (Claude)
 
 **Resume here.** The user asked (17 Nov) to "fix the serious findings" of the OSI layering audit

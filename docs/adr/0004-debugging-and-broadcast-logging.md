@@ -257,6 +257,15 @@ another. A client that does not state its version is still served. Before this r
 unread and the engine compared its own constant with itself. The engine host no longer mistakes an engine that answered and refused it for
 no engine. Evidence: `docs/evidence/2.20/README.md`; the audit that found it: `docs/audit/osi-layering-2026-11-17.md`.
 
+## As built, row 2.21 (18 November 2026)
+
+One bind policy now answers for every listener: `gx_contracts::endpoints::check_listen`. The control plane may leave loopback with a token;
+the asset plane and the MCP HTTP server verify no credential, so they listen on loopback only until they do (rows 2.24 and 2.23). A
+reserved port is refused by name on every plane. The engine takes `--bind IP` for its control plane, and `--lan` stays a declaration of how
+assets arrive. The ports and default endpoints are written once, in `endpoints.rs`, and the architecture guard refuses a socket bind
+outside the listed bind sites and an engine host:port literal outside that module. Evidence: `docs/evidence/2.21/README.md`; the audit
+that found it: `docs/audit/osi-layering-2026-11-17.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

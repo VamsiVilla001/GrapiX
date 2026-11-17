@@ -115,7 +115,10 @@ execution evidence.
     Tile-by-tile turns a thumbnail into a minute of GPU time.
 40. Preview streams are addressed to one client. Never broadcast frames.
 41. A non-loopback engine bind with no configured token refuses to start. That
-    is not a warning.
+    is not a warning. One policy answers for every listener
+    (`gx_contracts::endpoints::check_listen`, 2.21): a plane that verifies no
+    credential (the asset plane and the MCP HTTP transport, today) listens on
+    loopback only, token or not, and no listener takes a reserved port.
 42. A remote client supplies a relative, traversal-free path resolved inside a
     configured root, re-checked after canonicalisation. A syntax check alone
     cannot see a symlink.

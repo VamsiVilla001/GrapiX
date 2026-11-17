@@ -217,8 +217,16 @@ pub struct AssetPublishServer<P: AssetPublishPeer> {
     metrics: crate::preflight::AssetTransferMetrics,
 }
 
+/// The asset plane's case of the one bind policy (2.21): it verifies no
+/// credential today, so it listens on loopback only, and on no reserved port.
+/// The refusal is `PermissionDenied`, naming the plane and the reason.
+pub(crate) fn check_asset_listen(addr: SocketAddr) -> io::Result<()> {
+    gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::Asset, addr, None)
+}
+
 impl<P: AssetPublishPeer> AssetPublishServer<P> {
     pub fn bind(addr: SocketAddr, peer: Arc<Mutex<P>>) -> io::Result<Self> {
+        check_asset_listen(addr)?;
         Ok(Self {
             listener: TcpListener::bind(addr)?,
             peer,
@@ -859,6 +867,49 @@ mod tests {
                 serde_json::json!({"reply": "declared", "locality": serde_json::to_value(locality).unwrap()})
             );
         }
+    }
+
+    /// 2.21: the asset plane asks the one bind policy before it opens a socket.
+    /// It verifies no credential, so it is refused every interface but loopback
+    /// (a token would not protect it) and every reserved port, by name. A refusal
+    /// comes before any bind: an address that is not even this machine's is
+    /// refused as a policy, not as an address that cannot be bound.
+    #[test]
+    fn the_publish_server_asks_the_bind_policy_before_it_opens_a_socket() {
+        for (ip, port, because) in [
+            ("0.0.0.0", 0, "verifies no credential"),
+            ("192.168.1.50", 0, "verifies no credential"),
+            ("::", 0, "verifies no credential"),
+            ("127.0.0.1", 4100, "port 4100 is reserved"),
+            ("127.0.0.1", 4200, "port 4200 is reserved"),
+            ("127.0.0.1", 4300, "port 4300 is reserved"),
+        ] {
+            let addr = SocketAddr::new(ip.parse().unwrap(), port);
+            let refused =
+                match AssetPublishServer::bind(addr, Arc::new(Mutex::new(Peer::default()))) {
+                    Ok(_) => panic!("{addr} must be refused"),
+                    Err(refused) => refused,
+                };
+            assert_eq!(
+                refused.kind(),
+                io::ErrorKind::PermissionDenied,
+                "{addr}: {refused}"
+            );
+            assert!(
+                refused.to_string().contains("asset plane")
+                    && refused.to_string().contains(because),
+                "{addr}: {refused}"
+            );
+        }
+        // Loopback on a free port is what the plane is for.
+        assert!(
+            AssetPublishServer::bind(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                Arc::new(Mutex::new(Peer::default())),
+            )
+            .is_ok(),
+            "loopback is allowed"
+        );
     }
 
     #[test]
