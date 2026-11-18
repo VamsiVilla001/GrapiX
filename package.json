@@ -23,7 +23,7 @@
     "test:rust:host": "cargo test -p gx-engine-host",
     "build:web": "npm --prefix Editor run build:web",
     "editor": "npm run build:web && tauri dev --config Editor/shell/tauri.conf.json",
-    "playout": "tauri dev --config Playout/shell/tauri.conf.json",
+    "playout": "cargo run -p gx-playout-shell",
     "shells": "npm run build:web && node tools/launch-shells.mjs"
   },
   "devDependencies": {

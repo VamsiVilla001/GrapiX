@@ -6,9 +6,19 @@
 // copied here. This script owns the processes it starts and kills them on
 // exit, because a developer pressing ctrl-c expects their machine back.
 //
-// Order matters. The engine is started first and waited for, because both
-// shells connect on launch and a shell that starts first would open showing a
-// connection failure it then has to recover from.
+// Order matters. The engine and both shells are built first, in one `cargo
+// build`; then the engine is started and waited for, because both shells connect
+// on launch and a shell that starts first would open showing a connection
+// failure it then has to recover from (Playout attaches once, at launch, and
+// does not retry).
+//
+// The shells are run as the executables they are, not through `tauri dev`: with
+// both configs side by side, `tauri dev --config Playout/shell/tauri.conf.json`
+// finds the Editor's app folder first and runs the Editor's program, and two of
+// those then fight over one `gx-editor.exe` ("Access is denied"), which tears the
+// whole arrangement down, engine included. Each shell embeds its web files
+// (`frontendDist`) when it is built, so `npm run shells` builds the Editor's
+// bundle first (package.json).
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -18,6 +28,7 @@ import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { enginePorts } from "./engine-ports.mjs";
+import { shellArguments } from "./shell-args.mjs";
 
 // The ports are the engine's, from the one place that names them (2.21).
 const { control: CONTROL_PORT, asset: ASSET_PORT } = enginePorts();
@@ -47,9 +58,12 @@ function pipe(child, label, colour) {
 }
 
 function start(label, colour, command, args, env = {}) {
-  const child = spawn(command, args, {
+  // The Windows shell is for the `.cmd` programs (npx); an `.exe` is started
+  // directly. Either way an argument with a space in it stays one argument.
+  const shell = process.platform === "win32" && !command.toLowerCase().endsWith(".exe");
+  const child = spawn(command, shellArguments(args, { shell }), {
     stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
+    shell,
     env: { ...process.env, ...env },
   });
   pipe(child, label, colour);
@@ -84,6 +98,21 @@ async function waitForEngine() {
   return false;
 }
 
+/** Run `command` to its end with its output shown, and say whether it succeeded. */
+function runToEnd(label, colour, command, args) {
+  return new Promise((resolve) => {
+    const shell = process.platform === "win32" && !command.toLowerCase().endsWith(".exe");
+    const child = spawn(command, shellArguments(args, { shell }), {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell,
+    });
+    pipe(child, label, colour);
+    children.push(child);
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -110,26 +139,33 @@ console.log("");
 
 mkdirSync(PACKAGE_DIR, { recursive: true });
 console.log(`  package folder ${PACKAGE_DIR}`);
-start("engine", "36", worker, ["--port", String(CONTROL_PORT), "--package-dir", PACKAGE_DIR]);
+// The engine and the shells are built together, so none of them is older than the
+// others: a shell and an engine on different wire versions refuse each other (2.20).
+const built = await runToEnd("build", "33", "cargo", [
+  "build",
+  "-p",
+  "gx-render-worker",
+  "-p",
+  "gx-editor-shell",
+  "-p",
+  "gx-playout-shell",
+]);
 
-if (!(await waitForEngine())) {
-  console.error(`the render engine did not answer on ${CONTROL_PORT}; not starting the shells`);
+if (!built) {
+  console.error("the engine and the shells did not build; nothing was started");
   shutdown(1);
 } else {
-  console.log("engine ready — starting shells\n");
-  start(
-    "editor",
-    "34",
-    "npx",
-    ["tauri", "dev", "--config", "Editor/shell/tauri.conf.json", "--no-watch"],
-    { GX_EDITOR_PACKAGE_DIR: PACKAGE_DIR },
-  );
-  start("playout", "31", "npx", [
-    "tauri",
-    "dev",
-    "--config",
-    "Playout/shell/tauri.conf.json",
-    "--no-watch",
-  ]);
-  await once(process, "SIGINT").catch(() => {});
+  start("engine", "36", worker, ["--port", String(CONTROL_PORT), "--package-dir", PACKAGE_DIR]);
+
+  if (!(await waitForEngine())) {
+    console.error(`the render engine did not answer on ${CONTROL_PORT}; not starting the shells`);
+    shutdown(1);
+  } else {
+    console.log("engine ready — starting shells\n");
+    const exe = (name) =>
+      process.platform === "win32" ? `target\\debug\\${name}.exe` : `target/debug/${name}`;
+    start("editor", "34", exe("gx-editor"), [], { GX_EDITOR_PACKAGE_DIR: PACKAGE_DIR });
+    start("playout", "31", exe("gx-playout"), []);
+    await once(process, "SIGINT").catch(() => {});
+  }
 }
