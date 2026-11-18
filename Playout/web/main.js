@@ -329,6 +329,10 @@ const session = {
   armedLabel: null,
   /** Last poll failure, so a repeating fault is logged once. */
   lastPollSignature: null,
+  /** Last connect failure, so a repeating retry failure is logged once. */
+  lastConnectSignature: null,
+  /** The pending automatic reconnect, if one is scheduled. */
+  retryTimer: null,
   pollTimer: null,
   polling: false,
   busy: false,
@@ -761,6 +765,7 @@ async function pollOnce() {
     if (CONNECTION_LOST.has(described.code)) {
       log("STATUS", described.kind === "refused" ? "refused" : "error", described.name, described.detail);
       setDisconnected(`${described.name}${described.detail ? ` \u2014 ${described.detail}` : ""}`, true);
+      if (described.kind !== "refused") scheduleReconnect();
       return;
     }
 
@@ -793,7 +798,33 @@ async function run(fn) {
   }
 }
 
-async function doConnect() {
+// ---------------------------------------------------------------------------
+// Reconnect.
+//
+// An engine that is not up yet, or that went away, is retried every few
+// seconds until it answers, so an operator who opens Playout before the engine,
+// or whose engine restarts, is not left on a dead surface waiting to notice the
+// Connect button. A refusal (a wrong token, another protocol) is not retried:
+// it needs the operator. A retry reads status only, as the first attach does.
+// ---------------------------------------------------------------------------
+
+const RETRY_MS = 2000;
+
+function scheduleReconnect() {
+  if (session.retryTimer || session.connected) return;
+  ui.connectionDetail.textContent = `${ui.connectionDetail.textContent} Retrying every ${RETRY_MS / 1000} s.`;
+  session.retryTimer = setTimeout(async () => {
+    session.retryTimer = null;
+    if (session.connected) return;
+    if (session.busy) {
+      scheduleReconnect();
+      return;
+    }
+    await run(() => doConnect({ retry: true }));
+  }, RETRY_MS);
+}
+
+async function doConnect({ retry = false } = {}) {
   const endpoint = ui.endpointInput.value.trim();
   if (endpoint === "") {
     ui.endpointInput.setAttribute("aria-invalid", "true");
@@ -828,11 +859,15 @@ async function doConnect() {
     startPolling();
   } catch (err) {
     const described = describeError(err);
-    logFailure("CONNECT", err);
+    // A retry that fails the same way as the last attempt is not logged again.
+    const signature = `${described.name}|${described.detail}`;
+    if (!retry || signature !== session.lastConnectSignature) logFailure("CONNECT", err);
+    session.lastConnectSignature = signature;
     setDisconnected(
       `${described.name}${described.detail ? ` \u2014 ${described.detail}` : ""}`,
       session.connected,
     );
+    if (described.kind !== "refused") scheduleReconnect();
   }
 }
 
