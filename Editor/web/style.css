@@ -9,21 +9,24 @@
 
 :root {
   color-scheme: dark;
-  --base: #181818;
-  --panel: #232323;
-  --panel-2: #1e1e1e;
-  --rule: #343434;
-  --text: #d0d0d0;
-  --dim: #a4a4a4;
-  --faint: #9a9a9a;
-  --accent: #3d8ff5;
-  --accent-quiet: #273b54;
-  --good: #35a47c;
-  --warn: #d89a34;
-  --bad: #c25a4e;
-  --font: ui-sans-serif, system-ui, "Segoe UI", -apple-system, Roboto, Arial,
-    sans-serif;
-  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  /* Mapped onto the SKWAD live tokens (skwad.css, 18 Nov 2026). The Editor keeps
+     its quieter hierarchy: running text is ink-2, secondary ink-3. */
+  --base: var(--sk-canvas);
+  --panel: var(--sk-surface-2);
+  --panel-2: var(--sk-surface);
+  --rule: var(--sk-border);
+  --text: var(--sk-ink-2);
+  --dim: var(--sk-ink-3);
+  /* Readability: "faint" text is still read, so it stays at ink-3, not ink-4. */
+  --faint: var(--sk-ink-3);
+  --accent: var(--sk-ember);
+  --accent-quiet: var(--sk-ember-tint);
+  --good: var(--sk-ok);
+  --warn: var(--sk-warn);
+  --bad: var(--sk-danger);
+  --font: var(--sk-font-ui);
+  --ui: var(--sk-font-ui);
+  --mono: var(--sk-font-mono);
 }
 
 * {

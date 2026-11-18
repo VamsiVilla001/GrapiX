@@ -10,42 +10,44 @@
  */
 
 :root {
-  /* Neutrals — cool-tinted, never pure. */
-  --bg: #0d1013;
-  --bg-panel: #14181c;
-  --bg-panel-2: #191e23;
-  --bg-inset: #0a0d0f;
-  --line: #262d34;
-  --line-strong: #3a444d;
+  /* Mapped onto the SKWAD live tokens (skwad.css, 18 Nov 2026). */
+  --bg: var(--sk-canvas);
+  --bg-panel: var(--sk-surface);
+  --bg-panel-2: var(--sk-surface-2);
+  --bg-inset: #0e0d0b;
+  --line: var(--sk-border);
+  --line-strong: var(--sk-border-strong);
 
-  --ink: #e4e9ed;
-  --ink-dim: #97a3ad;
-  --ink-faint: #6a757e;
+  --ink: var(--sk-ink);
+  --ink-dim: var(--sk-ink-3);
+  --ink-faint: var(--sk-ink-4);
 
-  /* State — chosen to differ in lightness as well as hue. */
-  --nominal: #4ec27a;
-  --nominal-bg: #12241a;
-  --warning: #f0a93c;
-  --warning-bg: #2a1f0c;
+  /* State: still chosen to differ in lightness as well as hue, and each is also a
+     word and a rule weight. Critical keeps its own light red so it never reads as the
+     on-air colour; on air (TAKE, the live chip) is SKWAD's live signal, brand ember. */
+  --nominal: var(--sk-ok);
+  --nominal-bg: var(--sk-ok-tint);
+  --warning: var(--sk-warn);
+  --warning-bg: var(--sk-warn-tint);
   --critical: #ff5f56;
-  --critical-bg: #2e1113;
-  --live: #e23b3b;
+  --critical-bg: var(--sk-danger-tint);
+  --live: var(--sk-brand-ember);
   --info: #6fb3d9;
 
-  --focus: #8ab4f8;
+  --focus: var(--sk-ember);
 
   /* 4px spacing grid. */
-  --s1: 4px;
-  --s2: 8px;
-  --s3: 12px;
-  --s4: 16px;
-  --s5: 24px;
+  --s1: var(--sk-space-1);
+  --s2: var(--sk-space-2);
+  --s3: var(--sk-space-3);
+  --s4: var(--sk-space-4);
+  --s5: var(--sk-space-6);
   --s6: 32px;
 
-  --r: 2px;
+  --r: var(--sk-radius-control);
 
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
+  --sans: var(--sk-font-ui);
+  --mono: var(--sk-font-mono);
 }
 
 * {
