@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 pub mod wire;
 
 pub use wire::{
-    serve_http_listener, Jobs, McpService, HANDSHAKE_PROTOCOL_VERSION, HTTP_PATH,
-    SUPPORTED_PROTOCOL_VERSIONS,
+    serve_http_listener, serve_http_listener_within, HttpLimits, Jobs, McpService,
+    HANDSHAKE_PROTOCOL_VERSION, HTTP_PATH, SUPPORTED_PROTOCOL_VERSIONS,
 };
 
 /// What a tool does when called.

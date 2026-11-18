@@ -266,6 +266,14 @@ assets arrive. The ports and default endpoints are written once, in `endpoints.r
 outside the listed bind sites and an engine host:port literal outside that module. Evidence: `docs/evidence/2.21/README.md`; the audit
 that found it: `docs/audit/osi-layering-2026-11-17.md`.
 
+## As built, row 2.22 (18 November 2026)
+
+Every listener now bounds what a connection can cost it. The control plane drops a peer that sends nothing (10 s) or a frame that begins and
+stops (10 s), caps its connections (32), allows 4 KiB before a peer has authenticated, keeps the latest 64 acknowledgements, and sets
+`TCP_NODELAY` on what it accepts; a quiet authenticated peer is left alone. The asset plane and the MCP HTTP server take the same deadlines
+and a cap, and an asset transfer is bounded as it arrives. The stop path no longer sleeps: it waits, with a limit, for the transport to say
+the reply has left. Evidence: `docs/evidence/2.22/README.md`; the audit that found it: `docs/audit/osi-layering-2026-11-17.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |

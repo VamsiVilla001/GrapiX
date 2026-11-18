@@ -118,6 +118,60 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-18 — 2.22 done: transport bounds on every listener (Claude)
+
+**Resume here.** The user asked (18 Nov) to speed up and work on the main application tasks: wire both apps' UI modules to their backend
+modules, upgrade them where needed, and use the **SKWAD design system** for colours and buttons (the user's artifact "SKWAD Design System";
+tokens transcribed to scratch `skwad-tokens.css`: ember D95F18 / F58138 live, Manrope + Anybody + JetBrains Mono, 2px controls, 14px gutter,
+work = light, live = ink). Three read-only audits were running when this entry was written (Editor wiring, Playout wiring, styling against
+the tokens); their findings decide the order. Backend order after this row: **2.25** (the log sink race), then the control-plane request
+Playout's library needs (12.2, protocol 9), 2.23 and 2.24 wait for the user's credential decision. 2.22's launcher fixes
+(`tools/shell-args.mjs`, the launcher, `npm run playout`) are separate and uncommitted: see the entry above.
+
+What was built. `Shared/control-transport/src/server.rs`: `ServerLimits` (cap 32, first-frame 10 s, frame 10 s, write 10 s, pre-auth 4 KiB,
+ack window 64), `read_frame_within`, `configure_stream`, `Permit`; `Server::with_limits`. `Shared/control-plane`: `ControlStream::set_read_deadline`
+and `set_write_deadline` (TCP and Unix; a Windows pipe returns `Ok(false)` and the server logs `control.limits_not_applied`),
+`EnginePeer::stop_reply_delivered`. `services/render-engine/worker`: `StopFlush` (a one-shot the transport fires), the stop path waits for it with
+a 3 s limit (`STOP_FLUSH_LIMIT`), `engine.stop_reply_not_delivered` is a warning when it did not. `Shared/asset-plane/src/limits.rs`:
+`AssetLimits` for both listeners and the bounds on a transfer as it arrives. `services/mcp-server/src/wire.rs`: `HttpLimits` (header deadline,
+cap) and `serve_http_listener_within`. Real-process tests: `worker/tests/limits.rs` (defaults as shipped), `stop_request.rs` times the exit.
+
+Verified: gate on the final tree: fmt and clippy -D warnings clean, `npm run check` exit 0 (76 Node, 424 Editor, 1055 Rust with 38 ignored, conformance 631/0/9); 30 of 30 mutations fail a named check (A5 only after its test was fixed).
+
+**Process lessons.** (1) New tests that start servers made the existing log-capture test fail 16 runs in 20 in parallel (tracing caches
+whether an event has a listener for the whole process); server tests now take one test lock. (2) A mutation survived because my bound
+test could not tell the bound from a timeout that closes any silent connection: make the quantity under test the only thing that can
+close or fail. (3) Do not start the launcher or touch cargo while a mutation run holds the shared target folder; run the final gate in a
+separate `CARGO_TARGET_DIR` while the user's apps are running (the running engine locks `target\debug\gx-render-worker.exe`).
+
+Limits named: see `docs/evidence/2.22/README.md` (an MCP request body that stalls, MCP writes, Windows named pipes, 4 GiB held in memory per
+transfer, a 3 s stop limit).
+
+## 2026-11-18 — "Engine not connected" in Playout, the Editor and the asset loader: three causes found and two fixed (Claude)
+
+The user reported Playout, the other modules and the asset loader all showing the engine as not connected. Nothing from GrapiX was
+running (no engine, no shell, nothing on 4400/4401). Reproduced end to end with `npm run shells`, which had never worked on this path:
+
+1. **The launcher passed the package folder unquoted.** Since 5.10 `tools/launch-shells.mjs` hands the engine
+   `--package-dir <absolute path>` through the Windows shell; this repository's path has spaces, so the engine read `KK\Personal` as an
+   unknown argument and exited 2. Fixed: `tools/shell-args.mjs` (`quoteForCmd`, `shellArguments`), used by the launcher; tests in
+   `tools/tests/shell-args.test.mjs` (a real child process with a spaced path, and a guard showing the unquoted line really splits).
+2. **`tauri dev` ran the Editor for Playout.** Both `tauri dev --config <shell>/tauri.conf.json` processes find the Editor's app folder
+   first, so the "Playout" leg ran `gx-editor.exe`, two of them fought over that file ("Access is denied", exit 101) and the launcher
+   tore everything down, engine included. Fixed: the launcher now builds the engine and both shells in one `cargo build`, starts the
+   engine, waits for it, then runs `target\debug\gx-editor.exe` and `gx-playout.exe` directly (each embeds its web files); the
+   `npm run playout` script is now `cargo run -p gx-playout-shell`. A test pins both.
+3. **A stale recovery journal.** `C:\Users\CG\AppData\Roaming\GrapiX\GrapiX\data\render-engine\recovery.json` was schema 1 (3 Oct,
+   two demo scenes) and the engine refuses a schema it does not know ("this worker supports 3"), so it exited 1. **Moved aside, not
+   deleted:** `recovery.json.schema1-20261003.bak` in the same folder. Not fixed in code: the engine's message does not say what to do
+   (open: say "move or delete this file", or archive it by name on its own, which is a decision about not silently dropping state).
+
+Verified: `npm run shells` on the final tree built (1 m 05 s), started the engine (4400, 4401), then both shells; netstat showed the
+Playout shell's established connection to 4400 within seconds. The Editor connects on demand: its asset path was shown separately with
+`gx-mock-editor` publishing a scene to the live engine (revision 1) and the Playout shell's own `connect` through
+`live_engine.rs`. Not clicked through: the Editor's own asset-loader UI. Playout attaches once at launch and does not retry, so it must
+be opened after the engine (the launcher does that).
+
 ## 2026-11-18 — 2.21 done: one bind policy for every listener; a sink race found (Claude)
 
 **A defect found, not fixed (proposed row 2.25).** The first gate run for this row failed one conformance check, "no log file has a gap in

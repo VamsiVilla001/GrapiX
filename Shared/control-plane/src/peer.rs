@@ -56,6 +56,13 @@ pub trait EnginePeer {
     /// Collect events emitted since the last drain.
     fn drain_events(&mut self) -> Vec<EngineEvent>;
 
+    /// The transport has finished with the reply to a request that asked the
+    /// engine to stop (2.22): `delivered` is whether it was written and flushed
+    /// to the client. A peer that owns a process to end waits for this, with a
+    /// limit, instead of guessing how long a write takes. Nothing to tell, by
+    /// default.
+    fn stop_reply_delivered(&mut self, _delivered: bool) {}
+
     /// Convenience: current status via the protocol, as a client would.
     fn status(&mut self) -> Option<EngineStatus> {
         match self.handle(ClientRequest::Status) {

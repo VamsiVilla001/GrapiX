@@ -1,0 +1,332 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 8406,
+    "output_tokens": 0,
+    "state_tokens": 941,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics (Rust, Windows first). An engine process listens on a control plane (TCP, framed JSON, sequenced requests, one thread per connection, tokens verified once per connection) and an asset plane (TCP, scene packages and fonts, one thread per connection). Two MCP servers can listen on HTTP (hyper, one task per connection). The shells (Editor, Playout) keep a control connection open for the life of the window and poll the engine; the engine is a live broadcast graphics renderer, so a stalled or hostile connection must never be able to starve the frame path.",
+    "row": "2.22 (from a layering audit): every listener sets read and write timeouts, caps its connections and bounds a frame before authentication; the control server evicts acknowledgements it can no longer be asked to repeat; accepted control streams are low-latency; an asset transfer is bounded in total as it arrives, not after; a stalled peer is dropped, shown by a test for each plane (control, asset, MCP HTTP); the stop path leaves when the transport has flushed the reply, not after a 250 ms sleep.",
+    "facts": [
+      "Control plane: serve() accepts forever and spawns one thread per connection with no cap. Reads use read_exact with no timeout, so a client that connects and sends nothing, or sends half a frame, holds a thread for ever. Writes have no timeout.",
+      "Control frames are bounded at 1 MiB (MAX_FRAME_BYTES) after the 4-byte length, but the bound is the same before and after authentication. A protected listener (a token is configured) allocates up to 1 MiB for a frame from a peer that has not authenticated.",
+      "Each connection keeps a HashMap of the encoded acknowledgement for every request it ever admitted (invariant 33: a duplicate sequence number must get its original reply without re-running the request). It is never trimmed. The shipped Client never retransmits: it sends one request, waits up to REQUEST_TIMEOUT for the reply, and on a failure reconnects, which starts a new connection with sequence 0. So no shipped peer ever asks for an old acknowledgement; the map only grows.",
+      "The client sets TCP_NODELAY (set_low_latency) on its own stream. The server does not set it on accepted streams, so small replies can wait for Nagle and delayed ACK on the engine to client direction.",
+      "Asset plane (read in the code): one thread per connection, no cap, no read or write timeout, and a stalled connection ends only when the peer closes it. A frame is bounded at 64 MiB (MAX_PUBLISH_FRAME_BYTES) and refused before it is allocated, but nothing bounds the total a connection sends over many frames. In the transfer dialect a Begin names any u32 number of chunks, each Chunk request appends its bytes to an in-memory Vec until the last chunk, and only then is the content hash verified: there is no byte cap per transfer, so one connection can make the engine hold (chunk count) times (up to 64 MiB) in memory before anything is checked. MAX_PACKAGE_BYTES (4 GiB) is checked against the sizes a package manifest declares, not against bytes as they arrive.",
+      "MCP HTTP server (read in the code): each accepted socket is served by hyper http1::Builder::new() with no timer configured, so no header or body timeout is in force; no connection cap and no body size limit are configured by this code; a connection that sends nothing, or one byte at a time, is held until the peer closes or the process ends.",
+      "Stop request (row 2.19): the engine hands a stop reply back to the control transport, which writes it; the worker meanwhile sleeps a fixed 250 ms (STOP_REPLY_GRACE) and then ends the process. A reply that takes longer than 250 ms to leave is lost, and on a fast machine the process waits 250 ms for nothing.",
+      "A client that is connected and authenticated and then idle is normal: the shells keep the connection for the life of the window. The protocol has no ping or keepalive message. Adding one is a wire change (a protocol version bump).",
+      "Loopback only until row 2.21 (done) lets the control plane leave it with a token; a LAN engine will exist, so an unauthenticated peer on the network can reach the control plane port."
+    ]
+  },
+  "questions": {
+    "idle": {
+      "type": "choice",
+      "instructions": "What should the control plane do about a connection that sends nothing?",
+      "criteria": {
+        "deadlines_not_idle": "A: deadlines, not an idle timeout. A connection that has not authenticated (or sent its first frame on an unprotected listener) within a short deadline (about 10 s) is dropped; once a frame has begun, the rest must arrive within a short deadline (about 10 s); a write that does not complete within a short deadline drops the connection. An authenticated connection that is simply quiet is left alone, because shells keep one open for the life of the window.",
+        "idle_timeout": "B: an idle timeout on every connection (for example 5 minutes), and clients reconnect when it fires.",
+        "keepalive_protocol": "C: add a ping message to the protocol (a version bump) and drop any connection that neither sends a request nor answers a ping within a minute.",
+        "tcp_keepalive_only": "D: turn on TCP keepalive only and no application deadlines."
+      }
+    },
+    "cap": {
+      "type": "choice",
+      "instructions": "How should connections be capped?",
+      "criteria": {
+        "per_listener_total": "A: one total cap per listener (control 32, asset 16, MCP HTTP 16); a connection over the cap is closed at once with a log record naming the cap, and the listener keeps accepting.",
+        "per_peer_and_total": "B: a total cap per listener plus a lower cap per peer address.",
+        "backlog_only": "C: no cap in the code; rely on the operating system backlog and the timeouts."
+      }
+    },
+    "ack": {
+      "type": "choice",
+      "instructions": "How should retained acknowledgements be bounded?",
+      "criteria": {
+        "window_of_recent": "A: keep the last 64 acknowledgements per connection. A duplicate inside the window gets its original reply; a duplicate older than the window closes the connection with a named error (retransmission window passed). The window is a named constant and a test shows the 65th request still works and the 1st can no longer be repeated.",
+        "bytes_budget": "B: keep acknowledgements up to a byte budget (for example 256 KiB) and evict the oldest.",
+        "drop_duplicates_support": "C: stop retaining acknowledgements; a duplicate sequence number closes the connection."
+      }
+    },
+    "preauth": {
+      "type": "choice",
+      "instructions": "What frame size should an unauthenticated peer be allowed on a protected control listener?",
+      "criteria": {
+        "small_until_authenticated": "A: a small bound (4 KiB, enough for an authenticate request) until the connection has authenticated, then the usual 1 MiB; a larger declared length is refused by name before any buffer is allocated.",
+        "keep_one_mib": "B: keep 1 MiB for everyone."
+      }
+    },
+    "stop_flush": {
+      "type": "choice",
+      "instructions": "How should the stop path learn that the reply has left?",
+      "criteria": {
+        "flush_signal_with_deadline": "A: the stop request handed to the engine carries a one-shot flush signal that the control transport fires after it has written and flushed the reply (or failed to); the worker waits for that signal with a bounded fallback (a few seconds, so a stalled socket cannot hold the engine up) and then stops in order. The 250 ms sleep goes.",
+        "shorter_sleep": "B: keep a fixed sleep and shorten it.",
+        "close_wait": "C: the worker waits for the client to close the connection."
+      }
+    },
+    "asset_total": {
+      "type": "choice",
+      "instructions": "How should an asset transfer be bounded in total?",
+      "criteria": {
+        "running_count": "A: a Begin that declares more chunks than a fixed per-transfer maximum is refused by name (the maximum follows from a per-transfer byte cap and the 64 KiB chunk size); the transfer keeps a running count of the bytes it has accepted and refuses, by name, the chunk that would take it past the cap, before appending it; and a connection may carry a bounded number of transfers and bytes in total.",
+        "spill_to_disk": "B: keep the in-memory accumulation but write chunks to a temporary file once they pass a threshold, bounding memory and leaving the total to the store's quota.",
+        "check_after": "C: leave it as it is and rely on the hash check when the last chunk arrives."
+      }
+    },
+    "nodelay": {
+      "type": "choice",
+      "instructions": "Where should accepted streams be made low-latency?",
+      "criteria": {
+        "at_accept_all_listeners": "A: set TCP_NODELAY on every accepted TCP stream in the control server, the asset servers and the MCP HTTP server, in one helper next to the timeouts, and show it in a test.",
+        "control_only": "B: only on the control plane, where the latency matters."
+      }
+    },
+    "safest": {
+      "type": "choice",
+      "instructions": "Which idle policy best protects a live broadcast engine from a stalled or hostile peer without dropping a legitimate quiet shell?",
+      "criteria": {
+        "deadlines_not_idle": "A: deadlines on the first frame and on a started frame, none on a quiet authenticated connection.",
+        "idle_timeout": "B: a 5 minute idle timeout on every connection.",
+        "keepalive_protocol": "C: a ping message and a one minute liveness deadline."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "idle",
+      "jev": "deadlines_not_idle",
+      "laya": "idle_timeout",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "deadlines_not_idle",
+        "confidence": 1,
+        "probabilities": {
+          "deadlines_not_idle": 1,
+          "idle_timeout": 0,
+          "keepalive_protocol": 0,
+          "tcp_keepalive_only": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "idle_timeout",
+        "probabilities": {
+          "deadlines_not_idle": 0.3943,
+          "idle_timeout": 0.4306,
+          "keepalive_protocol": 0.06,
+          "tcp_keepalive_only": 0.1152
+        },
+        "confidence": 0.1723,
+        "answer_confidence": 0.4306,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "cap",
+      "jev": "per_listener_total",
+      "laya": "per_listener_total",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "per_listener_total",
+        "confidence": 0.91,
+        "probabilities": {
+          "per_listener_total": 0.94,
+          "per_peer_and_total": 0.05,
+          "backlog_only": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "per_listener_total",
+        "probabilities": {
+          "per_listener_total": 0.4151,
+          "per_peer_and_total": 0.2382,
+          "backlog_only": 0.3467
+        },
+        "confidence": 0.0224,
+        "answer_confidence": 0.4151,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "ack",
+      "jev": "window_of_recent",
+      "laya": "drop_duplicates_support",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "window_of_recent",
+        "confidence": 0.89,
+        "probabilities": {
+          "window_of_recent": 0.93,
+          "bytes_budget": 0.04,
+          "drop_duplicates_support": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "drop_duplicates_support",
+        "probabilities": {
+          "window_of_recent": 0.006,
+          "bytes_budget": 0.0059,
+          "drop_duplicates_support": 0.9881
+        },
+        "confidence": 0.9338,
+        "answer_confidence": 0.9881,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "preauth",
+      "jev": "small_until_authenticated",
+      "laya": "small_until_authenticated",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "small_until_authenticated",
+        "confidence": 0.92,
+        "probabilities": {
+          "small_until_authenticated": 0.96,
+          "keep_one_mib": 0.04
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "small_until_authenticated",
+        "probabilities": {
+          "small_until_authenticated": 0.7316,
+          "keep_one_mib": 0.2684
+        },
+        "confidence": 0.1609,
+        "answer_confidence": 0.7316,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stop_flush",
+      "jev": "flush_signal_with_deadline",
+      "laya": "shorter_sleep",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "flush_signal_with_deadline",
+        "confidence": 1,
+        "probabilities": {
+          "flush_signal_with_deadline": 1,
+          "shorter_sleep": 0,
+          "close_wait": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "shorter_sleep",
+        "probabilities": {
+          "flush_signal_with_deadline": 0.01,
+          "shorter_sleep": 0.9671,
+          "close_wait": 0.0229
+        },
+        "confidence": 0.8498,
+        "answer_confidence": 0.9671,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "asset_total",
+      "jev": "running_count",
+      "laya": "spill_to_disk",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "running_count",
+        "confidence": 1,
+        "probabilities": {
+          "running_count": 1,
+          "spill_to_disk": 0,
+          "check_after": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "spill_to_disk",
+        "probabilities": {
+          "running_count": 0.1348,
+          "spill_to_disk": 0.6588,
+          "check_after": 0.2063
+        },
+        "confidence": 0.2074,
+        "answer_confidence": 0.6588,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "nodelay",
+      "jev": "at_accept_all_listeners",
+      "laya": "control_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "at_accept_all_listeners",
+        "confidence": 0.32,
+        "probabilities": {
+          "at_accept_all_listeners": 0.66,
+          "control_only": 0.34
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "control_only",
+        "probabilities": {
+          "at_accept_all_listeners": 0.4332,
+          "control_only": 0.5668
+        },
+        "confidence": 0.0129,
+        "answer_confidence": 0.5668,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "safest",
+      "jev": "deadlines_not_idle",
+      "laya": "idle_timeout",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "deadlines_not_idle",
+        "confidence": 0.66,
+        "probabilities": {
+          "deadlines_not_idle": 0.77,
+          "idle_timeout": 0.01,
+          "keepalive_protocol": 0.22
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "idle_timeout",
+        "probabilities": {
+          "deadlines_not_idle": 0.3077,
+          "idle_timeout": 0.5728,
+          "keepalive_protocol": 0.1195
+        },
+        "confidence": 0.1483,
+        "answer_confidence": 0.5728,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

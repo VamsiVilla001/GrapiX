@@ -34,6 +34,7 @@ use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gx_contracts::mcp::{ToolEffect, TOOL_SCHEMA_VERSION};
 use gx_contracts::{Refusal, StructuredRefusal};
@@ -287,6 +288,53 @@ pub async fn serve_http_listener(
     listener: tokio::net::TcpListener,
     shutdown: CancellationToken,
 ) -> std::io::Result<()> {
+    serve_http_listener_within(service, listener, shutdown, HttpLimits::default()).await
+}
+
+/// What the MCP HTTP transport holds every connection to (2.22). A connection
+/// that sends nothing, or a request head that begins and stops, costs a task for
+/// `header_read_timeout` and no longer; the listener holds at most
+/// `max_connections` and closes one more at once; every accepted stream is
+/// low-latency.
+///
+/// Not bounded here, and named: a request body that begins and stops. The
+/// service reads it without a deadline of its own, so a peer that sends complete
+/// headers and then stalls holds its task until it closes (see 2.22's limits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpLimits {
+    pub max_connections: usize,
+    /// How long a connection has to send a whole request head, from the moment
+    /// it waits for one: when it is new, and again after each response on a
+    /// connection kept alive.
+    pub header_read_timeout: Duration,
+}
+
+impl Default for HttpLimits {
+    fn default() -> Self {
+        Self {
+            max_connections: 16,
+            header_read_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+/// Apply the per-stream limits to an accepted stream. Returns what could not be
+/// applied, by name.
+fn configure_http_stream(stream: &tokio::net::TcpStream) -> Vec<String> {
+    let mut problems = Vec::new();
+    if let Err(error) = stream.set_nodelay(true) {
+        problems.push(format!("low latency: {error}"));
+    }
+    problems
+}
+
+/// [`serve_http_listener`] under explicit limits.
+pub async fn serve_http_listener_within(
+    service: McpService,
+    listener: tokio::net::TcpListener,
+    shutdown: CancellationToken,
+    limits: HttpLimits,
+) -> std::io::Result<()> {
     let local = listener.local_addr()?;
     check_http_listen(local)?;
     let config = StreamableHttpServerConfig::default()
@@ -301,15 +349,32 @@ pub async fn serve_http_listener(
         Arc::new(NeverSessionManager::default()),
         config,
     );
+    let places = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
     loop {
         let (stream, _) = tokio::select! {
             accepted = listener.accept() => accepted?,
             () = shutdown.cancelled() => return Ok(()),
         };
+        // A connection over the cap is closed at once (dropped), and the listener
+        // keeps accepting. The place is given back when its task ends.
+        let Ok(place) = Arc::clone(&places).try_acquire_owned() else {
+            tracing::warn!(
+                event = "mcp.connection_refused",
+                cap = limits.max_connections,
+                reason = "the listener is holding its most connections",
+            );
+            continue;
+        };
+        for problem in configure_http_stream(&stream) {
+            tracing::warn!(event = "mcp.limits_not_applied", detail = problem.as_str());
+        }
         let connection = hyper_util::service::TowerToHyperService::new(http.clone());
         let shutdown = shutdown.clone();
         tokio::spawn(async move {
+            let _place = place;
             let serving = hyper::server::conn::http1::Builder::new()
+                .timer(hyper_util::rt::TokioTimer::new())
+                .header_read_timeout(limits.header_read_timeout)
                 .serve_connection(hyper_util::rt::TokioIo::new(stream), connection);
             tokio::select! {
                 _ = serving => {}
@@ -601,6 +666,134 @@ mod tests {
                 "{port}: {refused}"
             );
         }
+    }
+
+    // --- 2.22: a stalled peer costs a bounded task for a bounded time ----------------
+
+    fn serve_within(
+        limits: HttpLimits,
+    ) -> (SocketAddr, tokio::runtime::Runtime, CancellationToken) {
+        let runtime = runtime().unwrap();
+        let (service, _jobs) = McpService::pair();
+        let listener = runtime
+            .block_on(tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)))
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = CancellationToken::new();
+        runtime.spawn(serve_http_listener_within(
+            service,
+            listener,
+            shutdown.clone(),
+            limits,
+        ));
+        (address, runtime, shutdown)
+    }
+
+    /// How long until the server closes `stream`, or `None` if it is still open
+    /// after `limit`. Anything it sends meanwhile is read and thrown away.
+    fn closed_after(stream: &mut std::net::TcpStream, limit: Duration) -> Option<Duration> {
+        use std::io::Read as _;
+        let started = std::time::Instant::now();
+        let mut sink = [0u8; 256];
+        while started.elapsed() < limit {
+            let left = limit
+                .saturating_sub(started.elapsed())
+                .max(Duration::from_millis(1));
+            stream.set_read_timeout(Some(left)).unwrap();
+            match stream.read(&mut sink) {
+                Ok(0) => return Some(started.elapsed()),
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return None
+                }
+                Err(_) => return Some(started.elapsed()),
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_connection_that_sends_nothing_is_dropped_at_the_header_deadline() {
+        let (address, _runtime, shutdown) = serve_within(HttpLimits {
+            max_connections: 4,
+            header_read_timeout: Duration::from_millis(400),
+        });
+        let mut silent = std::net::TcpStream::connect(address).unwrap();
+        let took = closed_after(&mut silent, Duration::from_secs(5))
+            .expect("a silent connection was still held after 5 s");
+        assert!(
+            took >= Duration::from_millis(300) && took < Duration::from_secs(3),
+            "dropped after {took:?}, deadline 400 ms"
+        );
+        shutdown.cancel();
+    }
+
+    #[test]
+    fn a_request_head_that_begins_and_stalls_is_dropped_at_the_header_deadline() {
+        use std::io::Write as _;
+        let (address, _runtime, shutdown) = serve_within(HttpLimits {
+            max_connections: 4,
+            header_read_timeout: Duration::from_millis(400),
+        });
+        let mut slow = std::net::TcpStream::connect(address).unwrap();
+        slow.write_all(b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+            .unwrap();
+        let took = closed_after(&mut slow, Duration::from_secs(5))
+            .expect("a head that stalled was still held after 5 s");
+        assert!(
+            took >= Duration::from_millis(300) && took < Duration::from_secs(3),
+            "dropped after {took:?}, deadline 400 ms"
+        );
+        shutdown.cancel();
+    }
+
+    #[test]
+    fn a_connection_over_the_cap_is_closed_at_once_and_a_place_is_given_back() {
+        let (address, _runtime, shutdown) = serve_within(HttpLimits {
+            max_connections: 2,
+            header_read_timeout: Duration::from_secs(30),
+        });
+        let first = std::net::TcpStream::connect(address).unwrap();
+        let _second = std::net::TcpStream::connect(address).unwrap();
+        // Let the server take both places before the third arrives.
+        std::thread::sleep(Duration::from_millis(300));
+        let mut third = std::net::TcpStream::connect(address).unwrap();
+        let took = closed_after(&mut third, Duration::from_secs(3))
+            .expect("a connection over the cap was held");
+        assert!(
+            took < Duration::from_secs(1),
+            "closed after {took:?}, not at once"
+        );
+
+        drop(first);
+        let started = std::time::Instant::now();
+        let mut held = false;
+        while started.elapsed() < Duration::from_secs(5) && !held {
+            let mut again = std::net::TcpStream::connect(address).unwrap();
+            held = closed_after(&mut again, Duration::from_millis(500)).is_none();
+        }
+        assert!(held, "a place was never given back");
+        shutdown.cancel();
+    }
+
+    #[test]
+    fn an_accepted_stream_is_low_latency() {
+        let runtime = runtime().unwrap();
+        runtime.block_on(async {
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let address = listener.local_addr().unwrap();
+            let _client = tokio::net::TcpStream::connect(address).await.unwrap();
+            let (accepted, _) = listener.accept().await.unwrap();
+            assert!(configure_http_stream(&accepted).is_empty());
+            assert!(accepted.nodelay().unwrap(), "Nagle is still on");
+        });
     }
 
     #[test]

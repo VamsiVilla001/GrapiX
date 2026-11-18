@@ -144,17 +144,26 @@ fn a_stop_request_stops_the_shipped_engine_in_order_and_names_who_asked() {
         "the client gets its answer before the engine ends: {reply:?}"
     );
 
-    let exit = {
-        let deadline = Instant::now() + Duration::from_secs(20);
+    // 2.22: the engine leaves when the transport has flushed the reply, not after
+    // a fixed wait. The old wait was 250 ms from the request, so an engine that
+    // still slept it could not be gone sooner than that after the reply.
+    let replied = Instant::now();
+    let (exit, left_after) = {
+        let deadline = replied + Duration::from_secs(20);
         loop {
             if let Some(status) = engine.0.try_wait().expect("polled") {
-                break status;
+                break (status, replied.elapsed());
             }
             assert!(Instant::now() < deadline, "the engine did not end");
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(5));
         }
     };
+    eprintln!("the engine was gone {left_after:?} after the reply reached the client");
     assert_eq!(exit.code(), Some(0), "an orderly stop exits 0");
+    assert!(
+        left_after < Duration::from_millis(200),
+        "the engine took {left_after:?} to end after its reply: the fixed wait is back"
+    );
 
     let found = records(&logs.join("engine"));
     let events: Vec<&str> = found

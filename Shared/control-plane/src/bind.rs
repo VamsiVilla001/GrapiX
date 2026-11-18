@@ -10,6 +10,7 @@
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -89,6 +90,32 @@ impl ControlStream {
             Self::Local(_) => Ok(()),
             #[cfg(unix)]
             Self::Local(_) => Ok(()),
+        }
+    }
+
+    /// Bound how long one read may wait for the peer, or lift the bound with
+    /// `None` (2.22). A TCP stream and a Unix-domain socket honour it. A Windows
+    /// named pipe has no such call, so `Ok(false)` says the read stays unbounded
+    /// there: the caller must not claim a deadline it does not have.
+    pub fn set_read_deadline(&self, timeout: Option<Duration>) -> io::Result<bool> {
+        match self {
+            Self::Tcp(stream) => stream.set_read_timeout(timeout).map(|()| true),
+            #[cfg(windows)]
+            Self::Local(_) => Ok(false),
+            #[cfg(unix)]
+            Self::Local(stream) => stream.set_read_timeout(timeout).map(|()| true),
+        }
+    }
+
+    /// [`Self::set_read_deadline`] for writes: how long one write may wait for a
+    /// peer that does not read.
+    pub fn set_write_deadline(&self, timeout: Option<Duration>) -> io::Result<bool> {
+        match self {
+            Self::Tcp(stream) => stream.set_write_timeout(timeout).map(|()| true),
+            #[cfg(windows)]
+            Self::Local(_) => Ok(false),
+            #[cfg(unix)]
+            Self::Local(stream) => stream.set_write_timeout(timeout).map(|()| true),
         }
     }
 

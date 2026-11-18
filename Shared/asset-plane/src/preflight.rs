@@ -100,6 +100,10 @@ pub struct AssetTransferServer {
     listener: TcpListener,
     store: Arc<Mutex<AssetStore>>,
     metrics: AssetTransferMetrics,
+    /// What every connection is held to (2.22).
+    limits: crate::limits::AssetLimits,
+    /// Connections held now, against `limits.max_connections`.
+    connections: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl AssetTransferServer {
@@ -109,7 +113,16 @@ impl AssetTransferServer {
             listener: TcpListener::bind(addr)?,
             store,
             metrics: AssetTransferMetrics(Arc::new(AtomicU64::new(0))),
+            limits: crate::limits::AssetLimits::default(),
+            connections: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
+    }
+
+    /// Hold every connection to `limits` instead of the defaults.
+    #[must_use]
+    pub fn with_limits(mut self, limits: crate::limits::AssetLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -125,10 +138,31 @@ impl AssetTransferServer {
             for stream in self.listener.incoming() {
                 match stream {
                     Ok(stream) => {
+                        // 2.22: a connection over the cap is closed at once, and the
+                        // listener keeps accepting.
+                        let Some(permit) = crate::limits::take_permit(
+                            &self.connections,
+                            self.limits.max_connections,
+                        ) else {
+                            tracing::warn!(
+                                event = "asset.connection_refused",
+                                cap = self.limits.max_connections,
+                                reason = "the listener is holding its most connections",
+                            );
+                            continue;
+                        };
                         let store = Arc::clone(&self.store);
                         let metrics = self.metrics.clone();
+                        let limits = self.limits;
                         thread::spawn(move || {
-                            let _ = handle_connection(stream, store, metrics);
+                            let _permit = permit;
+                            for problem in crate::limits::configure(&stream, &limits) {
+                                tracing::warn!(
+                                    event = "asset.limits_not_applied",
+                                    detail = problem.as_str(),
+                                );
+                            }
+                            let _ = handle_connection(stream, store, metrics, &limits);
                         });
                     }
                     Err(error) => {
@@ -348,8 +382,9 @@ fn handle_connection(
     mut stream: TcpStream,
     store: Arc<Mutex<AssetStore>>,
     metrics: AssetTransferMetrics,
+    limits: &crate::limits::AssetLimits,
 ) -> io::Result<()> {
-    serve_transfer(&mut stream, None, &store, &metrics)
+    serve_transfer(&mut stream, None, &store, &metrics, limits)
 }
 
 /// Serve the transfer dialect on one connection, starting with `first` when a
@@ -360,20 +395,119 @@ pub(crate) fn serve_transfer<A: VerifiedAssets>(
     first: Option<AssetTransferRequest>,
     assets: &A,
     metrics: &AssetTransferMetrics,
+    limits: &crate::limits::AssetLimits,
 ) -> io::Result<()> {
     let mut active = None;
     let mut next = first;
+    // 2.22: a connection that has not sent its first request has the shorter
+    // first-frame deadline; one that has begun may pause for `idle_deadline`.
+    let mut wait = if next.is_some() {
+        limits.idle_deadline
+    } else {
+        limits.first_frame_deadline
+    };
+    let mut carried = 0u64;
     loop {
         let request = match next.take() {
             Some(request) => request,
-            None => match read_frame::<_, AssetTransferRequest>(stream)? {
-                Some(request) => request,
-                None => return Ok(()),
-            },
+            None => {
+                match read_frame_bounded::<AssetTransferRequest>(
+                    stream,
+                    wait,
+                    limits.frame_deadline,
+                )? {
+                    Some(request) => request,
+                    None => return Ok(()),
+                }
+            }
         };
+        wait = limits.idle_deadline;
+        within_limits(&request, limits, &mut carried)?;
         let reply = handle_request(request, assets, metrics, &mut active)?;
         write_frame(stream, &reply)?;
     }
+}
+
+/// Bound a transfer as it arrives (2.22), before any byte of it is held: a
+/// transfer may not declare more chunks than a package can hold, a chunk may be no
+/// larger than the chunk size, and a connection may send no more than a package's
+/// worth in all. A request over a bound ends the connection with the bound named,
+/// on record; nothing it carried is stored.
+fn within_limits(
+    request: &AssetTransferRequest,
+    limits: &crate::limits::AssetLimits,
+    carried: &mut u64,
+) -> io::Result<()> {
+    let refuse = |hash: &ContentHash, detail: String| {
+        tracing::warn!(
+            event = "asset.transfer_refused",
+            hash = hash.0.as_str(),
+            detail = detail.as_str(),
+        );
+        Err(io::Error::new(io::ErrorKind::InvalidData, detail))
+    };
+    match request {
+        AssetTransferRequest::Begin { hash, total_chunks }
+            if *total_chunks > limits.max_transfer_chunks =>
+        {
+            refuse(
+                hash,
+                format!(
+                    "a transfer declares {total_chunks} chunks; at most {} are accepted",
+                    limits.max_transfer_chunks
+                ),
+            )
+        }
+        AssetTransferRequest::Chunk { hash, bytes, .. } => {
+            if bytes.len() > ASSET_TRANSFER_CHUNK_BYTES {
+                return refuse(
+                    hash,
+                    format!(
+                        "a chunk of {} bytes; at most {ASSET_TRANSFER_CHUNK_BYTES} are accepted",
+                        bytes.len()
+                    ),
+                );
+            }
+            *carried = carried.saturating_add(bytes.len() as u64);
+            if *carried > limits.max_connection_bytes {
+                return refuse(
+                    hash,
+                    format!(
+                        "this connection has sent more than the {} bytes it may send",
+                        limits.max_connection_bytes
+                    ),
+                );
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// [`read_frame`] on a TCP stream, under the deadlines of 2.22: `first` to wait
+/// for the frame to begin, `frame` for the rest of it. The declared length is
+/// checked before the buffer for it is allocated (invariant 51).
+fn read_frame_bounded<T: for<'de> Deserialize<'de>>(
+    stream: &mut TcpStream,
+    first: std::time::Duration,
+    frame: std::time::Duration,
+) -> io::Result<Option<T>> {
+    let Some(start) = crate::limits::read_frame_start(stream, first, frame)? else {
+        return Ok(None);
+    };
+    if start.length > MAX_ASSET_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "asset frame is {} bytes; maximum is {MAX_ASSET_FRAME_BYTES}",
+                start.length
+            ),
+        ));
+    }
+    let bytes = crate::limits::read_frame_body(stream, &start, frame)?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(io::Error::other)
 }
 
 impl AssetTransferMetrics {
@@ -577,6 +711,301 @@ mod tests {
             );
         }
         let _ = fs::remove_dir_all(directory);
+    }
+
+    // --- 2.22: a stalled or hostile peer costs a bounded thread for a bounded time ---
+
+    fn quick() -> crate::limits::AssetLimits {
+        crate::limits::AssetLimits {
+            max_connections: 3,
+            first_frame_deadline: std::time::Duration::from_millis(400),
+            idle_deadline: std::time::Duration::from_millis(600),
+            frame_deadline: std::time::Duration::from_millis(400),
+            write_deadline: std::time::Duration::from_secs(2),
+            max_transfer_chunks: 4,
+            max_connection_bytes: 100 * 1024,
+        }
+    }
+
+    fn server_within(
+        limits: crate::limits::AssetLimits,
+    ) -> (SocketAddr, AssetTransferMetrics, PathBuf) {
+        let directory = temporary_directory();
+        let store = Arc::new(Mutex::new(AssetStore::at_root(directory.clone())));
+        let server =
+            AssetTransferServer::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), store)
+                .expect("asset transfer server must bind")
+                .with_limits(limits);
+        let address = server.local_addr().expect("bound listener has an address");
+        let metrics = server.metrics();
+        server.serve_in_background();
+        (address, metrics, directory)
+    }
+
+    /// How long until the server closes `stream`, or `None` if it is still open
+    /// after `limit`. Anything it sends meanwhile is read and thrown away.
+    fn closed_after(
+        stream: &mut TcpStream,
+        limit: std::time::Duration,
+    ) -> Option<std::time::Duration> {
+        let started = std::time::Instant::now();
+        let mut sink = [0u8; 256];
+        while started.elapsed() < limit {
+            let left = limit
+                .saturating_sub(started.elapsed())
+                .max(std::time::Duration::from_millis(1));
+            stream.set_read_timeout(Some(left)).expect("a read timeout");
+            match stream.read(&mut sink) {
+                Ok(0) => return Some(started.elapsed()),
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return None
+                }
+                Err(_) => return Some(started.elapsed()),
+            }
+        }
+        None
+    }
+
+    fn hash() -> ContentHash {
+        ContentHash("a".repeat(64))
+    }
+
+    #[test]
+    fn a_peer_that_sends_nothing_is_dropped_at_the_first_frame_deadline() {
+        let (address, _, directory) = server_within(quick());
+        let mut silent = TcpStream::connect(address).expect("connects");
+        let took = closed_after(&mut silent, std::time::Duration::from_secs(5))
+            .expect("a silent peer was still held after 5 s");
+        assert!(
+            took >= std::time::Duration::from_millis(300)
+                && took < std::time::Duration::from_secs(2),
+            "dropped after {took:?}, deadline 400 ms"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn a_peer_that_pauses_between_requests_is_dropped_at_the_idle_deadline() {
+        let (address, _, directory) = server_within(quick());
+        let mut peer = TcpStream::connect(address).expect("connects");
+        write_frame(
+            &mut peer,
+            &AssetTransferRequest::Preflight {
+                hashes: vec![hash()],
+            },
+        )
+        .expect("a request is sent");
+        let reply: AssetTransferReply = read_frame(&mut peer)
+            .expect("a reply reads")
+            .expect("a reply arrives");
+        assert!(
+            matches!(reply, AssetTransferReply::Preflight { .. }),
+            "{reply:?}"
+        );
+        let took = closed_after(&mut peer, std::time::Duration::from_secs(5))
+            .expect("a paused peer was still held after 5 s");
+        assert!(
+            took >= std::time::Duration::from_millis(450)
+                && took < std::time::Duration::from_secs(3),
+            "dropped after {took:?}, idle deadline 600 ms"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn a_frame_that_begins_and_stalls_is_dropped_at_the_frame_deadline() {
+        let mut limits = quick();
+        // Long enough that only the frame deadline can be what closes it.
+        limits.idle_deadline = std::time::Duration::from_secs(30);
+        let (address, _, directory) = server_within(limits);
+        let mut peer = TcpStream::connect(address).expect("connects");
+        peer.write_all(&[0, 0]).expect("half a prefix is sent");
+        let took = closed_after(&mut peer, std::time::Duration::from_secs(5))
+            .expect("a frame that stalled was still held after 5 s");
+        assert!(
+            took >= std::time::Duration::from_millis(300)
+                && took < std::time::Duration::from_secs(2),
+            "dropped after {took:?}, frame deadline 400 ms"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn a_connection_over_the_cap_is_closed_at_once_and_a_place_is_given_back() {
+        let mut limits = quick();
+        limits.max_connections = 2;
+        limits.first_frame_deadline = std::time::Duration::from_secs(30);
+        let (address, _, directory) = server_within(limits);
+        let first = TcpStream::connect(address).expect("the first connects");
+        let _second = TcpStream::connect(address).expect("the second connects");
+        // Let the server take both places before the third arrives.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let mut third = TcpStream::connect(address).expect("the socket opens");
+        let took = closed_after(&mut third, std::time::Duration::from_secs(3))
+            .expect("a connection over the cap was held");
+        assert!(
+            took < std::time::Duration::from_secs(1),
+            "closed after {took:?}, not at once"
+        );
+
+        drop(first);
+        let started = std::time::Instant::now();
+        let mut served = false;
+        while started.elapsed() < std::time::Duration::from_secs(5) && !served {
+            let mut again = TcpStream::connect(address).expect("connects");
+            write_frame(
+                &mut again,
+                &AssetTransferRequest::Preflight {
+                    hashes: vec![hash()],
+                },
+            )
+            .expect("a request is sent");
+            again
+                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .expect("a read timeout");
+            served = matches!(
+                read_frame::<_, AssetTransferReply>(&mut again),
+                Ok(Some(AssetTransferReply::Preflight { .. }))
+            );
+            if !served {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        assert!(served, "a place was never given back");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    /// A transfer is bounded as it arrives: a Begin that declares more chunks than
+    /// a package can hold, a chunk larger than the chunk size and a connection that
+    /// has sent more than it may each end the connection before a byte of the
+    /// offending request is held, and nothing is stored.
+    #[test]
+    fn a_transfer_is_bounded_as_it_arrives_not_after_it_is_assembled() {
+        // The idle deadline is long here: a connection that is closed within the
+        // wait was closed by the bound, not by a timeout that would close any
+        // silent connection (a mutation that removed the chunk-count bound passed
+        // this test while the idle deadline was 600 ms).
+        let mut limits = quick();
+        limits.idle_deadline = std::time::Duration::from_secs(30);
+        let (address, metrics, directory) = server_within(limits);
+        let closed = |peer: &mut TcpStream| {
+            closed_after(peer, std::time::Duration::from_secs(3))
+                .expect("a request over a bound was answered and the connection held")
+        };
+
+        // (a) more chunks than may be declared (the limit here is 4).
+        let mut peer = TcpStream::connect(address).expect("connects");
+        write_frame(
+            &mut peer,
+            &AssetTransferRequest::Begin {
+                hash: hash(),
+                total_chunks: 5,
+            },
+        )
+        .expect("a begin is sent");
+        assert!(closed(&mut peer) < std::time::Duration::from_secs(2));
+
+        // (b) a chunk over the chunk size.
+        let mut peer = TcpStream::connect(address).expect("connects");
+        write_frame(
+            &mut peer,
+            &AssetTransferRequest::Begin {
+                hash: hash(),
+                total_chunks: 2,
+            },
+        )
+        .expect("a begin is sent");
+        let started: AssetTransferReply = read_frame(&mut peer).expect("reads").expect("a reply");
+        assert!(
+            matches!(started, AssetTransferReply::Started { .. }),
+            "{started:?}"
+        );
+        write_frame(
+            &mut peer,
+            &AssetTransferRequest::Chunk {
+                hash: hash(),
+                index: 0,
+                bytes: vec![7; ASSET_TRANSFER_CHUNK_BYTES + 1],
+            },
+        )
+        .expect("a chunk is sent");
+        assert!(closed(&mut peer) < std::time::Duration::from_secs(2));
+        assert_eq!(
+            metrics.received_asset_bytes(),
+            0,
+            "an oversize chunk was counted as received"
+        );
+
+        // (c) more bytes in all than the connection may send (the limit here is 100 KiB).
+        let mut peer = TcpStream::connect(address).expect("connects");
+        write_frame(
+            &mut peer,
+            &AssetTransferRequest::Begin {
+                hash: hash(),
+                total_chunks: 4,
+            },
+        )
+        .expect("a begin is sent");
+        let _: Option<AssetTransferReply> = read_frame(&mut peer).expect("reads");
+        let chunk = |index| AssetTransferRequest::Chunk {
+            hash: hash(),
+            index,
+            bytes: vec![7; ASSET_TRANSFER_CHUNK_BYTES],
+        };
+        write_frame(&mut peer, &chunk(0)).expect("a chunk is sent");
+        let accepted: AssetTransferReply = read_frame(&mut peer).expect("reads").expect("a reply");
+        assert!(
+            matches!(accepted, AssetTransferReply::ChunkAccepted { .. }),
+            "{accepted:?}"
+        );
+        write_frame(&mut peer, &chunk(1)).expect("a chunk is sent");
+        assert!(closed(&mut peer) < std::time::Duration::from_secs(2));
+        assert_eq!(
+            metrics.received_asset_bytes(),
+            ASSET_TRANSFER_CHUNK_BYTES as u64,
+            "only the chunk inside the bound was admitted"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    /// The limits do not touch a transfer that stays inside them.
+    #[test]
+    fn a_transfer_inside_every_bound_is_served() {
+        let (address, _, directory) = server_within(quick());
+        let bytes = vec![3u8; ASSET_TRANSFER_CHUNK_BYTES + 10];
+        let asset = AssetBytes {
+            hash: content_hash(&bytes),
+            bytes,
+        };
+        let mut client = AssetTransferClient::connect(address).expect("connects");
+        client
+            .transfer(&asset)
+            .expect("a two-chunk transfer inside the bounds is stored");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn an_accepted_stream_is_low_latency_and_its_writes_are_bounded() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a listener");
+        let address = listener.local_addr().expect("an address");
+        let _client = TcpStream::connect(address).expect("connects");
+        let (accepted, _) = listener.accept().expect("accepts");
+        let problems = crate::limits::configure(&accepted, &quick());
+        assert!(problems.is_empty(), "{problems:?}");
+        assert!(
+            accepted.nodelay().expect("nodelay reads"),
+            "Nagle is still on"
+        );
+        assert_eq!(
+            accepted.write_timeout().expect("a write timeout reads"),
+            Some(std::time::Duration::from_secs(2))
+        );
     }
 
     #[test]

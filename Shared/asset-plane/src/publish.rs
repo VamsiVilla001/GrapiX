@@ -215,6 +215,10 @@ pub struct AssetPublishServer<P: AssetPublishPeer> {
     listener: TcpListener,
     peer: Arc<Mutex<P>>,
     metrics: crate::preflight::AssetTransferMetrics,
+    /// What every connection is held to (2.22).
+    limits: crate::limits::AssetLimits,
+    /// Connections held now, against `limits.max_connections`.
+    connections: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// The asset plane's case of the one bind policy (2.21): it verifies no
@@ -231,7 +235,16 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
             listener: TcpListener::bind(addr)?,
             peer,
             metrics: crate::preflight::AssetTransferMetrics::new(),
+            limits: crate::limits::AssetLimits::default(),
+            connections: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
+    }
+
+    /// Hold every connection to `limits` instead of the defaults.
+    #[must_use]
+    pub fn with_limits(mut self, limits: crate::limits::AssetLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -249,10 +262,31 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
             for stream in self.listener.incoming() {
                 match stream {
                     Ok(stream) => {
+                        // 2.22: a connection over the cap is closed at once, and the
+                        // listener keeps accepting.
+                        let Some(permit) = crate::limits::take_permit(
+                            &self.connections,
+                            self.limits.max_connections,
+                        ) else {
+                            tracing::warn!(
+                                event = "asset.connection_refused",
+                                cap = self.limits.max_connections,
+                                reason = "the listener is holding its most connections",
+                            );
+                            continue;
+                        };
                         let peer = Arc::clone(&self.peer);
                         let metrics = self.metrics.clone();
+                        let limits = self.limits;
                         thread::spawn(move || {
-                            let _ = handle_publish(stream, peer, &metrics);
+                            let _permit = permit;
+                            for problem in crate::limits::configure(&stream, &limits) {
+                                tracing::warn!(
+                                    event = "asset.limits_not_applied",
+                                    detail = problem.as_str(),
+                                );
+                            }
+                            let _ = handle_publish(stream, peer, &metrics, &limits);
                         });
                     }
                     Err(error) => {
@@ -531,10 +565,19 @@ fn handle_publish<P: AssetPublishPeer>(
     mut stream: TcpStream,
     peer: Arc<Mutex<P>>,
     metrics: &crate::preflight::AssetTransferMetrics,
+    limits: &crate::limits::AssetLimits,
 ) -> io::Result<()> {
-    let mut prefix = [0_u8; 4];
-    stream.read_exact(&mut prefix)?;
-    let length = u32::from_be_bytes(prefix) as usize;
+    // 2.22: the first frame has `first_frame_deadline` from accept to begin and
+    // `frame_deadline` to arrive whole.
+    let Some(start) = crate::limits::read_frame_start(
+        &mut stream,
+        limits.first_frame_deadline,
+        limits.frame_deadline,
+    )?
+    else {
+        return Ok(());
+    };
+    let length = start.length;
     let mut presented = Presented::default();
     let request = if length > MAX_PUBLISH_FRAME_BYTES {
         AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest {
@@ -543,8 +586,7 @@ fn handle_publish<P: AssetPublishPeer>(
             ),
         }))
     } else {
-        let mut bytes = vec![0; length];
-        stream.read_exact(&mut bytes)?;
+        let bytes = crate::limits::read_frame_body(&mut stream, &start, limits.frame_deadline)?;
         let (request, presenting) = parse_request(&bytes);
         presented = presenting;
         request
@@ -578,6 +620,7 @@ fn handle_publish<P: AssetPublishPeer>(
                     most_bytes: crate::package::MAX_PACKAGE_BYTES,
                 },
                 metrics,
+                limits,
             )
         }
         AssetRequest::Locality => {
@@ -909,6 +952,71 @@ mod tests {
             )
             .is_ok(),
             "loopback is allowed"
+        );
+    }
+
+    /// 2.22: the publish listener holds its connections to the same bounds: a peer
+    /// that sends nothing is dropped, and one connection too many is closed at once.
+    #[test]
+    fn the_publish_listener_drops_a_silent_peer_and_caps_its_connections() {
+        use std::io::Read as _;
+        let limits = crate::limits::AssetLimits {
+            max_connections: 2,
+            first_frame_deadline: std::time::Duration::from_millis(500),
+            ..crate::limits::AssetLimits::default()
+        };
+        let server = AssetPublishServer::bind(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            Arc::new(Mutex::new(Peer::default())),
+        )
+        .unwrap_or_else(|_| panic!("loopback binds"))
+        .with_limits(limits);
+        let address = server.local_addr().unwrap();
+        let _listener = server.serve_in_background();
+
+        let closed = |stream: &mut TcpStream, limit: std::time::Duration| {
+            let started = std::time::Instant::now();
+            stream.set_read_timeout(Some(limit)).unwrap();
+            let mut sink = [0u8; 16];
+            match stream.read(&mut sink) {
+                Ok(0) => Some(started.elapsed()),
+                Ok(_) => None,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    None
+                }
+                Err(_) => Some(started.elapsed()),
+            }
+        };
+
+        // Two held, a third closed at once.
+        let mut first = TcpStream::connect(address).unwrap();
+        let mut second = TcpStream::connect(address).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let mut third = TcpStream::connect(address).unwrap();
+        let took = closed(&mut third, std::time::Duration::from_secs(3))
+            .expect("a connection over the cap was held");
+        assert!(
+            took < std::time::Duration::from_millis(400),
+            "closed after {took:?}, not at once"
+        );
+
+        // The two held ones send nothing and are dropped at the first-frame deadline.
+        let took = closed(&mut first, std::time::Duration::from_secs(5))
+            .expect("a silent peer was still held after 5 s");
+        assert!(
+            took >= std::time::Duration::from_millis(300)
+                && took < std::time::Duration::from_secs(3),
+            "dropped after {took:?}, deadline 500 ms"
+        );
+        // The other was accepted at the same moment, so it went with it.
+        assert!(
+            closed(&mut second, std::time::Duration::from_secs(2)).is_some(),
+            "the second silent peer was still held"
         );
     }
 

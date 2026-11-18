@@ -1,0 +1,303 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 78567,
+    "output_tokens": 0,
+    "state_tokens": 7788,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.22: transport bounds",
+    "done_when": "Every listener sets read and write timeouts, caps its connections and bounds a frame before authentication; the\ncontrol server evicts acknowledgements it can no longer be asked to repeat; accepted control streams are\nlow-latency; an asset transfer is bounded in total as it arrives, not after; a stalled peer is dropped, shown by\na test for each plane (control, asset, MCP HTTP); the stop path leaves when the transport has flushed the reply,\nnot after a 250 ms sleep.",
+    "evidence": "# 2.22 \u2014 transport bounds (18 Nov 2026)\n\nThe OSI layering audit (`docs/audit/osi-layering-2026-11-17.md`, findings 5, 6 and 11) found that no listener\nbounded what a connection could cost it. The control server spawned a thread per connection with no cap and read\nwith no timeout, so a peer that connected and said nothing, or sent half a frame, held a thread for ever; it\nallocated up to 1 MiB for a frame from a peer that had not authenticated; it kept an encoded acknowledgement for\nevery request a connection ever made; its accepted streams were not low-latency (the client's were); and the stop\npath ended the process after a fixed 250 ms sleep, a guess at how long a write takes. The asset plane and the MCP\nHTTP server had the same unbounded threads and no timeouts, and the asset transfer dialect held a whole\ntransfer in memory with no byte cap until the last chunk had arrived.\n\n## Done-when\n\n> Every listener sets read and write timeouts, caps its connections and bounds a frame before authentication; the\n> control server evicts acknowledgements it can no longer be asked to repeat; accepted control streams are\n> low-latency; an asset transfer is bounded in total as it arrives, not after; a stalled peer is dropped, shown by\n> a test for each plane (control, asset, MCP HTTP); the stop path leaves when the transport has flushed the reply,\n> not after a 250 ms sleep.\n\n## Design decisions (Jev and Laya consulted first: `jev-laya-design.json`)\n\nJev's answers, with Laya's in brackets (Laya is an uncalibrated second opinion and disagreed on five of the eight):\n\n| Question | Jev | Laya |\n|---|---|---|\n| a connection that sends nothing | deadlines, no idle timeout (1.00) | idle timeout |\n| how to cap connections | a total per listener (0.91) | the same |\n| acknowledgements | a window of the latest 64 (0.89) | drop duplicate support |\n| frame size before authentication | small until authenticated (0.92) | the same |\n| the stop path | a flush signal with a limit (1.00) | a shorter sleep |\n| asset transfer bound | a running count as bytes arrive (1.00) | spill to disk |\n| low-latency streams | every listener (**0.32**) | the control plane only |\n\nThe one Jev did not settle (0.32) is my decision: **`TCP_NODELAY` on every accepted stream**, control, asset and MCP\nHTTP. The frames are small request and reply messages; the 64 KiB asset chunks are large enough that it costs\nnothing.\n\nReading the code, not guessing, corrected two facts in the questions before they were sent: the transfer dialect\nhad **no** byte cap at all (not \"checked after\"; `MAX_PACKAGE_BYTES` is checked against sizes a manifest declares),\nand the MCP HTTP connection is built with `http1::Builder::new()` and no timer, so no timeout was in force.\n\n## What was built\n\n- **Control plane** (`Shared/control-transport/src/server.rs`, `ServerLimits`, defaults in brackets):\n  - a **cap** on connections (32): one more is closed at once, `control.connection_refused` names the cap;\n  - **deadlines, not an idle timeout**: from accept to the first request (10 s), then once a frame has begun the\n    rest of it has 10 s, and a write has 10 s. An authenticated peer that is merely quiet is never dropped: the\n    shells keep one open for the life of the window and the protocol has no ping;\n  - **4 KiB before authentication**: a larger declared length on a protected listener is refused before any buffer\n    exists for it;\n  - the **latest 64 acknowledgements** are kept (invariant 33 still holds inside the window); a duplicate older\n    than that closes the connection with \"retransmission window passed\", on record as `control.window_passed`;\n  - accepted streams are **low-latency**, and a limit that could not be applied is logged by name\n    (`control.limits_not_applied`), never silently claimed.\n- **The stop path** (`EnginePeer::stop_reply_delivered`, `StopFlush`): the engine hands the process owner a one-shot\n  the control transport fires after it has written and flushed the stop reply (or failed to). The worker waits for\n  it with a 3 s limit and then stops in order; a reply that was not confirmed is a warning\n  (`engine.stop_reply_not_delivered`) before `engine.stop`. The 250 ms sleep is gone.\n- **Asset plane** (`Shared/asset-plane/src/limits.rs`, `AssetLimits`): both listeners (the publish port and the\n  transfer port) take the same cap (16), first-frame (10 s), idle (60 s), frame (30 s) and write (10 s) deadlines and\n  low-latency streams. A transfer is **bounded as it arrives**: a `Begin` that declares more than 65,536 chunks, a\n  chunk over 64 KiB, or a connection that has sent more than 4 GiB in all, ends the connection with the bound named\n  and on record (`asset.transfer_refused`) before the offending request is held; nothing it carried is stored.\n- **MCP HTTP** (`services/mcp-server/src/wire.rs`, `HttpLimits`): a 10 s request-head deadline (hyper's\n  `header_read_timeout` with a Tokio timer), a cap (16) enforced by a semaphore, and low-latency streams.\n\nNo wire or protocol-version change, no new refusal code, no download. One crate gains a dependency edge already in\nthe lock file (`gx-asset-plane` takes `tracing`).\n\n## What was run\n\n- **Control plane, real sockets** (`server.rs`, 8 new tests): a peer that sends nothing is dropped at the first-frame\n  deadline on a protected and on an unprotected listener (400 ms in the test, 10 s shipped); an authenticated peer that\n  is quiet for 1.5 s, longer than every deadline, is still served; a frame that begins and stalls is dropped at the\n  frame deadline while a quiet peer before it was not; a declared 1000-byte frame before authentication is refused\n  without being read (the deadlines were set to 8 s, so only the size could close it); a connection over the cap is\n  closed at once and its place is given back when another goes; the latest acknowledgements are repeated and the one\n  older than the window closes the connection; accepted streams are low-latency with a write deadline; and the\n  transport tells a peer once, and only for a stop, that the reply was written.\n- **Stop path** (7 new tests): the engine's one-shot reaches the process owner once and a second word is not heard;\n  a stop is recorded as soon as its reply has left (not before, and well before the limit); a reply that had already\n  left is not waited for at all (the old sleep was 250 ms); a reply never confirmed, or one the transport could not\n  write, ends the wait at the limit and is a warning on record before `engine.stop`.\n- **Asset plane** (9 new tests): a silent peer is dropped on both listeners; a peer that pauses between requests is\n  dropped at the idle deadline; a frame that begins and stalls is dropped; the cap and its give-back; a `Begin` over\n  the chunk limit, a chunk over the chunk size and a connection over its byte total each end the connection with\n  nothing stored, and only the bytes inside the bound are counted as received; a transfer inside every bound is\n  served; accepted streams are low-latency.\n- **MCP HTTP** (4 new tests): a silent connection and a request head that begins and stalls are dropped at the\n  header deadline, the cap and its give-back, low-latency streams.\n- **The real engine, with the defaults it ships with** (`services/render-engine/worker/tests/limits.rs`): a silent\n  peer on the control plane was dropped after 10.0013 s (the asset plane's silent peer was already gone by then);\n  with 32 connections held the 33rd was closed in 182 microseconds and the refusal is on record naming the cap;\n  and `stop_request.rs` now times the real engine: it was gone **98 ms** after its stop reply reached the client,\n  where the old fixed wait alone was 250 ms.\n- **Gate** (`cargo fmt --check`, `cargo clippy -D warnings`, `npm run check`): `FMT_OK`, clippy exit 0, `npm run check` exit 0 on the final tree\n  (76 Node tests, 424 Editor tests, 1055 Rust tests with 38 ignored, conformance 631 passed, 0 failed, 9 skipped). It was run in a\n  separate build folder so the user's running apps were not stopped. An earlier run failed on the log-capture test (see limit 8).\n\n## Mutations\n\n30, one at a time, each restored byte-identical, each made a named check fail (`mutations.txt`).\n**One survived its first run.** A5 (a transfer may declare any number of chunks) passed the whole asset-plane suite:\nmy test closed a connection and asserted it was closed, but the test's idle deadline (600 ms) closes any silent\nconnection, so the bound could not be told from a timeout. The test now uses a 30 s idle deadline, so only the\nbound can close the connection in time; A5 run again fails it by name, as do A6 and A7 which share it.\n\n[Condensed: 30 mutations, each restored byte-identical: C1 the control listener has no cap; C1w the same, seen by the real engine; C2 a silent peer is never dropped; C2w the same, seen by the real engine; C3 a quiet authenticated peer is dropped; C4 an unauthenticated peer may send a full-size frame; C5 a started frame has no deadline; C6 every acknowledgement is kept; C7 the window keeps one fewer than it says; C8 accepted streams are not low-latency; C9 writes have no deadline; C10 the transport never tells the engine the stop reply left; C11 the transport tells the engine the opposite; C12 a connection never gives its place back; W1 the stop waits a fixed time again; W1r the same, seen by the real engine; W2 the stop does not wait for the reply at all; W3 the engine never tells the owner the reply left; W4 the engine never keeps the flush to report on; A1 the asset listeners have no cap; A2 a silent asset peer is never dropped; A3 a started asset frame has no deadline; A4 a paused transfer connection is never dropped; A5 a transfer may declare any number of chunks; A6 a chunk may be any size; A7 a connection may send any number of bytes; A8 accepted asset streams are not low-latency; H1 the MCP header deadline is removed; H2 the MCP listener has no cap; H3 accepted MCP streams are not low-latency.]\n\n## Limits and readings\n\n1. **Windows named pipes have no deadline.** The local control endpoint (a named pipe on Windows) offers no read or\n   write timeout, so `set_read_deadline` and `set_write_deadline` return `Ok(false)` there, the server logs\n   `control.limits_not_applied`, and a silent peer on a pipe is held. A pipe is private to its owner by access\n   control; TCP is what an engine exposes.\n2. **An MCP request body is not bounded.** The head is (10 s), the cap is, but a peer that sends complete headers\n   and then stalls its body holds its task until it closes. No timeout was added to the body: it would need a body\n   wrapper, and a limit on tool calls that legitimately run long is a decision of its own.\n3. **No MCP write deadline.** hyper offers none; a peer that does not read holds its task.\n4. **\"Before authentication\" means the control plane.** The asset plane and the MCP HTTP server verify no credential\n   yet (2.24, 2.23), so their pre-authentication bound is the first-frame or header deadline and the cap.\n5. **An asset transfer over a bound ends the connection; it is not a refusal reply.** A legitimate client never\n   exceeds them (a package is at most 4 GiB, in 64 KiB chunks), so no new refusal code and no protocol bump were\n   made; the Editor would see a transport error, with the bound named in the engine's log.\n6. **A transfer is still held in memory** up to its declared chunk count (at most 4 GiB per transfer). The bound is\n   now enforced as it arrives, but 4 GiB is a large allowance: spilling to disk (Laya's choice) is a design of its\n   own for the asset store.\n7. **The stop limit is 3 s.** A client that never reads the stop reply keeps the engine waiting 3 s before it stops;\n   it does stop.\n8. **Server tests are serial.** The new limit tests failed the existing log-capture test 16 runs in 20 when run in\n   parallel with it (see below); they now take one test lock. The lock is a test arrangement, not a product\n   change.\n",
+    "code": "--- Shared/control-transport/src/server.rs (changed)\ndiff --git a/Shared/control-transport/src/server.rs b/Shared/control-transport/src/server.rs\nindex dc89b5c..3af0e30 100644\n--- a/Shared/control-transport/src/server.rs\n+++ b/Shared/control-transport/src/server.rs\n@@ -11,5 +11,6 @@ use std::net::SocketAddr;\n use std::path::Path;\n-use std::sync::atomic::{AtomicU64, Ordering};\n+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};\n use std::sync::{Arc, Mutex};\n use std::thread::{self, JoinHandle};\n+use std::time::{Duration, Instant};\n \n@@ -19,3 +20,5 @@ use gx_control_plane::bind::{\n };\n-use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};\n+use gx_control_plane::framing::{\n+    decode_body, decode_length, encode, LENGTH_PREFIX, MAX_FRAME_BYTES,\n+};\n use gx_control_plane::message::{ClientRequest, EngineReply, Envelope};\n@@ -41,2 +44,62 @@ impl std::error::Error for ServeError {}\n \n+/// What a control listener holds every connection to (2.22). A stalled or hostile\n+/// peer costs the engine a bounded thread for a bounded time. None of these\n+/// bounds touches a connection that has authenticated and is merely quiet: the\n+/// shells keep one open for the life of the window, and the protocol has no\n+/// ping, so an idle limit would drop a legitimate client.\n+#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n+pub struct ServerLimits {\n+    /// Connections held at once. One more is closed at once and logged.\n+    pub max_connections: usize,\n+    /// From accept to the first request (an unprotected listener) or to the\n+    /// request that authenticates (a protected one).\n+    pub first_frame_deadline: Duration,\n+    /// Once a frame has begun, the time it has to arrive whole.\n+    pub frame_deadline: Duration,\n+    /// How long one write may wait for a peer that does not read.\n+    pub write_deadline: Duration,\n+    /// The largest frame a peer that has not authenticated may send. A larger\n+    /// declared length is refused before any buffer is allocated.\n+    pub preauth_frame_bytes: usize,\n+    /// How many of the latest acknowledgements a connection keeps, for a\n+    /// duplicate sequence number (invariant 33). An older one cannot be repeated.\n+    pub ack_window: u64,\n+}\n+\n+impl Default for ServerLimits {\n+    fn default() -> Self {\n+        Self {\n+            max_connections: 32,\n+            first_frame_deadline: Duration::from_secs(10),\n+            frame_deadline: Duration::from_secs(10),\n+            write_deadline: Duration::from_secs(10),\n+            preauth_frame_bytes: 4 * 1024,\n+            ack_window: 64,\n+        }\n+    }\n+}\n+\n+/// A place in the connection count, given back when the connection ends.\n+struct Permit(Arc<AtomicUsize>);\n+\n+impl Drop for Permit {\n+    fn drop(&mut self) {\n+        self.0.fetch_sub(1, Ordering::SeqCst);\n+    }\n+}\n+\n+/// Take a place if fewer than `max` are held.\n+fn take_permit(held: &Arc<AtomicUsize>, max: usize) -> Option<Permit> {\n+    let mut now = held.load(Ordering::SeqCst);\n+    loop {\n+        if now >= max {\n+            return None;\n+        }\n+        match held.compare_exchange(now, now + 1, Ordering::SeqCst, Ordering::SeqCst) {\n+            Ok(_) => return Some(Permit(Arc::clone(held))),\n+            Err(seen) => now = seen,\n+        }\n+    }\n+}\n+\n /// A control-plane server bound to an endpoint, not yet accepting.\n@@ -52,2 +115,6 @@ pub struct Server<P: EnginePeer> {\n     secret: Option<String>,\n+    /// What every connection is held to (2.22).\n+    limits: ServerLimits,\n+    /// Connections held now, against `limits.max_connections`.\n+    connections: Arc<AtomicUsize>,\n }\n@@ -101,2 +168,4 @@ impl<P: EnginePeer + Send + 'static> Server<P> {\n             secret: secret.map(str::to_owned),\n+            limits: ServerLimits::default(),\n+            connections: Arc::new(AtomicUsize::new(0)),\n         })\n@@ -104,2 +173,9 @@ impl<P: EnginePeer + Send + 'static> Server<P> {\n \n+    /// Hold every connection to `limits` instead of the defaults.\n+    #[must_use]\n+    pub fn with_limits(mut self, limits: ServerLimits) -> Self {\n+        self.limits = limits;\n+        self\n+    }\n+\n     pub fn engine(&self) -> Arc<Mutex<P>> {\n@@ -111,2 +187,6 @@ impl<P: EnginePeer + Send + 'static> Server<P> {\n \n+    pub fn limits(&self) -> ServerLimits {\n+        self.limits\n+    }\n+\n     /// The TCP address actually bound. Local endpoints have no port and name\n@@ -131,5 +211,22 @@ impl<P: EnginePeer + Send + 'static> Server<P> {\n                 Ok(stream) => {\n+                    // 2.22: a connection over the cap is closed at once, and the\n+                    // listener keeps accepting. The place is given back when the\n+                    // connection's thread ends.\n+                    let Some(permit) = take_permit(&self.connections, self.limits.max_connections)\n+                    else {\n+                        tracing::warn!(\n+                            event = \"control.connection_refused\",\n+                            peer = peer_name(&stream).as_str(),\n+                            cap = self.limits.max_connections,\n+                            reason = \"the listener is holding its most connections\",\n+                        );\n+                        continue;\n+                 \n--- Shared/asset-plane/src/limits.rs (new)\n//! What the asset plane holds every connection to (build plan 2.22).\n//!\n//! A stalled or hostile peer costs the engine a bounded thread for a bounded\n//! time, as on the control plane: a connection that sends nothing is dropped at\n//! the first-frame deadline, a frame that begins must arrive whole, a peer that\n//! does not read cannot hold a write for ever, the listener holds at most so\n//! many connections, and a transfer is bounded in bytes as it arrives, not after\n//! it has been assembled and hashed.\n//!\n//! Unlike a control connection, an asset connection is request and reply for the\n//! length of one publish or one transfer (`AssetTransferClient` is scoped to\n//! one), so a quiet one is dropped too, after `idle_deadline`.\n\nuse std::io::{self, Read};\nuse std::net::TcpStream;\nuse std::sync::atomic::{AtomicUsize, Ordering};\nuse std::sync::Arc;\nuse std::time::{Duration, Instant};\n\nuse crate::package::MAX_PACKAGE_BYTES;\nuse crate::preflight::ASSET_TRANSFER_CHUNK_BYTES;\n\n/// The bounds an asset listener holds every connection to.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub struct AssetLimits {\n    /// Connections held at once. One more is closed at once and logged.\n    pub max_connections: usize,\n    /// From accept to the first frame.\n    pub first_frame_deadline: Duration,\n    /// Between one request and the next on a connection that has begun.\n    pub idle_deadline: Duration,\n    /// Once a frame has begun, the time it has to arrive whole.\n    pub frame_deadline: Duration,\n    /// How long one write may wait for a peer that does not read.\n    pub write_deadline: Duration,\n    /// The most chunks one transfer may declare. A package is at most\n    /// `MAX_PACKAGE_BYTES`, sent in chunks of `ASSET_TRANSFER_CHUNK_BYTES`.\n    pub max_transfer_chunks: u32,\n    /// The most chunk bytes one connection may send in all.\n    pub max_connection_bytes: u64,\n}\n\nimpl Default for AssetLimits {\n    fn default() -> Self {\n        let chunks = MAX_PACKAGE_BYTES / ASSET_TRANSFER_CHUNK_BYTES as u64;\n        Self {\n            max_connections: 16,\n            first_frame_deadline: Duration::from_secs(10),\n            idle_deadline: Duration::from_secs(60),\n            // A publish frame may be tens of megabytes on a slow link.\n            frame_deadline: Duration::from_secs(30),\n            write_deadline: Duration::from_secs(10),\n            max_transfer_chunks: u32::try_from(chunks).unwrap_or(u32::MAX),\n            max_connection_bytes: MAX_PACKAGE_BYTES,\n        }\n    }\n}\n\n/// A place in the connection count, given back when the connection ends.\npub(crate) struct Permit(Arc<AtomicUsize>);\n\nimpl Drop for Permit {\n    fn drop(&mut self) {\n        self.0.fetch_sub(1, Ordering::SeqCst);\n    }\n}\n\n/// Take a place if fewer than `max` are held.\npub(crate) fn take_permit(held: &Arc<AtomicUsize>, max: usize) -> Option<Permit> {\n    let mut now = held.load(Ordering::SeqCst);\n    loop {\n        if now >= max {\n            return None;\n        }\n        match held.compare_exchange(now, now + 1, Ordering::SeqCst, Ordering::SeqCst) {\n            Ok(_) => return Some(Permit(Arc::clone(held))),\n            Err(seen) => now = seen,\n        }\n    }\n}\n\n/// Apply the per-stream limits to an accepted stream. Returns what could not be\n/// applied, by name: a limit that i\n--- services/mcp-server/src/wire.rs (changed)\ndiff --git a/services/mcp-server/src/wire.rs b/services/mcp-server/src/wire.rs\nindex 1ebcaf1..285964e 100644\n--- a/services/mcp-server/src/wire.rs\n+++ b/services/mcp-server/src/wire.rs\n@@ -36,2 +36,3 @@ use std::sync::mpsc;\n use std::sync::Arc;\n+use std::time::Duration;\n \n@@ -288,2 +289,49 @@ pub async fn serve_http_listener(\n     shutdown: CancellationToken,\n+) -> std::io::Result<()> {\n+    serve_http_listener_within(service, listener, shutdown, HttpLimits::default()).await\n+}\n+\n+/// What the MCP HTTP transport holds every connection to (2.22). A connection\n+/// that sends nothing, or a request head that begins and stops, costs a task for\n+/// `header_read_timeout` and no longer; the listener holds at most\n+/// `max_connections` and closes one more at once; every accepted stream is\n+/// low-latency.\n+///\n+/// Not bounded here, and named: a request body that begins and stops. The\n+/// service reads it without a deadline of its own, so a peer that sends complete\n+/// headers and then stalls holds its task until it closes (see 2.22's limits).\n+#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n+pub struct HttpLimits {\n+    pub max_connections: usize,\n+    /// How long a connection has to send a whole request head, from the moment\n+    /// it waits for one: when it is new, and again after each response on a\n+    /// connection kept alive.\n+    pub header_read_timeout: Duration,\n+}\n+\n+impl Default for HttpLimits {\n+    fn default() -> Self {\n+        Self {\n+            max_connections: 16,\n+            header_read_timeout: Duration::from_secs(10),\n+        }\n+    }\n+}\n+\n+/// Apply the per-stream limits to an accepted stream. Returns what could not be\n+/// applied, by name.\n+fn con\n--- services/render-engine/worker/src/main.rs (changed)\ndiff --git a/services/render-engine/worker/src/main.rs b/services/render-engine/worker/src/main.rs\nindex 8a1ac52..a2852fe 100644\n--- a/services/render-engine/worker/src/main.rs\n+++ b/services/render-engine/worker/src/main.rs\n@@ -305,8 +305,11 @@ const STOP_REQUEST_REASON: &str = \"a stop request on the control plane\";\n \n-/// How long the engine waits, after accepting a stop request, before it ends:\n-/// the reply is written by the control transport after the engine hands it\n-/// back, and the process must not end before the client has it. A reply that\n-/// takes longer than this to leave (a stalled socket) is lost, and the client\n-/// sees the connection close instead; the stop is on record either way.\n-const STOP_REPLY_GRACE: Duration = Duration::from_millis(250);\n+/// The longest the engine waits, after accepting a stop request, for the control\n+/// transport to say its reply has left (2.22): the reply is written by the\n+/// transport after the engine hands it back, and the process must not end before\n+/// the client has it. The wait ends the moment the transport says so, so a stop\n+/// that is answered at once is not held back; it is only a limit, so a peer that\n+/// does not read cannot keep the engine from stopping. A reply that did not\n+/// leave in time is lost, the client sees the connection close instead, and the\n+/// stop is on record either way, with a warning that names the reply.\n+const STOP_FLUSH_LIMIT: Duration = Duration::from_secs(3);\n \n@@ -318,3 +321,3 @@ fn "
+  },
+  "questions": {
+    "each_plane_shown": {
+      "type": "noul",
+      "instructions": "Does the evidence show, with real sockets, that a stalled peer is dropped on each of the three planes (control, asset, MCP HTTP), and a connection over the cap closed at once on each?",
+      "criteria": {
+        "true": "Yes, each plane is shown.",
+        "false": "No, a plane is not shown."
+      }
+    },
+    "meets_done_when": {
+      "type": "noul",
+      "instructions": "Is the done-when met on the readings the evidence names (deadlines rather than an idle timeout on the control plane; the asset plane and MCP having no credential to be before)?",
+      "criteria": {
+        "true": "Yes, on openly named readings.",
+        "false": "No."
+      }
+    },
+    "readings_honest": {
+      "type": "noul",
+      "instructions": "Are the places the done-when is not fully met named openly (an MCP request body that stalls, MCP writes, Windows named pipes, a transfer held in memory up to its declared chunks) rather than passed off as bounded?",
+      "criteria": {
+        "true": "Yes, each is named.",
+        "false": "No, one is hidden or claimed."
+      }
+    },
+    "stop_path_shown": {
+      "type": "noul",
+      "instructions": "Does the evidence show the stop path leaves when the transport has flushed the reply, not after a sleep, including on the real engine process, and a reply that never leaves not holding the engine for ever?",
+      "criteria": {
+        "true": "Yes, shown on the real engine and by unit tests.",
+        "false": "No."
+      }
+    },
+    "idle_rule_safe": {
+      "type": "noul",
+      "instructions": "Is leaving an authenticated but quiet control connection open (no idle timeout) a safe reading given that the first-frame, frame, write and cap bounds exist, and given that shells keep a connection for the life of the window?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, an idle bound is needed."
+      }
+    },
+    "unbounded_cost_left": {
+      "type": "noul",
+      "instructions": "Reading the code, can a single peer still cost the engine an unbounded resource that neither the code nor the limits section names (threads, memory, file handles, CPU)?",
+      "criteria": {
+        "true": "Yes, an unnamed one exists.",
+        "false": "No, or every one is named."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the mutations show the checks can fail, and is the one that survived its first run (A5, a bound that a timeout masked) reported with what was done about it?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "gate_and_race_handled": {
+      "type": "noul",
+      "instructions": "The new tests broke an existing log-capture test 16 runs in 20 in parallel (a process-wide tracing cache); is that handled openly with the cause named and the tests serialised, not hidden or excused?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "mcp_body_unbounded": "An MCP request body that stalls is not bounded.",
+        "named_pipe_unbounded": "A Windows named pipe has no deadline.",
+        "memory_per_transfer": "A transfer is held in memory up to 4 GiB.",
+        "stop_limit_3s": "A client that never reads the stop reply delays the stop by 3 s.",
+        "serial_test_lock": "The server tests are serialised by a lock."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "each_plane_shown",
+      "jev": 0.91,
+      "laya": 0.9881,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9881,
+        "confidence": 0.9881,
+        "answer_confidence": 0.9881,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "meets_done_when",
+      "jev": 0.87,
+      "laya": 0.9899,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.87
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9899,
+        "confidence": 0.9899,
+        "answer_confidence": 0.9899,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "readings_honest",
+      "jev": 0.95,
+      "laya": 0.9889,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9889,
+        "confidence": 0.9889,
+        "answer_confidence": 0.9889,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stop_path_shown",
+      "jev": 0.97,
+      "laya": 0.9872,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9872,
+        "confidence": 0.9872,
+        "answer_confidence": 0.9872,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "idle_rule_safe",
+      "jev": 0.82,
+      "laya": 0.9883,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.82
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9883,
+        "confidence": 0.9883,
+        "answer_confidence": 0.9883,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unbounded_cost_left",
+      "jev": 0.5,
+      "laya": 0.9835,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.5
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9835,
+        "confidence": 0.9835,
+        "answer_confidence": 0.9835,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.97,
+      "laya": 0.9903,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9903,
+        "confidence": 0.9903,
+        "answer_confidence": 0.9903,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "gate_and_race_handled",
+      "jev": 0.96,
+      "laya": 0.9896,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9896,
+        "confidence": 0.9896,
+        "answer_confidence": 0.9896,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "mcp_body_unbounded",
+      "laya": "none",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "mcp_body_unbounded",
+        "confidence": 0.65,
+        "probabilities": {
+          "none": 0,
+          "mcp_body_unbounded": 0.71,
+          "named_pipe_unbounded": 0.1,
+          "memory_per_transfer": 0.13,
+          "stop_limit_3s": 0.03,
+          "serial_test_lock": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "none",
+        "probabilities": {
+          "none": 0.3459,
+          "mcp_body_unbounded": 0.2059,
+          "named_pipe_unbounded": 0.0965,
+          "memory_per_transfer": 0.142,
+          "stop_limit_3s": 0.0971,
+          "serial_test_lock": 0.1126
+        },
+        "confidence": 0.0692,
+        "answer_confidence": 0.3459,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.62,
+      "laya": 0.9702,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.62
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9702,
+        "confidence": 0.9702,
+        "answer_confidence": 0.9702,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

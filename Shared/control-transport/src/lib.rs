@@ -18,7 +18,7 @@ pub mod server;
 pub use auth::{Claims, ClaimsError, Token, TokenError};
 pub use client::{Client, Reconciliation, REQUEST_TIMEOUT};
 pub use gx_control_plane::bind::Endpoint;
-pub use server::{ServeError, Server};
+pub use server::{ServeError, Server, ServerLimits};
 
 #[cfg(test)]
 mod tests {

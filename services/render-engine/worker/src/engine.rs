@@ -112,6 +112,9 @@ pub struct Engine {
     /// engine's log and exit. `None` when nothing is listening, and the engine
     /// then refuses a stop request by name instead of saying it is stopping.
     stop_signal: Option<std::sync::mpsc::Sender<StopRequest>>,
+    /// Where the transport's word about the stop reply goes (2.22): set when a
+    /// stop request was accepted, taken when the transport reports on the reply.
+    stop_flush: Option<StopFlush>,
     /// The engine's own store of verified asset bytes beside its recovery
     /// journal (5.11). The asset plane writes every asset there before this
     /// engine is handed it. `None` until a journal is attached.
@@ -195,6 +198,7 @@ impl Engine {
             asset_bytes: HashMap::new(),
             package_directory: None,
             stop_signal: None,
+            stop_flush: None,
             asset_store: None,
             dropped: BTreeMap::new(),
             revision_floors: BTreeMap::new(),
@@ -1138,11 +1142,16 @@ impl Engine {
                 what: "this engine has no process owner to stop it: it was not started by the render worker binary".to_string(),
             });
         };
+        let flushed = StopFlush::new();
         let request = StopRequest {
             correlation: gx_telemetry::corr::current(),
+            flushed: flushed.clone(),
         };
         match signal.send(request) {
-            Ok(()) => EngineReply::Stopping,
+            Ok(()) => {
+                self.stop_flush = Some(flushed);
+                EngineReply::Stopping
+            }
             Err(_) => EngineReply::Refused(Refusal::TransportFailed {
                 detail: "the engine's process owner is gone and cannot stop it".to_string(),
             }),
@@ -1151,6 +1160,12 @@ impl Engine {
 }
 
 impl EnginePeer for Engine {
+    fn stop_reply_delivered(&mut self, delivered: bool) {
+        if let Some(flush) = self.stop_flush.take() {
+            flush.deliver(delivered);
+        }
+    }
+
     fn capability(&self) -> EngineCapability {
         EngineCapability {
             protocol: gx_contracts::PROTOCOL_VERSION,
@@ -1412,11 +1427,47 @@ impl Engine {
 }
 
 /// An accepted stop request (2.19), as the process owner receives it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct StopRequest {
     /// The correlation id the request arrived under, so the engine's own stop
     /// record can be followed back to the request and the connection that sent it.
     pub correlation: Option<String>,
+    /// The control transport's word that the reply has left (2.22).
+    pub flushed: StopFlush,
+}
+
+/// The control transport's word that a stop request's reply has left: written
+/// and flushed to the client, or not written at all. The process owner waits on
+/// it, with a limit, before it ends the process, instead of sleeping for as long
+/// as a write might take (2.22).
+#[derive(Debug, Clone, Default)]
+pub struct StopFlush(std::sync::Arc<(std::sync::Mutex<Option<bool>>, std::sync::Condvar)>);
+
+impl StopFlush {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record the outcome: `true` when the reply was written and flushed.
+    pub fn deliver(&self, delivered: bool) {
+        let (slot, ready) = &*self.0;
+        *slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(delivered);
+        ready.notify_all();
+    }
+
+    /// The outcome, waiting at most `limit` for it. `None` when it did not come.
+    pub fn wait(&self, limit: std::time::Duration) -> Option<bool> {
+        let (slot, ready) = &*self.0;
+        let held = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (held, _) = ready
+            .wait_timeout_while(held, limit, |outcome| outcome.is_none())
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *held
+    }
 }
 
 /// How the GPU readback ring delivered Program (3.21), for the frame-timing
@@ -2126,13 +2177,40 @@ mod tests {
             e.handle(ClientRequest::Stop)
         };
         assert_eq!(reply, EngineReply::Stopping);
-        assert_eq!(
-            heard.try_recv().expect("the owner was told"),
-            StopRequest {
-                correlation: Some("stop-test-7".to_owned())
-            }
-        );
+        let request = heard.try_recv().expect("the owner was told");
+        assert_eq!(request.correlation.as_deref(), Some("stop-test-7"));
         assert!(heard.try_recv().is_err(), "told once");
+
+        // 2.22: the transport's word that the reply left reaches the owner, once.
+        assert_eq!(
+            request.flushed.wait(std::time::Duration::from_millis(20)),
+            None,
+            "nothing has been said about the reply yet"
+        );
+        e.stop_reply_delivered(true);
+        assert_eq!(
+            request.flushed.wait(std::time::Duration::ZERO),
+            Some(true),
+            "the owner hears that the reply left"
+        );
+        e.stop_reply_delivered(false);
+        assert_eq!(
+            request.flushed.wait(std::time::Duration::ZERO),
+            Some(true),
+            "a second word is not heard: there is one reply"
+        );
+    }
+
+    /// A reply the transport could not write is told as that.
+    #[test]
+    fn a_stop_reply_that_could_not_be_written_is_told_as_not_delivered() {
+        let mut e = engine();
+        let (signal, heard) = std::sync::mpsc::channel();
+        e.set_stop_signal(signal);
+        assert_eq!(e.handle(ClientRequest::Stop), EngineReply::Stopping);
+        let request = heard.try_recv().expect("the owner was told");
+        e.stop_reply_delivered(false);
+        assert_eq!(request.flushed.wait(std::time::Duration::ZERO), Some(false));
     }
 
     /// While a scene is on Program a stop request is refused by name, names the

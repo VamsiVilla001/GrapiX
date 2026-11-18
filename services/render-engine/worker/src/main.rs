@@ -303,12 +303,15 @@ fn record_stop(log: &SharedLog, reason: &str) {
 /// The reason a stop request writes (2.19).
 const STOP_REQUEST_REASON: &str = "a stop request on the control plane";
 
-/// How long the engine waits, after accepting a stop request, before it ends:
-/// the reply is written by the control transport after the engine hands it
-/// back, and the process must not end before the client has it. A reply that
-/// takes longer than this to leave (a stalled socket) is lost, and the client
-/// sees the connection close instead; the stop is on record either way.
-const STOP_REPLY_GRACE: Duration = Duration::from_millis(250);
+/// The longest the engine waits, after accepting a stop request, for the control
+/// transport to say its reply has left (2.22): the reply is written by the
+/// transport after the engine hands it back, and the process must not end before
+/// the client has it. The wait ends the moment the transport says so, so a stop
+/// that is answered at once is not held back; it is only a limit, so a peer that
+/// does not read cannot keep the engine from stopping. A reply that did not
+/// leave in time is lost, the client sees the connection close instead, and the
+/// stop is on record either way, with a warning that names the reply.
+const STOP_FLUSH_LIMIT: Duration = Duration::from_secs(3);
 
 /// Wait for an accepted stop request (2.19), then stop in order: let the reply
 /// go out, write `engine.stop` under the request's correlation id, finish the
@@ -316,29 +319,41 @@ const STOP_REPLY_GRACE: Duration = Duration::from_millis(250);
 fn spawn_stop_listener(log: &SharedLog, requests: Receiver<StopRequest>) {
     let log = Arc::clone(log);
     thread::spawn(move || {
-        if wait_and_record_stop(&log, &requests, STOP_REPLY_GRACE) {
+        if wait_and_record_stop(&log, &requests, STOP_FLUSH_LIMIT) {
             std::process::exit(0);
         }
     });
 }
 
-/// Wait for a stop request, give its reply `grace` to leave, then write the stop
-/// under the request's correlation id. `true` when a stop was recorded, so the
-/// caller ends the process; `false` when the engine's side of the channel went
-/// away without a request, and nothing was written.
+/// Wait for a stop request, wait (up to `limit`) for the transport to say its
+/// reply has left, then write the stop under the request's correlation id. `true`
+/// when a stop was recorded, so the caller ends the process; `false` when the
+/// engine's side of the channel went away without a request, and nothing was
+/// written.
 fn wait_and_record_stop(
     log: &SharedLog,
     requests: &Receiver<StopRequest>,
-    grace: Duration,
+    limit: Duration,
 ) -> bool {
     let Ok(request) = requests.recv() else {
         return false;
     };
-    thread::sleep(grace);
     let _correlation = request
         .correlation
         .as_deref()
         .map(gx_telemetry::corr::enter);
+    match request.flushed.wait(limit) {
+        Some(true) => {}
+        Some(false) => tracing::warn!(
+            event = "engine.stop_reply_not_delivered",
+            detail = "the transport could not write the stop reply to the client",
+        ),
+        None => tracing::warn!(
+            event = "engine.stop_reply_not_delivered",
+            detail = "the transport did not report on the stop reply",
+            limit_ms = u64::try_from(limit.as_millis()).unwrap_or(u64::MAX),
+        ),
+    }
     record_stop(log, STOP_REQUEST_REASON);
     true
 }
@@ -523,6 +538,7 @@ fn usage(problem: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gx_render_worker::engine::StopFlush;
     use tracing_subscriber::layer::SubscriberExt;
 
     /// 2.16, 2.18: a console event leaves `engine.stop` naming that event and
@@ -633,13 +649,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(directory);
     }
 
-    /// 2.19: an accepted stop request is recorded only after its reply has had
-    /// the grace to leave, under the correlation id it arrived with, and ends in
-    /// `log.stop`. A request channel that closes without a request writes nothing.
-    #[test]
-    fn a_stop_request_waits_for_its_reply_then_is_recorded_under_its_id() {
+    fn scratch_log(
+        label: &str,
+    ) -> (
+        std::path::PathBuf,
+        SharedLog,
+        impl tracing::Subscriber + Send + Sync + 'static,
+    ) {
         let directory = std::env::temp_dir().join(format!(
-            "gx-worker-stop-wait-{}-{}",
+            "gx-worker-stop-{label}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -651,7 +669,35 @@ mod tests {
         ))
         .expect("the sink starts");
         let subscriber = tracing_subscriber::registry().with(guard.layer());
-        let log: SharedLog = Arc::new(Mutex::new(Some(guard)));
+        (directory, Arc::new(Mutex::new(Some(guard))), subscriber)
+    }
+
+    fn records_in(directory: &std::path::Path) -> Vec<serde_json::Value> {
+        let file = std::fs::read_dir(directory.join("engine"))
+            .expect("the product folder exists")
+            .flatten()
+            .next()
+            .expect("one file was written")
+            .path();
+        std::fs::read_to_string(file)
+            .expect("the file reads")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("every line is JSON"))
+            .collect()
+    }
+
+    fn events_of(records: &[serde_json::Value]) -> Vec<&str> {
+        records
+            .iter()
+            .map(|record| record["event"].as_str().unwrap_or(""))
+            .collect()
+    }
+
+    /// 2.22: the stop waits for the transport's word that the reply has left, and
+    /// is written as soon as it comes, under the request's correlation id.
+    #[test]
+    fn a_stop_request_waits_for_its_reply_to_leave_then_is_recorded_under_its_id() {
+        let (directory, log, subscriber) = scratch_log("flushed");
 
         // Nobody asked: the channel closes and nothing is written.
         let (closed, never) = std::sync::mpsc::channel::<StopRequest>();
@@ -660,40 +706,114 @@ mod tests {
         assert!(log.lock().expect("lock").is_some(), "the log is untouched");
 
         let (send, requests) = std::sync::mpsc::channel();
+        let flushed = StopFlush::new();
         send.send(StopRequest {
             correlation: Some("stop-wait-9".to_owned()),
+            flushed: flushed.clone(),
         })
         .expect("sent");
-        let grace = Duration::from_millis(300);
+        let leaves_after = Duration::from_millis(300);
+        let transport = thread::spawn(move || {
+            thread::sleep(leaves_after);
+            flushed.deliver(true);
+        });
         let started = Instant::now();
         let recorded = tracing::subscriber::with_default(subscriber, || {
-            wait_and_record_stop(&log, &requests, grace)
+            wait_and_record_stop(&log, &requests, Duration::from_secs(10))
         });
+        let waited = started.elapsed();
+        transport.join().expect("the transport thread ends");
         assert!(recorded);
         assert!(
-            started.elapsed() >= grace,
-            "the stop was written {:?} after the request, before the reply's grace of {grace:?}",
-            started.elapsed()
+            waited >= leaves_after,
+            "the stop was written {waited:?} after the request, before its reply had left"
+        );
+        assert!(
+            waited < Duration::from_secs(5),
+            "the stop waited {waited:?}: it must end the wait when the reply has left"
         );
 
-        let file = std::fs::read_dir(directory.join("engine"))
-            .expect("the product folder exists")
-            .flatten()
-            .next()
-            .expect("one file was written")
-            .path();
-        let records: Vec<serde_json::Value> = std::fs::read_to_string(file)
-            .expect("the file reads")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("every line is JSON"))
-            .collect();
-        let events: Vec<&str> = records
-            .iter()
-            .map(|record| record["event"].as_str().unwrap_or(""))
-            .collect();
-        assert_eq!(events, ["log.start", "engine.stop", "log.stop"]);
+        let records = records_in(&directory);
+        assert_eq!(
+            events_of(&records),
+            ["log.start", "engine.stop", "log.stop"]
+        );
         assert_eq!(records[1]["fields"]["reason"], STOP_REQUEST_REASON);
         assert_eq!(records[1]["corr"], "stop-wait-9");
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    /// 2.22: a reply that has already left is not waited for at all. The old
+    /// fixed wait was 250 ms whatever the transport had done.
+    #[test]
+    fn a_reply_that_has_already_left_does_not_hold_the_stop_back() {
+        let (directory, log, subscriber) = scratch_log("at-once");
+        let (send, requests) = std::sync::mpsc::channel();
+        let flushed = StopFlush::new();
+        flushed.deliver(true);
+        send.send(StopRequest {
+            correlation: None,
+            flushed,
+        })
+        .expect("sent");
+        let started = Instant::now();
+        let recorded = tracing::subscriber::with_default(subscriber, || {
+            wait_and_record_stop(&log, &requests, Duration::from_secs(10))
+        });
+        let waited = started.elapsed();
+        assert!(recorded);
+        assert!(
+            waited < Duration::from_millis(150),
+            "a reply that had left was waited for {waited:?}"
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    /// 2.22: a transport that never reports (a peer that does not read) cannot
+    /// keep the engine from stopping: the limit ends the wait, and the log says the
+    /// reply was not confirmed. A reply the transport could not write says so too.
+    #[test]
+    fn a_reply_that_is_not_confirmed_ends_the_wait_at_the_limit_and_is_on_record() {
+        for (label, outcome) in [("silent", None), ("failed", Some(false))] {
+            let (directory, log, subscriber) = scratch_log(label);
+            let (send, requests) = std::sync::mpsc::channel();
+            let flushed = StopFlush::new();
+            if let Some(delivered) = outcome {
+                flushed.deliver(delivered);
+            }
+            send.send(StopRequest {
+                correlation: Some("stop-late-1".to_owned()),
+                flushed,
+            })
+            .expect("sent");
+            let limit = Duration::from_millis(400);
+            let started = Instant::now();
+            let recorded = tracing::subscriber::with_default(subscriber, || {
+                wait_and_record_stop(&log, &requests, limit)
+            });
+            let waited = started.elapsed();
+            assert!(recorded, "{label}");
+            if outcome.is_none() {
+                assert!(
+                    waited >= limit,
+                    "{label}: ended after {waited:?}, before the limit"
+                );
+            }
+            assert!(waited < Duration::from_secs(5), "{label}: {waited:?}");
+            let records = records_in(&directory);
+            assert_eq!(
+                events_of(&records),
+                [
+                    "log.start",
+                    "engine.stop_reply_not_delivered",
+                    "engine.stop",
+                    "log.stop"
+                ],
+                "{label}"
+            );
+            assert_eq!(records[1]["level"], "warn", "{label}");
+            assert_eq!(records[1]["corr"], "stop-late-1", "{label}");
+            let _ = std::fs::remove_dir_all(directory);
+        }
     }
 }

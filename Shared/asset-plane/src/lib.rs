@@ -8,6 +8,7 @@
 pub mod fonts;
 pub mod handoff;
 pub mod import;
+pub mod limits;
 pub mod package;
 pub mod preflight;
 pub mod publish;
@@ -18,6 +19,7 @@ pub use handoff::{
     DocumentPublication, DocumentPublishError, PackagePublication, PackagePublishError,
     PackagedScene,
 };
+pub use limits::AssetLimits;
 pub use preflight::{
     publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient, AssetTransferClientError,
     AssetTransferMetrics, AssetTransferReply, AssetTransferRequest, AssetTransferServer,
