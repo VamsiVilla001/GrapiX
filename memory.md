@@ -118,6 +118,12 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-18 — 2.25 done, Playout reconnects, SKWAD styling and fonts, new icons (Claude)
+
+**Resume here.** Next, one by one (user, 18 Nov): feature map against `docs/research/market-scan-2026-11-18.md` (Jev and Laya, then plan rows); live telemetry in Help in both apps; a GPU/CPU load balancer that protects Program; a compact UI and UX pass (Jev and Laya on screenshots); After Effects-style keyframes; the Figma test (file Kn05sACr8HOcZhZnx8EqAz, node 1945-12449). Agents never take or clear Program.
+
+Built: 2.25 (see evidence). Playout retries the engine every 2 s when it is down or goes away, not on a refusal, logging a repeated failure once (checked live: Playout opened first, engine started after, Playout attached by itself). Both apps run SKWAD live mode: `web/skwad.css` holds the tokens and the bundled fonts (Manrope, JetBrains Mono, Anybody, OFL, from Fontsource 5.3.0, approved), each style.css maps its variables onto them; on air is brand ember #F15A29, critical keeps #FF5F56. New icons from `docs/brand/grapix-*.svg` (Editor: title-safe frame + SKWAD star; Playout: SKWAD burst + play + on-air dot), favicons, product sheet `docs/brand/GrapiX-by-SKWAD.pdf` ("GrapiX", never all caps). Left for the UI pass: about 60 hard-coded colours (the Editor selected tool is still blue), Playout header writes GRAPIX in capitals, spacing not yet compact. Editor shell test fix: a quiet global subscriber before log capture (2 in 20 flake, predates 2.25).
+
 ## 2026-11-18 — 2.22 done: transport bounds on every listener (Claude)
 
 **Resume here.** The user asked (18 Nov) to speed up and work on the main application tasks: wire both apps' UI modules to their backend

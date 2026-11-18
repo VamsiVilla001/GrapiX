@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- GrapiX Playout: SKWAD's burst, the emblem, in ember with Playout's play triangle cut
+       through it in cream: a graphic going to air. A small cream dot is the on-air light. -->
+  <rect width="512" height="512" rx="64" fill="#1B0C10"/>
+  <g transform="translate(256 256) scale(1.42) translate(-141.73 -141.73)">
+    <polygon fill="#F15A29" points="248.03 123.83 187.54 95.91 159.62 35.42 123.82 35.42 95.9 95.91 35.41 123.83 35.41 159.63 95.9 187.55 123.82 248.04 159.62 248.04 187.54 187.55 248.03 159.63"/>
+    <polygon fill="#F3EDE4" points="118 98 118 186 194 141.73"/>
+  </g>
+  <circle cx="420" cy="92" r="26" fill="#F3EDE4"/>
+</svg>

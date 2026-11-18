@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- GrapiX Editor: the Editor's frame (now title-safe corner brackets, the frame a graphic is
+       composed in) around SKWAD's star, the sports emblem, in ember. SKWAD ink ground. -->
+  <rect width="512" height="512" rx="64" fill="#1B0C10"/>
+  <g fill="none" stroke="#F3EDE4" stroke-width="30" stroke-linecap="square">
+    <path d="M104 172V104H172"/><path d="M340 104H408V172"/>
+    <path d="M408 340V408H340"/><path d="M172 408H104V340"/>
+  </g>
+  <g transform="translate(256 256) scale(1.32) translate(-141.73 -141.73)">
+    <polygon fill="#F15A29" points="212.6 143.11 177.6 159.69 177.6 177.6 159.69 177.6 143.11 212.6 140.35 212.6 123.77 177.6 105.87 177.6 105.87 159.69 70.87 143.11 70.87 140.35 105.87 123.77 105.87 105.87 123.77 105.87 140.35 70.87 143.11 70.87 159.69 105.87 177.6 105.87 177.6 123.77 212.6 140.35 212.6 143.11"/>
+  </g>
+</svg>
