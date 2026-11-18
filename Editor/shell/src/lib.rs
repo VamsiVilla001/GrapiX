@@ -1319,6 +1319,26 @@ fn stopped(log: &mut Option<gx_telemetry::sink::LogGuard>, reason: &str) {
 
 #[cfg(test)]
 mod tests {
+    /// The tests that capture this process's log take this one at a time: a
+    /// capture that runs beside another lost records (2 runs in 20), because
+    /// `tracing` keeps its per-call-site "is anyone listening" answer for the whole
+    /// process.
+    static LOG_CAPTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A process-wide subscriber that records nothing, installed once before a
+    /// capture. With only one scoped subscriber alive, `tracing` decides whether a
+    /// call site is listened to from the thread that first reaches it; a test on
+    /// another thread then marks `editor.command` as unheard for the whole process
+    /// and the capture loses it. With a global subscriber there is never just one.
+    fn install_quiet_global_subscriber() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = tracing::dispatcher::set_global_default(tracing::Dispatch::new(
+                tracing_subscriber::registry(),
+            ));
+        });
+    }
+
     use gx_contracts::command::{CreateObject, DeclareControl, EditScene, SceneEdit};
     use gx_contracts::control::ControlField;
 
@@ -1340,6 +1360,10 @@ mod tests {
                 .unwrap();
         let subscriber = tracing_subscriber::registry().with(guard.layer());
         let mut log = Some(guard);
+        install_quiet_global_subscriber();
+        let _alone = LOG_CAPTURE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         tracing::subscriber::with_default(subscriber, || {
             tracing::info!(event = "editor.start");
             stopped(&mut log, "the window closed");
@@ -1387,6 +1411,10 @@ mod tests {
         let guard =
             gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("editor", "shell", &dir))
                 .unwrap();
+        install_quiet_global_subscriber();
+        let _alone = LOG_CAPTURE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         tracing::subscriber::with_default(tracing_subscriber::registry().with(guard.layer()), body);
         guard.finish().unwrap();
         let mut records: Vec<serde_json::Value> = Vec::new();
@@ -1733,7 +1761,17 @@ mod tests {
             gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("editor", "shell", &dir))
                 .unwrap();
         let subscriber = tracing_subscriber::registry().with(guard.layer());
+        install_quiet_global_subscriber();
+        let _alone = LOG_CAPTURE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         tracing::subscriber::with_default(subscriber, || {
+            // `tracing` caches, per call site and per process, whether anyone is
+            // listening. Another test that ran an editor command before this
+            // capture existed can have cached "nobody" for `editor.command`, and
+            // the capture then loses the record (2 runs in 20 in parallel). Ask
+            // tracing to recompute that cache now that this capture is installed.
+            tracing::callsite::rebuild_interest_cache();
             let mut workspace = Workspace::new(None);
             let opened = execute(
                 &mut workspace,

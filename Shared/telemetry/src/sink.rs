@@ -101,6 +101,11 @@ struct Shared {
     /// The last number handed out; the writer reads it at shutdown to state a
     /// loss at the very end of the file.
     issued: AtomicU64,
+    /// Held while a record takes its number and is offered to the queue
+    /// (2.25), so the queue receives records in the order of their numbers.
+    /// Without it two threads could number 48 and 49 and queue 49 first; the
+    /// writer then stated 48 lost and wrote it after.
+    order: std::sync::Mutex<()>,
 }
 
 /// The `tracing` layer that turns each event into a line of the schema and
@@ -176,6 +181,7 @@ pub fn start(config: LogConfig) -> io::Result<LogGuard> {
         pid: std::process::id(),
         started,
         issued: AtomicU64::new(0),
+        order: std::sync::Mutex::new(()),
     });
     let stem = format!(
         "{}-{}-{}",
@@ -308,7 +314,6 @@ impl JsonLayer {
         event: &str,
         mut fields: Map<String, Value>,
     ) {
-        let seq = self.shared.issued.fetch_add(1, Ordering::SeqCst) + 1;
         let mut line = Map::new();
         line.insert("ts".into(), Value::from(rfc3339_utc(SystemTime::now())));
         line.insert(
@@ -317,7 +322,6 @@ impl JsonLayer {
                 u64::try_from(self.shared.started.elapsed().as_nanos()).unwrap_or(u64::MAX),
             ),
         );
-        line.insert("seq".into(), Value::from(seq));
         line.insert("process".into(), Value::from(self.shared.process.clone()));
         line.insert("pid".into(), Value::from(self.shared.pid));
         line.insert("version".into(), Value::from(env!("CARGO_PKG_VERSION")));
@@ -340,6 +344,18 @@ impl JsonLayer {
             }
         }
         line.insert("fields".into(), Value::Object(fields));
+        // 2.25: number, render and offer under one short lock, never waiting on
+        // the queue itself (try_send), so a full queue still drops rather than
+        // blocks, and the dropped number is a gap the writer states.
+        let _in_order = self
+            .shared
+            .order
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let seq = self.shared.issued.fetch_add(1, Ordering::SeqCst) + 1;
+        line.insert("seq".into(), Value::from(seq));
+        #[cfg(test)]
+        tests::between_number_and_queue(seq);
         let json = Value::Object(line).to_string();
         match self.sender.try_send(Msg::Line(Line { seq, json })) {
             Ok(()) | Err(TrySendError::Disconnected(_)) => {}
@@ -1127,6 +1143,125 @@ mod tests {
         assert!(plain["event"].as_str().unwrap().ends_with(".message"));
         assert_eq!(plain["fields"]["message"], "a dependency's plain message");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A pause a test can put between a record taking its number and being
+    /// queued: the window in which the 2.25 race happened.
+    static PAUSE_AT: std::sync::Mutex<Option<(u64, std::sync::mpsc::Receiver<()>)>> =
+        std::sync::Mutex::new(None);
+
+    pub(super) fn between_number_and_queue(seq: u64) {
+        let waiting = {
+            let mut slot = PAUSE_AT
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match slot.as_ref() {
+                Some((at, _)) if *at == seq => slot.take().map(|(_, release)| release),
+                _ => None,
+            }
+        };
+        if let Some(release) = waiting {
+            let _ = release.recv_timeout(Duration::from_secs(5));
+        }
+    }
+
+    /// 2.25: a record held between its number and the queue (the race's window)
+    /// does not let a later record overtake it: the file holds 1, 2, 3 in order and
+    /// no `log.lost`. Before the fix the later one was queued first, and the writer
+    /// stated the held one lost and then wrote it.
+    #[test]
+    fn a_record_held_after_its_number_is_not_overtaken_or_stated_lost() {
+        let dir = scratch("order");
+        let guard = start(LogConfig::new("engine", "worker", &dir)).unwrap();
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(guard.layer()));
+        // log.start took 1; the held record is 2.
+        let (release, held) = std::sync::mpsc::channel();
+        *PAUSE_AT.lock().unwrap() = Some((2, held));
+        let first = {
+            let dispatch = dispatch.clone();
+            std::thread::spawn(move || {
+                tracing::dispatcher::with_default(&dispatch, || {
+                    tracing::info!(event = "order.first");
+                });
+            })
+        };
+        // Let the first thread reach the pause holding number 2.
+        while PAUSE_AT.lock().unwrap().is_some() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let second = {
+            let dispatch = dispatch.clone();
+            std::thread::spawn(move || {
+                tracing::dispatcher::with_default(&dispatch, || {
+                    tracing::info!(event = "order.second");
+                });
+            })
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        release.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        drop(dispatch);
+        guard.finish().unwrap();
+        let records = lines(&dir.join("engine"));
+        assert!(
+            !records.iter().any(|r| r["event"] == "log.lost"),
+            "a written record was stated lost: {records:#?}"
+        );
+        let events: Vec<(&str, u64)> = records
+            .iter()
+            .filter(|r| r["event"].as_str().is_some_and(|e| e.starts_with("order.")))
+            .map(|r| (r["event"].as_str().unwrap(), r["seq"].as_u64().unwrap()))
+            .collect();
+        assert_eq!(
+            events,
+            [("order.first", 2), ("order.second", 3)],
+            "{records:#?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 2.25: many threads logging at once leave every number written once, in
+    /// order, and nothing stated lost when the queue has room.
+    #[test]
+    fn threads_logging_at_once_write_every_number_once_and_in_order() {
+        for round in 0..5 {
+            let dir = scratch(&format!("flood-{round}"));
+            let mut config = LogConfig::new("engine", "worker", &dir);
+            config.queue = 100_000;
+            let guard = start(config).unwrap();
+            let dispatch =
+                tracing::Dispatch::new(tracing_subscriber::registry().with(guard.layer()));
+            let threads: Vec<_> = (0..8)
+                .map(|t| {
+                    let dispatch = dispatch.clone();
+                    std::thread::spawn(move || {
+                        tracing::dispatcher::with_default(&dispatch, || {
+                            for i in 0..400u64 {
+                                tracing::info!(event = "flood", thread = t, i);
+                            }
+                        });
+                    })
+                })
+                .collect();
+            for thread in threads {
+                thread.join().unwrap();
+            }
+            drop(dispatch);
+            guard.finish().unwrap();
+            let records = lines(&dir.join("engine"));
+            assert!(
+                !records.iter().any(|r| r["event"] == "log.lost"),
+                "round {round}"
+            );
+            let seqs: Vec<u64> = records.iter().filter_map(|r| r["seq"].as_u64()).collect();
+            assert!(
+                seqs.windows(2).all(|w| w[1] == w[0] + 1),
+                "round {round}: numbers out of order"
+            );
+            assert_eq!(seqs.len() as u64, 8 * 400 + 1, "round {round}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]
