@@ -1,0 +1,147 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 2225,
+    "output_tokens": 0,
+    "state_tokens": 576,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics (Rust engine process, Tauri shells Editor and Playout, Windows first). The engine renders Program on the GPU and answers a framed-JSON control plane (TCP 4400, tokens with a role and scopes) and an asset plane (TCP 4401). Playout is the operator app (cue, take, clear). Editor is the authoring app and by invariant 4 must never be able to touch Program.",
+    "row": "2.27: a Help menu entry in both apps opens a compact live telemetry panel: a small graph per resource and, when something fails, a plain statement of what failed and what to check (for example 'GPU adapter X lost', 'readback stalled 3 frames', 'output 2 not locked'), with the log record id so the diagnostic bundle finds it. It must not be just CPU and RAM.",
+    "facts": [
+      "The engine already answers a Performance request (control plane) with a bounded snapshot: per-frame render_nanos, interval_nanos, late, drops_so_far, missed_before, totals (rendered, late, dropped, missed), mean budget ratio, device tier. No UI reads it yet. It carries nothing per GPU adapter, per output, per readback, per queue, no CPU twin load and no memory.",
+      "Playout's shell holds a control-plane client for the life of the window and polls Status; adding a Performance read is trivial there.",
+      "The Editor shell has no control-plane client. A structural guard (check-boundaries R6) fails the build if any Editor-side crate depends on gx-control-plane, gx-control-transport or gx-playout, to keep invariant 4 true by construction. The Editor reaches the engine only to publish, over the asset plane, via gx_editor::publish.",
+      "Auth: roles are Editor (scope Author), Playout (Cue, Take, Clear, ConfigureOutput, Stop) and Engine (Report). Status and Performance requests today need no scope beyond a valid token.",
+      "Precedent: status.rs clock_summary(status) returns a severity and a label decided once in the engine-side crate so Editor, Playout and any future surface cannot disagree about how alarming a state is.",
+      "An MCP server exists with a scope gate; row 8.16 (pending) wants a supervising agent to read the same live telemetry and advise operators, with no tool that changes Program.",
+      "Frame path rule: a telemetry read must never delay a Program frame; the engine's control threads are separate from the render loop.",
+      "The user wants one set of telemetry in both apps ('Help module in Editor and Playout'), detailed enough to troubleshoot exactly which component failed."
+    ]
+  },
+  "questions": {
+    "editor_route": {
+      "type": "choice",
+      "instructions": "How should the Editor get live engine telemetry without weakening invariant 4 (the Editor can never reach Program)?",
+      "criteria": {
+        "readonly_client": "A: a new small crate (a read-only telemetry client) that can only send Status and Performance requests and has no way to build a cue, take, clear or output request. The Editor crates may depend on it; R6 is amended to allow that crate and still forbid control-plane, control-transport and playout. The Editor holds a token whose role carries only a new read scope (Observe), which the engine checks, so even a modified shell could not take.",
+        "asset_plane_read": "B: add a read-only telemetry frame to the asset plane the Editor already uses to publish, and leave the control plane Editor-free.",
+        "http_endpoint": "C: the engine serves a read-only loopback HTTP JSON endpoint for telemetry (also usable by MCP and agents), with its own bind site and the one bind policy; the Editor does a plain HTTP GET.",
+        "no_editor_link": "D: the Editor's Help shows only the Editor's own process telemetry and says engine telemetry is in Playout."
+      }
+    },
+    "diagnosis_owner": {
+      "type": "choice",
+      "instructions": "Where should the failure wording and severity ('GPU adapter X lost: Program is on the CPU twin', 'readback stalled 3 frames', 'output 2 not locked') be decided?",
+      "criteria": {
+        "engine_once": "A: in the engine-side crate, once, as typed findings (id, component, severity, what failed, what to check, the log record id), sent over the wire next to the numeric series; the apps and MCP agents only render or relay them. Same pattern as clock_summary.",
+        "each_ui": "B: each app derives the wording from the raw numbers, so each can be tuned to its own audience.",
+        "agent_only": "C: only a supervising agent over MCP interprets the numbers; the UIs show graphs without wording."
+      }
+    },
+    "wire_shape": {
+      "type": "choice",
+      "instructions": "How should the extra data (per GPU adapter, readback, per output, CPU twin, memory, queues, connections) travel?",
+      "criteria": {
+        "components_list": "A: extend the Performance reply with a list of components, each with a stable id, a kind (gpu_adapter, readback, output, cpu_twin, memory, control_link, asset_link), a state (ok, degraded, failed, unknown), bounded numeric series and the findings above; unknown kinds are shown generically so a newer engine never breaks an older app. One protocol bump, one shape the UIs and the MCP tool share.",
+        "typed_fields": "B: add a fixed struct field per resource (gpu_frame_nanos, readback_nanos, output_state and so on). Simple to type, but every new resource is a protocol change.",
+        "log_scrape": "C: the apps read the engine's JSON-lines log for the numbers instead of a new reply."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "editor_route",
+      "jev": "readonly_client",
+      "laya": "no_editor_link",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "readonly_client",
+        "confidence": 0.43,
+        "probabilities": {
+          "readonly_client": 0.57,
+          "asset_plane_read": 0.26,
+          "http_endpoint": 0.14,
+          "no_editor_link": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_editor_link",
+        "probabilities": {
+          "readonly_client": 0.353,
+          "asset_plane_read": 0.2049,
+          "http_endpoint": 0.0668,
+          "no_editor_link": 0.3754
+        },
+        "confidence": 0.1048,
+        "answer_confidence": 0.3754,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "diagnosis_owner",
+      "jev": "engine_once",
+      "laya": "engine_once",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "engine_once",
+        "confidence": 1,
+        "probabilities": {
+          "engine_once": 1,
+          "each_ui": 0,
+          "agent_only": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "engine_once",
+        "probabilities": {
+          "engine_once": 0.861,
+          "each_ui": 0.0816,
+          "agent_only": 0.0573
+        },
+        "confidence": 0.5473,
+        "answer_confidence": 0.861,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "wire_shape",
+      "jev": "components_list",
+      "laya": "typed_fields",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "components_list",
+        "confidence": 1,
+        "probabilities": {
+          "components_list": 1,
+          "typed_fields": 0,
+          "log_scrape": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "typed_fields",
+        "probabilities": {
+          "components_list": 0.1306,
+          "typed_fields": 0.773,
+          "log_scrape": 0.0963
+        },
+        "confidence": 0.3717,
+        "answer_confidence": 0.773,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -5,10 +5,11 @@ probe on both platforms, run early. It decides whether the WASM fallback is
 real." The fallback in question is ADR-0001's WASM render core on WebGPU, used
 only if the engine-rendered viewport fails on latency.
 
-**This decision is not yet closed. The macOS leg has not been run**, and
-ADR-0002's concern was specifically Safari/WKWebView ("Safari 26+ — verify on
-target OS versions"). Windows uses WebView2/Chromium, which was never the
-doubtful platform. The result below therefore answers the easier half.
+**Windows only (user decisions, 8 and 19 November 2026).** GrapiX builds for
+Windows, whose webview is WebView2/Chromium, so the Windows result below is
+the whole probe: the macOS leg ADR-0002 asked for (Safari/WKWebView) is out of
+scope and was never run. The step's done-when, "Result recorded; decides the
+WASM fallback", is met by this record; marking `11.2` done is the user's call.
 
 The probe lives in `Editor/src/gpu-probe.ts` and runs at Editor startup; its
 one-line verdict goes to the activity log.
@@ -59,18 +60,3 @@ gap in the webview, not a capability gap — Chromium masks precise device
 strings unless the origin is privileged. The probe reports this as *available
 with an unnamed device* rather than as a failure, because treating it as one
 would turn a privacy measure into a platform verdict.
-
-## macOS — not run
-
-No macOS machine is available to this project yet. Until it is:
-
-- ADR-0002's checklist item "WebGPU capability probe run on both target OS
-  versions, result recorded" stays **open**.
-- Step `11.2` stays **active**, not done.
-- No claim should be made about the WASM fallback on macOS. Safari/WKWebView
-  is the platform the ADR actually doubted, so the Windows result above does
-  not generalise.
-
-To run it: build the Editor shell on macOS, launch it, and read the
-`WebGPU …` line from the activity log, or call `probeWebGpu(navigator.gpu)`
-directly. Append the result here in the same shape as the Windows table.

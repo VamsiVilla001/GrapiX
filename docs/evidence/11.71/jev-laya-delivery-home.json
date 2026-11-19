@@ -1,0 +1,84 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 995,
+    "output_tokens": 0,
+    "state_tokens": 425,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "11.73 design consult: where the Delivery tab group lives",
+    "context": "\nGrapiX Editor, authoring app for broadcast graphics. Build row 11.73 puts the right dock's panels into tab groups (a strip of tabs, one panel showing).\nRecorded layout decision of 14 Sep 2026: scene and object navigation at the left, authoring inspectors at the right, the viewport in the centre, the timeline below.\n\nMEASURED on the reference window (3862 x 2122 physical px; half-scale numbers below):\n- The right dock is 20 % of the width and 530 px tall (visible). Preview takes about 255 px of it once its image is limited, leaving about 275 px.\n- Three tab groups were put in the right dock: Inspector (Properties, Animation, Effect Controls, Text styles, Fonts), Library (Effects and Presets, Materials) and Delivery (Take page, Control contract, Bindings, Publish). Each group needs at least 120 px to show a list. Preview plus three groups needs about 615 px, so the Delivery group is below the fold and the dock scrolls.\n- The left dock is 19 % of the width and 535 px tall. Since the Scene Manager became a list it holds Scene Manager 190 px, Objects 85 px and Assets 40 px, leaving about 220 px empty.\n- The Delivery panels are used when a graphic is finished and goes to Playout (a take page's fields, the control contract, bindings, publish); an author touches them far less often than Properties or Effects.\nOptions for the Delivery group: (a) the left dock under Assets, where the free space is; (b) the right dock as a third group (the dock scrolls); (c) the right dock but Preview folded by default.\n"
+  },
+  "questions": {
+    "delivery_home": {
+      "type": "choice",
+      "instructions": "Where should the Delivery tab group (Take page, Control contract, Bindings, Publish) live?",
+      "criteria": {
+        "left_under_assets": "In the left dock under Assets, which has the free space.",
+        "right_third_group": "In the right dock as a third group, and the dock scrolls.",
+        "right_preview_folded": "In the right dock, with Preview folded by default."
+      }
+    },
+    "left_fits_decision": {
+      "type": "noul",
+      "instructions": "Is moving the Delivery panels to the left dock acceptable against the recorded decision (navigation left, authoring inspectors right), given they are project and delivery panels rather than inspectors?",
+      "criteria": {
+        "true": "Yes, acceptable.",
+        "false": "No, it breaks the decision."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "delivery_home",
+      "jev": "left_under_assets",
+      "laya": "right_preview_folded",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "left_under_assets",
+        "confidence": 0.26,
+        "probabilities": {
+          "left_under_assets": 0.51,
+          "right_third_group": 0.31,
+          "right_preview_folded": 0.18
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "right_preview_folded",
+        "probabilities": {
+          "left_under_assets": 0.065,
+          "right_third_group": 0.0768,
+          "right_preview_folded": 0.8582
+        },
+        "confidence": 0.5393,
+        "answer_confidence": 0.8582,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "left_fits_decision",
+      "jev": 0.65,
+      "laya": 0.9756,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.65
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9756,
+        "confidence": 0.9756,
+        "answer_confidence": 0.9756,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

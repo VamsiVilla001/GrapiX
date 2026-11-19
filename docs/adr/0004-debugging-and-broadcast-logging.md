@@ -103,7 +103,11 @@ engine instead writes:
   `frame.missed`), with its frame number and timing;
 - a **heartbeat** once a second (`engine.heartbeat`: frames emitted, late,
   missed, ring state, GPU and output health), so the log is continuous and a
-  quiet minute is visibly quiet rather than missing.
+  quiet minute is visibly quiet rather than missing;
+- every **load shift** (`load.shift`, 3.24): the load governor moved the level
+  non-live work is shed at, with `from`, `to`, what is `shed` and the `reason`
+  in words. Climbing is `warn` (Program was at risk), falling is `info`. The
+  telemetry panel (2.27) names this record under the `load.shedding` finding.
 
 `debug` and `trace` (every frame's span, every layer) are switched on per
 process (`GX_LOG`, as `RUST_LOG`) for deep debugging, never in a show by

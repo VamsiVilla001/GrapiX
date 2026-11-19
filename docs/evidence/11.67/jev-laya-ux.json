@@ -1,0 +1,143 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 2590,
+    "output_tokens": 0,
+    "state_tokens": 739,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics for live sport and esports, a SKWAD product. Two Windows desktop apps (Tauri, WebView2): GrapiX Editor (authoring, many panels, used for hours) and GrapiX Playout (operator surface: cue, take, clear, read in a glance during a show). Both run SKWAD live (dark) mode with Manrope, JetBrains Mono and Anybody. The user wants a clean, compact UI and UX, and says GrapiX must not be another XPression or Vizrt clone.",
+    "row": "11.67: a compact, clean UI and UX pass on both apps under SKWAD, reviewed by Jev and Laya. These reviewers see this text, not screenshots (their tools take text only); the facts below were measured or read from the running windows on 18 Nov 2026.",
+    "facts": [
+      "Both windows carry a native menu bar whose only menu is Help (Live telemetry, Export diagnostic bundle all modules, Export diagnostic bundle this module). That native row is about 30 px tall and holds one word. The Editor also has its own in-page menu row (File, Edit, Layer, Window) below it, then the header row with the wordmark, scene id and name fields, then the tool row. Playout has the native Help row, then the header with the endpoint, token and buttons.",
+      "Playout's header was 'GRAPIX PLAYOUT' in capitals (against the brand rule that the name is GrapiX); it is now 'GrapiX' in Anybody 800 at 20 px with 'Playout' beside it in the interface face. Every field label in Playout is uppercase with wide letter spacing at 11 to 12 px (CONTROL ENDPOINT, TAKE ID, CONTENT HASH, CLOCK & REFERENCE, TRANSPORT); state chips are uppercase words (WARNING, NOMINAL); the TAKE button is the only filled control and uses the brand ember.",
+      "Controls: Playout's text inputs and buttons are about 31 CSS px tall at 12 to 13 px text with 12 px padding; the Editor's tool buttons are 31 by 29 px, its text inputs 25 px tall, running text 12 to 13 px. Panels in both use 12 to 16 px gutters.",
+      "The Editor's Scene Manager panel is about 220 px wide in a narrow dock: its project dropdown, New project, New scene and Save to project buttons wrap onto three rows; the label 'Project' was clipped by the dropdown until fixed today.",
+      "Contrast: SKWAD live ink on canvas is high (ink #F2F0EB on #131210); secondary ink-3 #95908A on #1B1916 is about 5.6:1; ink-4 #6E6A63 is about 3.1:1 and is used only for disabled and faint text.",
+      "Hard-coded colours outside the SKWAD tokens were removed today (66 in the Editor, 17 in Playout); the Editor's selected tool, active tab and playhead are ember instead of blue.",
+      "Operators use Playout during a show under stress; authors use the Editor all day. The two must not blend into one stylesheet by design (an earlier decision): Playout must be unmissable, the Editor quiet."
+    ]
+  },
+  "questions": {
+    "help_home": {
+      "type": "choice",
+      "instructions": "Where should Help (telemetry, diagnostic export) live, given the native row holding one word costs about 30 px of height in both apps?",
+      "criteria": {
+        "native_only": "A: keep the native Help menu in both apps (status quo; one place, OS-standard, works even if the page is broken).",
+        "in_page_only": "B: remove the native menu bar and put Help in each app's own header or menu row (saves about 30 px, one menu surface, but it depends on the page and needs the shell to expose the diagnostic export as commands).",
+        "editor_in_page_playout_native": "C: the Editor gets Help inside its own menu row and drops the native row; Playout keeps the native one."
+      }
+    },
+    "density": {
+      "type": "choice",
+      "instructions": "What density should the apps adopt for 'clean and compact'?",
+      "criteria": {
+        "compact_28": "A: controls 28 px tall, 12 px text, 8 px gutters in the Editor; Playout keeps larger hit targets (32 px) for the operator and larger type on TAKE, CUE, CLEAR.",
+        "compact_28_both": "B: 28 px controls and 12 px text in both apps, including Playout's transport.",
+        "keep": "C: keep today's sizes and only tidy spacing."
+      }
+    },
+    "label_case": {
+      "type": "choice",
+      "instructions": "How should labels be capitalised?",
+      "criteria": {
+        "state_only_upper": "A: uppercase only for state words and chips (WARNING, FREE RUN, ON AIR) and the TAKE, CUE, CLEAR buttons; field labels and panel titles in sentence case at normal letter spacing.",
+        "all_upper": "B: keep every label uppercase with wide spacing (today's Playout).",
+        "all_sentence": "C: sentence case everywhere, including state chips and the transport buttons."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "help_home",
+      "jev": "in_page_only",
+      "laya": "native_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "in_page_only",
+        "confidence": 0.18,
+        "probabilities": {
+          "native_only": 0.18,
+          "in_page_only": 0.45,
+          "editor_in_page_playout_native": 0.37
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "native_only",
+        "probabilities": {
+          "native_only": 0.3547,
+          "in_page_only": 0.3273,
+          "editor_in_page_playout_native": 0.318
+        },
+        "confidence": 0.001,
+        "answer_confidence": 0.3547,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "density",
+      "jev": "compact_28",
+      "laya": "keep",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "compact_28",
+        "confidence": 0.43,
+        "probabilities": {
+          "compact_28": 0.62,
+          "compact_28_both": 0.05,
+          "keep": 0.33
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep",
+        "probabilities": {
+          "compact_28": 0.0928,
+          "compact_28_both": 0.3259,
+          "keep": 0.5813
+        },
+        "confidence": 0.1795,
+        "answer_confidence": 0.5813,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "label_case",
+      "jev": "state_only_upper",
+      "laya": "all_upper",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "state_only_upper",
+        "confidence": 0.49,
+        "probabilities": {
+          "state_only_upper": 0.66,
+          "all_upper": 0.32,
+          "all_sentence": 0.02
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "all_upper",
+        "probabilities": {
+          "state_only_upper": 0.3466,
+          "all_upper": 0.4143,
+          "all_sentence": 0.2391
+        },
+        "confidence": 0.022,
+        "answer_confidence": 0.4143,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -41,6 +41,6 @@ the authored colour within one quantization code value. Existing worker tests
 cover packaged glyph outlines, opacity, working-space composition and named
 refusals. Before regeneration, exactly 39,065 pixels differed, maximum channel
 delta 255; the five rate references were unchanged. No comparison threshold
-is changed. This is a Windows software-reference correction, not a Windows /
-macOS comparison or certification of the future GPU renderer (step 4.5 remains
-active).
+is changed. This is a Windows software-reference correction, not a certification of
+the future GPU renderer (the cross-OS comparison step, 4.5, was removed when
+macOS went out of scope).

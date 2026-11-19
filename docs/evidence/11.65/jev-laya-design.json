@@ -1,0 +1,145 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 1993,
+    "output_tokens": 0,
+    "state_tokens": 536,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics, Rust engine process plus two Tauri apps (Editor for authoring, Playout for the operator). Windows first. The Editor must never be able to reach Program (invariant 4) and must not import renderer internals (invariant 3); a structural check forbids any control-plane client in Editor crates (it reaches the engine only to publish, over the asset plane, TCP 4401).",
+    "row": "11.65: the Editor's Preview shows an engine-rendered frame of the active scene at the playhead, labelled Engine, within 250 ms of an edit on the reference machine, while the Three.js viewport is labelled Draft; a disconnected or refusing engine shows a named unavailable state, never a stale frame presented as current. Needed because objects with effects (blur, glow, shadow, wipes) cannot be drawn by the draft viewport at all.",
+    "facts": [
+      "The engine already has a headless render (control-plane request Render, 11.41): it renders a pinned published revision at a frame on the CPU reference rasteriser (which does handle effects, masks and clips), off Program's thread and outside the engine lock (invariant 14), returns the PNG's hash, and the asset plane serves the PNG bytes by hash. Both steps need a published revision, and Render is a control-plane request the Editor cannot send.",
+      "The asset plane already carries publish (a SceneDocument becomes an immutable, content-hashed revision) and fetch-by-hash. Both are served by one listener, one thread per connection, with limits (2.22). Editors publish deliberately; a revision per keystroke would flood the revision store.",
+      "The load governor (3.24) throttles detached renders to one at a time under load, so a preview render never competes with Program for more than one core when Program is at risk.",
+      "A scene document at 1080p with a handful of layers is a few KiB to a few hundred KiB of JSON; the prepare step (text shaping, path tessellation, effect layers) is the expensive part of a render and is cacheable by the document's content hash.",
+      "The Editor already has a draft viewport that is fast and interactive but cannot draw effects, shaped text or masks faithfully; the engine preview is the truth, the draft is the editing surface.",
+      "The market scan found Vizrt separates its preview engines from the program engine (a load-balanced Preview Server) so previews never load the on-air engine."
+    ]
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": "How should the Editor obtain an engine-rendered frame of an unsaved, edited scene?",
+      "criteria": {
+        "asset_plane_preview": "A: a new preview request on the asset plane (the channel the Editor already uses): it carries the draft SceneDocument and a frame, the engine prepares it transiently (cached by content hash, bounded), renders on the CPU reference through the same detached gate as headless renders, and returns the PNG. No revision is created and Program is untouched; the Editor still holds no control-plane client.",
+        "publish_then_render": "B: publish a revision for each edit, then render it through the control plane.",
+        "editor_local_render": "C: link the engine's CPU rasteriser into the Editor shell and render in-process.",
+        "preview_server": "D: a separate preview-server process, started beside the engine, with its own loopback listener; the Editor sends drafts to it and it renders with the same code; the on-air engine never prepares a draft."
+      }
+    },
+    "cadence": {
+      "type": "choice",
+      "instructions": "How often should the engine preview re-render while the author edits?",
+      "criteria": {
+        "latest_only": "A: coalesce: at most one render in flight and one pending; a newer edit replaces the pending one, so the preview always converges on the latest state and never queues a backlog; the frame shown is labelled with the edit it shows.",
+        "every_edit": "B: render every edit in order.",
+        "on_idle": "C: render only after the author pauses for about a second."
+      }
+    },
+    "stale": {
+      "type": "choice",
+      "instructions": "What should the preview show while a newer edit is rendering, or when the engine is unreachable?",
+      "criteria": {
+        "labelled_stale": "A: keep the last engine frame visible but clearly marked 'out of date' (dimmed, with a word) while a render is pending, and replace it with a named unavailable message when the engine is unreachable or refuses; a frame is never presented as current when it is not.",
+        "blank_while_pending": "B: blank the preview while any render is pending.",
+        "last_frame_always": "C: always show the last frame, unmarked."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "route",
+      "jev": "asset_plane_preview",
+      "laya": "asset_plane_preview",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "asset_plane_preview",
+        "confidence": 0.96,
+        "probabilities": {
+          "asset_plane_preview": 0.97,
+          "publish_then_render": 0,
+          "editor_local_render": 0,
+          "preview_server": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "asset_plane_preview",
+        "probabilities": {
+          "asset_plane_preview": 0.5326,
+          "publish_then_render": 0.0434,
+          "editor_local_render": 0.1242,
+          "preview_server": 0.2998
+        },
+        "confidence": 0.2124,
+        "answer_confidence": 0.5326,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "cadence",
+      "jev": "latest_only",
+      "laya": "latest_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "latest_only",
+        "confidence": 0.76,
+        "probabilities": {
+          "latest_only": 0.84,
+          "every_edit": 0.02,
+          "on_idle": 0.14
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "latest_only",
+        "probabilities": {
+          "latest_only": 0.5564,
+          "every_edit": 0.1574,
+          "on_idle": 0.2863
+        },
+        "confidence": 0.1123,
+        "answer_confidence": 0.5564,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stale",
+      "jev": "labelled_stale",
+      "laya": "blank_while_pending",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "labelled_stale",
+        "confidence": 0.98,
+        "probabilities": {
+          "labelled_stale": 0.99,
+          "blank_while_pending": 0.01,
+          "last_frame_always": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "blank_while_pending",
+        "probabilities": {
+          "labelled_stale": 0.1227,
+          "blank_while_pending": 0.7674,
+          "last_frame_always": 0.1098
+        },
+        "confidence": 0.3599,
+        "answer_confidence": 0.7674,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

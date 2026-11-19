@@ -1,104 +1,102 @@
-# GrapiX — Sequenced Build Plan
+# GrapiX — Build Plan
 
-Built from scratch, in dependency order. GrapiX is After Effects-style
-composition authoring with a Scene Manager, plus XPression/Viz-style live
-playout; the Render Engine owns time and Program pixels. Backend, contracts
-and platform work come first because everything else reads them, and the
-application is operable and automatable before it is clickable.
+*The EffectCraft-core application, in backend and frontend modules. Rewritten 18 November 2026; every step keeps its ID.*
+
+GrapiX is a broadcast motion-graphics application in three processes. A **Render Engine** owns time and Program pixels. An **Editor** is After Effects-style authoring: a Scene Manager of independent graphics, layers, per-property keyframes, effects and presets, scripts and plug-ins, and Figma and PSD ingest. **Playout** is the operator's application: cue, take, continue, out, clear, and an as-run record. An **MCP surface** lets agents operate and author through the same commands a person uses, and never take or clear Program.
+
+The core is EffectCraft's. The render path is a GrapiX-owned, GPU-first compositor (ADR-0003) built from EffectCraft's WGSL kernels, blend formulas, layer-style and shading algorithms, path operators and importers, each ported with attribution under the step that owns it. The editing model follows EffectCraft and After Effects: an Effects & Presets tree of 306 catalogued effects (the panel counts how many render), layer styles, text animators, keyframe tracks and curves, After Effects scripts, ScriptUI panels and plug-ins. Windows only for now.
 
 | | |
 |---|---|
 | **Status** | In execution |
-| **Date** | 9 September 2026; direction amended 15 October 2026; decisions recorded 16 October 2026 |
-| **Tracker** | `progress.html` — keep it in the repo, commit `progress.json` |
-| **Rule** | A phase does not start until every dependency listed in it is done. |
+| **Date** | 9 September 2026; rewritten around the EffectCraft core and split into backend and frontend modules on 18 November 2026 |
+| **Tracker** | `progress.html` (the page) and `progress.json` (the committed state): the only place a step's status lives |
+| **Rule** | A step does not start until every step it needs is done. The `Needs` column decides this, not the module. |
 
-**Tracks:** `CON` Contracts · `PLAT` Platform · `BE` Backend · `UI` Interface · `RES` Research · `EXT` External gate · `AI` Gen-AI
+Tracks: `CON` Contracts · `PLAT` Platform · `BE` Backend · `UI` Interface · `RES` Research · `EXT` External gate · `AI` Gen-AI
 
 ---
 
-**258 steps across 19 phases.**
+**293 steps in 27 modules: 14 backend (177 steps), 7 frontend (72 steps) and 6 parked (44 steps).**
 
-**Product direction — 15 October 2026 (user):** GrapiX combines After
-Effects-style composition authoring with Scene Manager and live broadcast
-playout like XPression/VizRT. Authoring covers layers, editable properties,
-keyframes, curves, effects and composition previews. Scene Manager groups
-multiple independent graphics in one saved container. Playout cues, takes,
-continues and clears published graphics; the Render Engine owns the frame
-clock and production pixels sent to outputs, including DeckLink SDI (Phase
-15). This is a functional product requirement as well as an interface
-reference. Editor, Playout and Render Engine keep their existing authority
-boundaries. SDI readiness requires the SDK, hardware and timing tests in
-Phase 15; discovering a card does not satisfy those gates.
+## How this plan is organised
 
-**Authoring follow-up — 15 October 2026 (user):** Properties must expose
-inline value edits and visible keyframe controls, with values evaluated at
-the playhead and edits to animated properties keyed there. Scene Manager
-must show a preview for each graphic. Current authoring thumbnails reuse the
-existing viewport and explicitly identify partial previews; engine-backed
-preview/Program parity remains 13.5/13.6. These follow-ups belong to 11.9,
-11.21, 11.63 and 11.64 and require desktop interaction verification.
+- **Backend and frontend are separate.** Backend modules (B1 to B14) are everything that runs without a window: the Rust engine and services, the contracts, platform, transport, MCP, the object and text libraries, and the import and scripting runtimes. Frontend modules (F1 to F7) are the two Tauri apps' interfaces: the Editor's workspace, panels, animation, effects, import and script panels and preview monitor, and the Playout application. A capability and the panel that surfaces it are separate steps in separate modules (the effects engine B5 and its panels F4; import B11 and F5; scripting B12 and F5; parity B13 and F7).
+- **Step IDs are stable.** The numbers (3.22, 11.36, 18.2) are cited in code, ADRs, evidence folders and `memory.md`, so none was renumbered. The module ids are new. Steps whose number starts with 11 are spread over many modules because the old "Editor UI" phase held 80 steps that are really several different things.
+- **A module id is a reading order and a priority guide, not a gate.** Backend modules come first because the interface is built against an API that is already proven, and a frontend module needs the backend module that feeds it; but a few steps need a step in a later module (3.15 needs 7.1, for example), and the `Needs` column is the truth.
+- **Parked is not removed.** Modules X1 to X6 keep their steps, dependencies and Done-when text, out of the main order, so any of them can be pulled back in. Removed steps are gone: the old parallel tracks (P.1 to P.3) and the old UI research phase (9.1 to 9.7) on 18 Nov 2026, and 4.5 and 16.2 on 8 Nov.
+- **Status is not written here.** Done, in progress and not started live in the tracker, and a step is marked done only after its whole Done-when has been verified by execution (LLM-GOVERNANCE.md).
+- **Old phase numbers.** Done-when text written before this rewrite still says "Phase 3", "Phase 11", "Phase 15" and so on, in the old numbering. Old Phase 0 and 1 are B1 (0.14 is F1); 2 is B2 (2.27 is F6); 3 is B3 and B5; 4 is B4; 5 is B6; 6 and 7 are B7 (7.2 and 7.3 are B11); 8 is B8; 10 is B11; 11 is split over B5, B9, B10, B12 and F1 to F7; 12 is F6 (12.10 and 12.11 are B7); 13 is B13 (13.5 is F7); 14 is X1; 15 is X2; 16 is B11, B12, B14 and X5 (16.15 is F5); 17 is X3; 18 is B11 (18.10 is F5); 19 is X4 (19.3 and 19.7 are X6).
 
-**Product amendment — 15 October 2026:** the user removed the design-system
-concept from the current authoring workflow. Scene Manager is now one saved
-container holding multiple independent graphics, each with its own layers,
-timeline and undo history (11.64), analogous to compositions inside an `.aep`.
-Phase 10 and design-system-only portions of earlier rows are historical
-compatibility work, not requirements for creating, saving or browsing graphics.
-Do not introduce new token-ingest, brand-pack confirmation or drift workflows.
-Existing saved metadata remains readable and is not deleted by this change.
+| Module | Side | What it builds | Steps |
+|---|---|---|---|
+| **B1** Foundations and contracts | Backend | Repository, pinned toolchains, CI, core types, contracts, mocks and the conformance suite. | 25 |
+| **B2** Platform and diagnostics | Backend | Storage, security, structured logging and diagnostics, bind policy and transport bounds. | 26 |
+| **B3** Render core: the GPU compositor | Backend | The GPU-first, GrapiX-owned compositor: colour pipeline, text, masks, blends, output and the load governor. | 23 |
+| **B4** Pixel gate | Backend | Reference scenes, committed baselines and the CI pixel gate. | 4 |
+| **B5** Effects engine: effects, layer styles, text animators | Backend | The effect registry and EffectCraft's catalogue on the GPU, layer styles and text animators. | 4 |
+| **B6** Transport | Backend | Control, asset and media planes, session and auth, scope enforcement and the L0 asset handoff. | 12 |
+| **B7** Playout and Editor services | Backend | The Playout service (library, takes, rundown, outputs, overlays, as-run) and the Editor service (CRUD, validate, publish). | 13 |
+| **B8** Automation: MCP and AI-native authoring | Backend | The MCP surface, AI-native authoring and a supervising agent. | 16 |
+| **B9** Editor core: commands, revisions and the template contract | Backend | Command model, undo, revisions, provenance, component registry, headless render, lint, stop points and the template contract. | 12 |
+| **B10** Object libraries and the text engine | Backend | 2D and 3D object libraries, the video layer, materials and the text engine. | 5 |
+| **B11** Import and design sources | Backend | Figma, PSD, AI, After Effects and Lottie import, fidelity gates and token ingest. | 19 |
+| **B12** Scripting, logic and plug-ins (runtime) | Backend | Per-scene JS sandbox, logic, widgets, .jsx scripting and effect plug-ins. | 5 |
+| **B13** Parity and approval | Backend | Viewport latency, alpha frames, picking, the viewport-equals-Program gate, approvals and provenance. | 7 |
+| **B14** Content depth | Backend | Decoders, transitions, 3D depth ordering, camera parity and the rasteriser benchmark. | 6 |
+| **F1** Editor workspace: the After Effects and XPression feel | Frontend | Tauri shell, identity, dockable workspace, menus, save model, tab groups, splitters, pop-out, workspaces and the viewport. | 27 |
+| **F2** Authoring panels | Frontend | Scene Manager, object manager, inspector, fonts, materials, assets, bindings, text styles, Test fill and the console. | 15 |
+| **F3** Animation: timeline, keyframes and easing | Frontend | Timeline, keyframes, Auto-Key, easing, the speed graph, stagger and infinity. | 9 |
+| **F4** Effects & Presets and Effect Controls | Frontend | The Effects & Presets and Effect Controls panels, category dropdowns and the preset library. | 5 |
+| **F5** Import and scripting panels | Frontend | The import UI, the Figma import UI and dockable script panels. | 3 |
+| **F6** Playout application | Frontend | Library, rundown, transport, monitors, telemetry in Help, outputs, operator pages and the hash publish. | 11 |
+| **F7** Preview and parity | Frontend | The engine preview monitor and the browser reduced to overlays. | 2 |
+| **X1** Later: remote engine | Backend (parked) | Parked: the remote engine. | 8 |
+| **X2** Later: output server and genlock | Backend (parked) | Parked: DeckLink, AJA, genlock, NDI, SRT, soaks and ST 2110. | 13 |
+| **X3** Later: Gen-AI template factory | Backend (parked) | Parked: the Gen-AI template factory. | 9 |
+| **X4** Later: GrapiX Data Server (services) | Backend (parked) | Parked: the Data Server services and connectors. | 8 |
+| **X5** Later: generative and spatial content | Backend (parked) | Parked: generative assets, AI keyer, Gaussian splats, OpenUSD and MaterialX. | 4 |
+| **X6** Later: Data Server app and panels | Frontend (parked) | Parked: the Data Server app and the Editor panel that reads it. | 2 |
 
-**Decision — 8 November 2026 (user): Windows only for now.** macOS is out of
-the current scope. Removed: `4.5` (Windows versus macOS pixel equality) and
-`16.2` (VideoToolbox decode on macOS), which nothing depended on. Reworded to
-Windows: `0.3`, `4.2`, `9.2`, `11.1`, `11.30`, `11.32`, `12.1`, `14.5` and the
-Phase 11 UI acceptance note; CI runs on
-`windows-latest` only. macOS work returns as new rows when the user re-adds it.
+## Decisions in force
 
-**Decisions — 8 November 2026 (user), from the two-classifier plan review
-(`docs/evidence/plan-review-2026-11`).** (1) `5.7`, control-port scope
-enforcement at the transport, is added to Phase 5 and is done before Phase 14
-exposes the port beyond loopback. (2) `5.5`'s done-when is reworded to an
-executable one and the row returns to `active` until that test runs. (3) A
-done-when that cannot be executed as written (one-line intents such as
-"Reduces the Adobe dependency") is rewritten to an executable form, and
-approved by the user, before its phase opens; none of the 68 such rows in
-phases 9 and 12–19 is edited until then. (4) The phase and row order stands.
+**15 October 2026 (user): the product.** GrapiX combines After Effects-style composition authoring with a Scene Manager and live broadcast playout like XPression and Viz. Authoring covers layers, editable properties, keyframes, curves, effects and composition previews. The Scene Manager groups multiple independent graphics in one saved container. Playout cues, takes, continues and clears published graphics; the Render Engine owns the frame clock and the production pixels sent to outputs, including DeckLink SDI (X2). Editor, Playout and Render Engine keep their existing authority boundaries. SDI readiness needs the SDK, hardware and timing tests in X2; discovering a card does not satisfy those gates.
 
-**Decisions — 16 October 2026 (user).** From the Editor UX/direction and
-Playout workflow reviews (`docs/proposals/GrapiX-Editor-UX-Direction-Review.md`,
-Decisions Q1–Q8; `docs/proposals/GrapiX-Broadcast-Playout-Workflow-Review.md`):
-Phase 9 validates rather than gates (Q1); the engine preview comes before
-further Editor polish, so 11.41 is next and 11.65 follows it (Q2); explicit
-save is the only project writer, with crash-recovery snapshots kept apart
-(Q3); on-air Update touches only fields marked `liveUpdate` (default false)
-and Continue advances a stop point (Q4); operator pages live in Playout, with
-the Editor keeping a Test fill (Q5); the glossary is Project → Graphic →
-Layer with a "Composition" viewer, and Take, Page and Playout library on the
-operator side (Q6); 17.2 uses project variables (Q7); the first release
-targets sports/esports with one Program channel (Q8). No existing step
-changed state because of these decisions.
+**15 October 2026 (user): authoring follow-up.** Properties expose inline value edits and visible keyframe controls, with values evaluated at the playhead and edits to animated properties keyed there. The Scene Manager shows a preview for each graphic; current thumbnails reuse the existing viewport and say when they are partial, and engine-backed preview and Program parity stay with 13.5 and 13.6. These belong to 11.9, 11.21, 11.63 and 11.64 and need desktop interaction verification.
 
+**15 October 2026 (user): no design-system concept in authoring.** The Scene Manager is one saved container of independent graphics, each with its own layers, timeline and undo history (11.64), like compositions inside an .aep. The design-system steps (10.1 to 10.5) and design-system-only parts of earlier steps are historical compatibility, not requirements for creating, saving or browsing graphics. No new token-ingest, brand-pack confirmation or drift workflows. Existing saved metadata stays readable and is not deleted.
 
-## Phase P — Parallel tracks — start on day one
+**11 to 13 October 2026 (user): the render core.** The main render path is GPU-first and GrapiX-owned. Whole-core adoption of EffectCraft's render and gpu crates was halted: upstream rasterises text, shapes and masks on the CPU by design, its GPU suite fails on DX12, and 4K misses the 50p frame period even for two solid layers (ADR-0003). EffectCraft stays the preferred component source. Steps 3.15 to 3.22 own the GPU compositor, and no done step is evidence that GrapiX draws on the GPU unless it says so. Colour follows the project: compositing happens in the project's declared working colour space, not unconditionally in linear light (3.15).
 
-Long lead times. Nothing here is code, and all of it blocks something later.
+**16 October 2026 (user): UX and Playout workflow reviews.** From `docs/proposals/GrapiX-Editor-UX-Direction-Review.md` (Q1 to Q8) and `GrapiX-Broadcast-Playout-Workflow-Review.md`: the engine preview comes before further Editor polish, so 11.41 and then 11.65 (Q2); explicit save is the only project writer, with crash-recovery snapshots kept apart (Q3); on-air Update touches only fields marked liveUpdate (default false) and Continue advances a stop point (Q4); operator pages live in Playout, with the Editor keeping a Test fill (Q5); the glossary is Project, Graphic, Layer with a "Composition" viewer, and Take, Page and Playout library on the operator side (Q6); 17.2 uses project variables (Q7); the first release targets sports and esports with one Program channel (Q8). The research phase of Q1 was removed on 18 Nov 2026.
 
-| Step | Work | Track | Needs | Done when |
-|---|---|---|---|---|
-| `P.1` | Procure GPU, DeckLink/AJA hardware, NDI SDK access, lab time | EXT | — | Purchase orders raised and dates confirmed |
-| `P.2` | Licensing decisions: Adobe/AE, FFmpeg LGPL vs GPL, H.264/HEVC/ProRes, font embedding | EXT | — | Written position per item, owner named |
-| `P.3` | UI research programme (Phase 9) kicked off | RES | — | Participants recruited, first sessions booked |
+**8 and 19 November 2026 (user): Windows only.** macOS and every other OS are out of scope: the plan, the CI and installer jobs and the Tauri bundle targets build for Windows only. 4.5 (Windows versus macOS pixel equality) and 16.2 (VideoToolbox decode) were removed on 8 Nov. On 19 Nov every step that still named another OS was reworded to Windows: 0.3, 2.2, 2.5, 2.8, 3.1, 3.3, 4.2, 5.1, 11.1, 11.2, 11.24, 12.1, 14.5 and the Editor 2.0 acceptance bullet. The macOS installer job, the dmg bundle target and the Apple signing steps were removed. Other-OS builds return as new steps when the user re-adds them.
 
-## Phase 0 — Repository foundations
+**8 November 2026 (user): the plan review.** From the two-classifier review (`docs/evidence/plan-review-2026-11`): 5.7, control-port scope enforcement at the transport, is done before the control port is exposed beyond loopback (X1); 5.5's done-when was made executable; a done-when that cannot be executed as written is rewritten to an executable form, and approved by the user, before its module opens (the one-line intents in the parked modules wait for that); the order stood.
 
-Blocks literally everything. Nothing else starts until this is green.
+**8 November 2026 (user, on Jev's recommendation): the 4.4 threshold for a GPU render.** Unchanged: no channel more than one code value apart and at most 0.1% of pixels differing. Comparing a GPU render with the CPU reference of the same frame, a differing pixel does not count toward the 0.1% if it is a proven tie flip (the GPU bytes are the CPU encode of its own working-space floats, within 1e-4 relative of the reference's, and the reference lay on a rounding tie); the one-code limit still applies to every pixel and the strict count is recorded beside the tie-aware one. Applies to 3.17 to 3.22 and later GPU steps.
+
+**18 November 2026 (user): effects and presets are the main thing.** The Editor lists EffectCraft's 306 effects, its 8 original presets and GrapiX's own broadcast effects, with categories as collapsible dropdowns, and supports After Effects scripts, ScriptUI panels and plug-ins the way After Effects does (backend B5 and B12, frontend F4 and F5). Panels are draggable and resizable like After Effects, using XPression's module knowledge and layout (F1). This outranks polish work.
+
+**18 November 2026 (user): Figma, telemetry, load, brand.** Figma is consumed through an approved agent's MCP with no personal access token and no keychain entry in GrapiX (18.2). Live telemetry is a Playout feature only; the Editor has none (2.28 cancelled), and Help sits beside Window in the Editor. A GPU and CPU load governor keeps a spike from making live output hiccup (3.24). GrapiX is "Graphics by SKWAD" under the SKWAD design system, both apps dark (SKWAD live mode), with the name always written GrapiX.
+
+**18 November 2026 (user): scope cut and module split.** Removed the old parallel tracks (P.1 procurement of the GPU, DeckLink and AJA hardware, NDI SDK access and lab time, the I/O configuration step; P.2 licensing decisions; P.3 UI research kickoff) and the old UI research phase (9.1 to 9.7). 15.1, 16.1 and 18.1 carry no dependency now. The written licence positions stay in `docs/p2-licensing-positions.md`; a few documents still say "P.1" or "P.2" and are history, not requirements. The rewrite on the same day parked the remote engine, the output server and genlock, the Gen-AI template factory, the Data Server, and generative and spatial content as X1 to X6, and split the plan and the tracker into backend and frontend modules.
+
+**Standing prohibitions, all modules (2 October 2026).** No neural frame generation or temporal AI upscaling on Program; nothing generative runs at Take time; agents never Cue, Take, Continue, Clear or configure outputs (invariants 60 to 66). Per-scene JavaScript runs only inside 16.4's deterministic sandbox, and no author- or agent-scoped tool reaches playout control.
+
+## Backend modules
+
+Everything that runs without a window. The Rust engine and services own the truth; the interface only asks for it.
+
+### Module B1 — Foundations and contracts
+
+*Backend.* One Cargo workspace and lockfile, pinned toolchains, Windows CI, the refusal, rate, ID and revision types, and the contracts every other layer reads: scene, objects, materials, colour, assets, packages, protocol v3 and capability, with three mock peers under a conformance suite. Rust is the source of truth and TypeScript is generated. Blocks everything.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `0.1` | Clean branch; one Cargo workspace, one lockfile | CON | — | cargo build at root builds all crates |
 | `0.2` | Pin toolchains: Rust, Node, wgpu 30 across every crate | CON | 0.1 | Versions pinned in-tree, CI enforces |
-| `0.3` | CI on Windows from the first commit (macOS dropped 8 Nov 2026, user decision) | PLAT | 0.1 | Windows green on an empty tree |
+| `0.3` | CI on Windows from the first commit | PLAT | 0.1 | Windows green on an empty tree |
 | `0.4` | Dependency and licence policy; SBOM generated in CI | PLAT | 0.3 | SBOM artifact on every build |
 | `0.5` | tracing + OpenTelemetry skeleton | BE | 0.1 | A span reaches a collector |
 | `0.6` | Structured refusal type — code, field, given, allowed, severity | CON | 0.1 | Serialises identically in Rust and TS |
@@ -109,14 +107,6 @@ Blocks literally everything. Nothing else starts until this is green.
 | `0.11` | Consolidate all project agents into one shared worktree and enforce LLM workspace governance | PLAT | 0.1 | All former worktree heads and pending source edits are preserved in `agent/shared`; only the primary checkout and `agent/worktree` are registered; obsolete agent folders and temp captures are removed from the live project; private settings and legacy source are preserved; workspace guard rejects alternate paths/branches and the product gate passes |
 | `0.12` | Agent protocol files made context-efficient: `memory.md` split, binding rules in one place, the worktree rule stated once, one status vocabulary, the working protocol written down | PLAT | 0.11 | An agent that follows the written protocol reads about 10k tokens before it starts, not the 129k the first rule asks for: `memory.md` holds the rules, "Resume here" and an index and is at most 12 KB, and its dated history is under `docs/log/` with every entry kept byte for byte (a check shows the entries before and after are the same set); every rule `memory.md` calls binding (rules 8 to 29) is in `docs/invariants.md` and `memory.md` no longer claims authority it says it lacks; the worktree rule is stated once, in `AGENTS.md`, and `CLAUDE.md` and `LLM-GOVERNANCE.md` point to it; `LLM-GOVERNANCE.md` uses one status vocabulary and no stale step counts; a short working-protocol section (the Panchayati lock, mutation testing, Jev and Laya review, commit only when the user says, downloads need approval) is in the repository where every agent reads it. No rule is lost. From the agent-protocol and context-efficiency assessment of 17 Nov 2026 (measured: `memory.md` is 494 KB and its first rule says to read it; `progress.html` is 204 KB with a second copy of every plan row and nothing checks the three tracker files against each other); proposed by Claude, and the user said to proceed with it as a proposed row. |
 | `0.13` | The tracker generated from the plan: `progress.html`'s embedded rows and state come from `GrapiX-Build-Plan.md` and `progress.json`, and `npm run check` fails on drift | PLAT | 0.12 | A tool (`tools/sync-tracker`) regenerates the rows and the state embedded in `progress.html` from `GrapiX-Build-Plan.md` and `progress.json`, and a round trip over today's files changes no row text and no status; a `check:tracker` step in `npm run check` fails when the three differ, shown by a changed row, a changed status and a status for a row that is not in the plan; closing a row is then a plan edit and a status edit, and steps 3 and 4 of `LLM-GOVERNANCE.md` say so. A separate row from 0.12 because it adds a tool. From the agent-protocol and context-efficiency assessment of 17 Nov 2026 (measured: `memory.md` is 494 KB and its first rule says to read it; `progress.html` is 204 KB with a second copy of every plan row and nothing checks the three tracker files against each other); proposed by Claude, and the user said to proceed with it as a proposed row. |
-| `0.14` | GrapiX identity: "Graphics by SKWAD" marks, app icons and fonts under the SKWAD design system | UI | 0.11 | GrapiX is presented as a SKWAD product: the name is always written GrapiX; the Editor mark (title-safe frame around the SKWAD star) and the Playout mark (SKWAD burst cut by a play triangle, with an on-air light) are the application, window, taskbar and exe icons and the favicons of both apps, generated from masters in `docs/brand/`; both apps run SKWAD live (dark) mode with Manrope, JetBrains Mono and Anybody bundled (no remote load); a product sheet `docs/brand/GrapiX-by-SKWAD.pdf` states the logo units, what they depict, the fonts and the colours. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. (Done 18 Nov 2026: marks, icons, favicons, SKWAD tokens and fonts in both apps, product sheet; gate exit 0, checked in the running windows. Left to 11.67: hard-coded colours and compact spacing.) |
-
-## Phase 1 — Domain contracts
-
-Defined before any implementation reads them. This is what makes three products buildable in parallel.
-
-| Step | Work | Track | Needs | Done when |
-|---|---|---|---|---|
 | `1.1` | Scene document schema | CON | 0.9 | Round-trips through both languages |
 | `1.2` | Object type catalogue and full property surface | CON | 1.1 | Every authorable object is representable |
 | `1.3` | Material model; fit and blend enums as the single source of truth | CON | 1.1 | One enum, consumed by validator, engine and UI |
@@ -132,21 +122,20 @@ Defined before any implementation reads them. This is what makes three products 
 
 > **Milestone.** Three products can be built in parallel from here.
 
+### Module B2 — Platform and diagnostics
 
-## Phase 2 — Platform primitives
-
-No UI. These are the things every later layer depends on and that fail quietly if rushed.
+*Backend.* No UI. Atomic writes, filename and path rules, the project and asset stores, fonts, tokens and roles, one structured log for every process with correlation ids and a diagnostic bundle, and the bind policy, wire version and transport bounds every listener shares. These fail quietly if rushed.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `2.1` | Atomic write helper: unique temp, fsync, retry on contention, directory fsync | PLAT | 0.1 | Both known rename races closed; one implementation only |
-| `2.2` | Filename sanitiser: reserved names, illegal characters, length, NFC | PLAT | 0.1 | Passes a hostile-name corpus on both platforms |
+| `2.2` | Filename sanitiser: reserved names, illegal characters, length, NFC | PLAT | 0.1 | Passes a hostile-name corpus on Windows |
 | `2.3` | Case canonicalisation policy: compare insensitively, preserve for display | PLAT | 2.2 | A case-sensitive volume behaves identically |
 | `2.4` | OS directory conventions; the in-repo default removed | PLAT | 0.1 | AppData and Application Support used correctly |
-| `2.5` | File watching with debounce, both platforms | PLAT | 2.4 | Equivalent event streams from FSEvents and Win32 |
+| `2.5` | File watching with debounce | PLAT | 2.4 | Debounced, ordered event streams from Win32 |
 | `2.6` | Project store: JSON, backups, autosave ring | BE | 2.1 | Kill -9 mid-write leaves a valid project |
 | `2.7` | Asset store: SHA-256 dedupe, two-address, geometry read from headers | BE | 1.7 | Same asset imported twice stores once |
-| `2.8` | Font subsystem ported across unchanged | BE | 2.7 | All sources resolve on Windows (the macOS run was dropped from this step by user decision, 18 Oct 2026) |
+| `2.8` | Font subsystem ported across unchanged | BE | 2.7 | All sources resolve on Windows |
 | `2.9` | gx1 HMAC tokens; roles and scopes | BE | 0.1 | Algorithm fixed by prefix at parse time |
 | `2.10` | Audit and operations logging, sanitised | BE | 0.5 | No credentials in any log line |
 | `2.11` | Structured JSON Lines log sink: one schema, one file per process, bounded queue that never blocks, losses on record, rotation | BE | 2.10 | A test floods the sink faster than it writes: the caller never waits, every written line parses against the ADR-0004 schema, `seq` has no gaps except those a `log.lost` record states, files rotate by size and expire after 30 days, and no credential appears in any line (ADR-0004, user decision 16 Nov 2026) (Done 16 Nov 2026: `gx-telemetry::sink`; a 5,000-event flood through a 32-event queue never makes the caller wait and every number is written or stated lost; schema, rotation, 30-day expiry and redaction tested; 8 of 8 mutations caught; evidence `docs/evidence/2.11`.) |
@@ -165,17 +154,16 @@ No UI. These are the things every later layer depends on and that fail quietly i
 | `2.24` | Asset plane: authentication, resume, retry, and transport errors named as transport errors | BE | 2.21 | A publish or a fetch over the asset plane carries a credential the engine verifies when a token is configured (required off loopback); a transfer cut part way resumes from its last whole chunk and the client retries with backoff, each shown against a killed connection in a test; a concurrent duplicate upload is answered idempotently; a reset or an end of stream is reported as a transport error, not as a protocol failure. A decision for the user on the credential. From the OSI layering audit of 17 Nov 2026 (`docs/audit/osi-layering-2026-11-17.md`); proposed by Claude when the user asked for its serious findings to be fixed. (findings 3, 7, 8, 14.) |
 | `2.25` | The log sink keeps `log.lost` true when threads log at once: a record is written or stated lost, never both, and never out of order | BE | 2.11 | Two threads that log at the same instant never produce a `log.lost` for a record that is written, and no file holds a number after a higher one: shown by a test that makes the writer receive number N+1 before N by construction (not by racing), by a flood from several threads after which every number is written once or stated lost once and the written ones are in order, and by the conformance check "no log file has a gap in its sequence that a log.lost record does not state" over a run with concurrent control connections; the offer path still never waits on the queue, and what it may wait on (if anything) is named and bounded. Found 18 Nov 2026 by the gate for row 2.21, which failed once on it (`docs/evidence/2.21/gate-first-run-failure.txt`): `offer()` in `Shared/telemetry/src/sink.rs` takes the number, builds the line and then queues it, so two threads can queue in the other order; the writer then states the first as lost and writes it afterwards. Row 2.11 says every gap is stated exactly; under concurrent logging that is not true today. Proposed by Claude; the user decides whether 2.11 is reopened meanwhile. (Done 18 Nov 2026. Number, render and queue under one short lock in `offer()`, never waiting on the queue; a deterministic test holds the race window open, a flood test checks order and completeness, and releasing the lock early fails both. Gate exit 0 (1057 Rust, conformance 631/0/9). Evidence `docs/evidence/2.25`.) |
 | `2.26` | The architecture guard covers Playout as it covers the Editor, and sees the files and the listeners it does not see today | BE | 2.21 | The guard applies to `Playout/web` and the Playout shell the rules it applies to the Editor (the shell surface is the named commands, the browser invokes only named shell commands, no consumer branches on the engine's locality), each shown by a case that fails; rule R11 (the engine's host:port is written once) also reads `.js` and `.mjs`, so `Playout/web` and the tools are covered; rule R10 (a socket is bound only in the listed sites) also refuses a listener opened another way (`TcpSocket`, a socket crate, a Unix or named-pipe listener) outside those sites; the real tree passes. The Playout checks were in the first done-when of row 2.21 and were left out of it by name; the rest are that row's limit 5. Proposed by Claude, 18 Nov 2026. |
-| `2.27` | Live telemetry in Help: a small, detailed performance graph in the Editor and in Playout | UI | 2.14, 2.22 | The Help menu of both apps opens a compact telemetry panel fed by the engine (the existing `performance` request and heartbeat, extended where needed): a live graph per resource, not just CPU and RAM: GPU frame time and readback latency per adapter, render time per output, late and missed Program frames (never coalesced), the CPU twin's load, memory per process, each output's state and the control and asset connections. A failure names what failed and what to check (for example "adapter X lost", "readback stalled 3 frames", "output 2 not locked"), with the record id so the diagnostic bundle (2.14) finds it. Shown in the running apps against a real engine, including an injected GPU fault. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. |
 
-## Phase 3 — Render engine core
+### Module B3 — Render core: the GPU compositor
 
-Headless. The engine must be complete and testable before anything draws a pixel of UI.
+*Backend.* Headless, and the heart of the application (ADR-0003). GrapiX owns a GPU-first compositor: layers, transforms, 2D drawing, text, masks and blend modes on the GPU, composited in the project's declared colour space, with Program and Preview output that quantises once and reads back asynchronously within a bound, and a load governor so Program is never late because something else spiked. EffectCraft is the component source (WGSL kernels, blend formulas, layer-style and shading algorithms, path operators, importers), ported with attribution under the step that owns each; whole-core adoption was halted on 12 Oct 2026. The acceptance rules are in the standing notes.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `3.1` | wgpu init; backend selection D3D12 / Metal / Vulkan | BE | 0.2 | Runs headless on both platforms |
+| `3.1` | wgpu init; backend selection D3D12 / Vulkan | BE | 0.2 | Runs headless on Windows |
 | `3.2` | Device tier negotiation T0–T3 | BE | 3.1 | Tier reported in capability |
-| `3.3` | Colour pipeline: linear internal, tagged textures, sRGB and Rec.709 output | BE | 1.4 | Colour ramp renders identically on both platforms |
+| `3.3` | Colour pipeline: linear internal, tagged textures, sRGB and Rec.709 output | BE | 1.4 | Colour ramp renders identically on Windows |
 | `3.4` | Scene parse to prepared scene | BE | 1.1 | Unknown fields refuse, never ignore |
 | `3.5` | PathRasteriser trait; lyon implementation behind it | BE | 3.1 | Swappable without touching scene logic |
 | `3.6` | Text via cosmic-text: shaping, fallback, bidi, OpenType | BE | 2.8 | Missing font refuses, never substitutes |
@@ -194,140 +182,40 @@ Headless. The engine must be complete and testable before anything draws a pixel
 | `3.19` | GPU masks, clip groups, track mattes and trim paths | BE | 3.16, 3.17 | Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured (they are silently ignored today); an unsupported combination refuses by name (Done 15 Nov 2026: layer masks, clip groups and track mattes in the scene contract (user decisions), drawn on the GPU and by the CPU reference within one code value on DX12 and Vulkan in both working spaces; clips and mattes are per-frame matte targets at the source's own opacity, and matte sources are never drawn; trim measured on the GPU; MaskInvalid, ClipGroupInvalid and TrackMatteInvalid refuse by name in the validator and at publication; 15 of 15 mutations fail named tests; evidence `docs/evidence/3.19`.) |
 | `3.20` | Full blend-mode set on the GPU | BE | 3.15, 3.16 | The contract's blend modes cover the 27 Photoshop and the After Effects modes, ported from EffectCraft's formulas with attribution; each composites on the GPU in both working spaces and matches its CPU reference per mode; no declared mode is refused; NaN or infinity never reaches output, with EffectCraft's non-deterministic DX12 32-bit NaN failures (Darken on 11 October, ClassicDifference on 12 October) kept as regression tests |
 | `3.21` | GPU Program/Preview output: encode, quantise once, bounded asynchronous readback | BE | 3.11, 3.15, 3.16 | Frames leave the GPU through the 3.15 output transforms with exactly one quantisation, via a bounded asynchronous readback ring that never stalls the Program clock; a lower third, a scorebug with about 20 live text fields and a full-screen stats page each render at p99 ≤ 10 ms end to end at 1080p50 on DX12 on the reference GPU (2160p50 moved to 3.23 as a V2 option by user decision, 16 Nov 2026) (ADR-0003's proposed target, or the confirmed show target if set first), with the method recorded; a headless render (11.41) issued while Program runs causes no dropped or late Program frame, shown by the engine's frame-timing report over a timed run (invariant 14; moved here from 11.41 by user decision, 16 Oct 2026; the conformance timed run already measures it) |
-| `3.22` | Typed effect registry and the broadcast effect set on the GPU | BE | 3.16, 3.20 | Effects are a contract enum with typed parameters, generated TS and JSON Schema, and no string-keyed parameters; an unknown effect refuses by name. First set: Gaussian, box and directional blur, glow, drop shadow, fill, tint, gradient ramp, levels, curves, hue/saturation, brightness/contrast, exposure, and linear, radial and iris wipes, as GPU kernels ported from EffectCraft with attribution; each matches a CPU reference within the 4.4 threshold on DX12 and Vulkan, and every parameter is keyframable |
 | `3.23` | 2160p50 Program/Preview output budget (V2) | BE | 3.21 | A lower third, a scorebug with about 20 live text fields and a full-screen stats page each render at p99 ≤ 10 ms end to end at 2160p50 on DX12 on the reference GPU, measured with no other application holding GPU memory, with the method recorded (moved from 3.21 by user decision, 16 Nov 2026: 4K is a V2 option; `program_holds_the_frame_budget_at_2160p`) |
-| `3.24` | GPU/CPU load balancer: Program is never late because something else spiked | BE | 3.21, 2.22 | The engine budgets each Program frame first; when the frame budget is at risk, non-live work (Preview, headless renders, thumbnails, asset preparation) is throttled or moved to the CPU renderer, in a named order, and returns when the load falls; every shift is a log record with its reason. A sustained load test (headless renders and previews pushed until the GPU saturates) shows Program with no late or missed frame while the shifts happen, on DX12 and Vulkan. Design to Jev and Laya before code. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. |
+| `3.24` | GPU/CPU load balancer: Program is never late because something else spiked | BE | 3.21, 2.22 | The engine budgets each Program frame first; when the frame budget is at risk, non-live work (Preview, headless renders, thumbnails, asset preparation) is throttled or moved to the CPU renderer, in a named order, and returns when the load falls; every shift is a log record with its reason. A sustained load test (headless renders and previews pushed until the GPU saturates) shows Program with no late or missed frame while the shifts happen, on DX12 and Vulkan. Design to Jev and Laya before code. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. **Design done and first slice built, 18 Nov 2026** (`docs/evidence/3.24`; Jev 1.00, 1.00, 0.55; Laya disagreed on all three and is a second opinion only): the signal is leading indicators with hysteresis (render p95 over 70% of the interval, readback more than 2 frames behind, ring full) plus an immediate trip on any late or missed frame, released only after 250 calm frames, one step at a time in reverse; the order is graded: (1) headless renders one at a time, (2) Preview decimated (Program untouched), (3) new scene preparation deferred, (4) new headless renders and prepares refused by name with a retry hint; Preview is shed by decimation, not moved to the CPU (Jev 0.55; my reason: the CPU renderer would take cores from the render loop). Built: `services/render-engine/worker/src/governor.rs` (a pure state machine, 17 tests), level 1 wired (a gate in front of every detached render), an idle engine never sheds, every shift a `load.shift` record, shown in telemetry as the `load-balancer` component and `load.shedding` finding; 12 mutations each caught. **Not built:** levels 2 to 4 (the Preview decimation needs the GPU output ring to skip the Preview encode), thread priority for detached work, and the sustained load test on DX12 and Vulkan that this row's acceptance names, so the row stays open. |
 
-**11 October 2026 — render-core evaluation authorized.**
-[ADR-0003](docs/adr/0003-effectcraft-render-core.md) records the preferred
-candidate and preserves GrapiX's ownership boundary. `3.14` begins with an
-isolated Windows release build and shared-device pixel probe, using an
-explicit candidate toolchain and external temporary checkout. Product
-dependencies and output routing do not change in this step. Preview and
-Program cutovers require subsequent plan updates and the ADR's acceptance
-evidence; existing `done` entries are not evidence that a GPU compositor
-already exists.
+### Module B4 — Pixel gate
 
-**GPU-first is an acceptance requirement.** Main production drawing,
-transforms, masks, effects and composition must run primarily on the GPU.
-CPU scene logic and bounded preparation remain allowed; CPU full-frame
-rasterisation or silent fallback cannot qualify the candidate. `3.14` must
-report this gate even if a cached-composition benchmark passes.
-
-**12 October 2026 — render-core decision (user).** The main render path is
-GPU-first and GrapiX-owned. Whole-core adoption of EffectCraft's `render` and
-`gpu` crates is halted: upstream rasterises text, shapes and masks on the CPU
-by design, its GPU suite fails on DX12, and 4K misses the 50p frame period
-even for two solid layers (ADR-0003). EffectCraft remains the preferred
-**component source** — WGSL kernels, blend formulas, layer-style and shading
-algorithms, path operators and importers — ported into GrapiX-owned code with
-attribution, each under the step that owns it (ADR-0003's reuse catalogue).
-Steps `3.15`–`3.22` own the GPU compositor. Until they are done, no `done`
-entry is evidence that GrapiX draws on the GPU.
-
-**The 4.4 threshold for a GPU render held to its CPU reference (user, 8
-November 2026, on Jev's recommendation).** The threshold is unchanged: no
-channel more than one code value apart, at most 0.1% of pixels differing
-(`CROSS_MACHINE_TOLERANCE`). When a GPU render is compared with the CPU
-reference of the same frame, a differing pixel does not count toward the
-0.1% if it is a proven tie flip: the GPU's output bytes are exactly the
-CPU encode of its own working-space floats, and those floats are within
-1e-4 (relative, absolute below 1e-3) of the reference's, far below one code
-step (3.9e-3). Such a pixel's reference value lay on a rounding tie (0.5 is
-127.5/255 in an sRGB project), where the GPU's fused multiply-adds may land
-it one code either side. The one-code limit still applies to every pixel,
-and the strict count is recorded beside the tie-aware one. Applies to
-`3.17`–`3.22` and later GPU rows (`docs/evidence/3.22/`).
-
-**Colour follows the project (user, 12 October 2026).** Compositing happens in
-the project's declared working colour space, not in linear light
-unconditionally. This amends ADR-0002 B.1's "render internally in linear,
-always" and is owned by `3.15`. `3.3` stays done for what it verified: tagged
-sources, the two output transforms and the colour ramp.
-
-**3.15's done-when, corrected 13 October 2026.** As first written it asked
-for a rendered anti-aliased edge, gradient and blur, which the engine cannot
-draw until `3.17` and `3.22`; it could never have closed before its own
-successors. The overlap is checked as an engine render; coverage,
-interpolation and averaging are checked as working-space reference
-operations that the GPU steps must match. **Named gap:** the Editor's Three.js
-viewport (11.6) does not read the scene's declared space, and which space its
-blending matches is unmeasured (Three.js applies the output curve per
-fragment before hardware blending). The engine is the renderer of record;
-`13.5` (the engine renders the viewport) closes the gap, unless a measured
-browser fix lands first.
-
-**Reopened 13 October 2026 (user) — done steps contradicted by execution.**
-Each step's original evidence was re-run and still passes; a probe against
-its done-when failed (`memory.md`, 13 October). They are `active` again.
-- `3.13` "No silent fallback anywhere": a stroke with `trim_end` 50% renders
-  byte-identically to the untrimmed stroke (3,600 lit pixels both times) and
-  prepares without a refusal; glTF geometry draws nothing without a refusal;
-  and vector objects ignore `opacity` — a rectangle at 50% opacity renders
-  fully opaque, without a refusal (found by 3.15's rendered test, 13 October).
-  **Closes again when** non-default trim, object opacity on vector paths and
-  unloadable glTF geometry each either render correctly or refuse by name, and the conformance refusal audit
-  covers both. Drawing trim on the GPU stays `3.19`'s work.
-- `3.7`: a glTF holding one real triangle prepares to 0 vertices and 0
-  triangles; sphere and torus are 151-triangle fans sharing vertex 0. **Closes
-  again when** glTF primitives load their real vertices and indices and the
-  sphere and torus are triangulated grids, tested by counts and a silhouette.
-- `8.1`: none of the 30 `tools/list` entries carries an `inputSchema`; each
-  names a type instead. **Closes again when** every listed tool carries its
-  generated JSON Schema as `inputSchema`, checked by a test over every tool. **Closed 16 Nov 2026** (`docs/evidence/8.1`).
-- `8.9`: `tools/call render.preview` returns a raw `pixels` number array and
-  ignores the requested frame. **Closes again when** it answers with an MCP
-  image content block (PNG) for the requested frame, or a named refusal,
-  checked over JSON-RPC.
-- `8.12`: `cargo tree -i gx-write-semantics` shows no dependent; no MCP edit
-  carries `if_revision` or an idempotency key. **Closes again when** the
-  editor MCP edit path takes both through `gx-write-semantics` and the
-  retry-after-timeout test runs against that path. **Closed 16 Nov 2026** (`docs/evidence/8.12`).
-
-Done steps that need a reopened step keep their state, because their own
-done-when was not contradicted: `4.1` and `7.4` (need `3.13`) and `11.20`
-(needs `8.12`). `3.16` now waits on `3.13`.
-
-**Open defect — the engine-host test leg does not terminate (found 13 September 2026).**
-`cargo test -p gx-engine-host` hangs indefinitely in
-`the_host_spawns_when_nothing_is_listening` (`services/render-engine/host/tests/ensure.rs`).
-The sibling `ensure_refuses_a_reserved_port` passes in the same run, so this is
-neither a compile cost nor an environment problem: it is the spawn-and-adopt
-path itself. The hang survives an external `timeout`, which points at a spawned
-`gx-render-worker` the harness never reaps.
-
-Because of it, `npm run test:rust` runs `cargo test --workspace --exclude
-gx-engine-host` so the gate terminates, and `npm run test:rust:host` runs the
-host leg alone. **That exclusion is a named hole, not a permanent carve-out**,
-and it is recorded here rather than left in a script where nobody would find
-it. Until the hang is fixed, no run of `npm run check` has exercised host
-supervision, and no claim about it should rest on that gate.
-
-This was invisible until today because `npm run check` referenced a `test:rust`
-script that did not exist, so the gate died before the Rust leg for as long as
-that chain has been in place.
-
-## Phase 4 — Pixel gate
-
-The instrument. Built before anything that could change pixels, so there is a baseline to compare against.
+*Backend.* The instrument, built before anything that could change pixels so there is a baseline to compare against: reference scenes, a headless harness on Windows, committed baselines, and a CI gate with a diff threshold that fails the build.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `4.1` | Reference scene set: colour ramp, safe areas, text, vector, 3D, every rate family | BE | 3.13 | Covers each supported fit and blend mode |
-| `4.2` | Headless render harness on Windows (macOS dropped 8 Nov 2026) | PLAT | 4.1 | Runs in CI without a display |
+| `4.2` | Headless render harness on Windows | PLAT | 4.1 | Runs in CI without a display |
 | `4.3` | Baseline capture, committed to the repo | BE | 4.2 | Reference images versioned |
 | `4.4` | CI gate with a diff threshold that fails the build | PLAT | 4.3 | A deliberate one-pixel change is caught |
 
 > **Milestone.** There is now an instrument. Nothing after this changes pixels unmeasured.
 
+### Module B5 — Effects engine: effects, layer styles, text animators
 
-## Phase 5 — Transport — local
-
-Location-transparent from the first line. Local is an optimisation, not a different code path.
+*Backend.* The main thing (user, 18 Nov 2026), in the engine. The typed effect registry and the broadcast effect set on the GPU, EffectCraft's 306-effect catalogue ported in broadcast-first batches, layer styles and text animators. Each effect is a typed contract with a GPU kernel and a CPU reference within the 4.4 threshold, and every parameter is keyframable. None may silently drop an option it cannot render: a missing capability is a named finding. The panels that surface them are module F4.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `5.1` | Control plane over named pipe and unix socket | BE | 1.9 | Ordered, acknowledged, sequenced |
+| `3.22` | Typed effect registry and the broadcast effect set on the GPU | BE | 3.16, 3.20 | Effects are a contract enum with typed parameters, generated TS and JSON Schema, and no string-keyed parameters; an unknown effect refuses by name. First set: Gaussian, box and directional blur, glow, drop shadow, fill, tint, gradient ramp, levels, curves, hue/saturation, brightness/contrast, exposure, and linear, radial and iris wipes, as GPU kernels ported from EffectCraft with attribution; each matches a CPU reference within the 4.4 threshold on DX12 and Vulkan, and every parameter is keyframable |
+| `3.25` | Port EffectCraft's effects beyond the first 16, broadcast-first | BE | 3.22 | Effects from EffectCraft's catalogue are ported in priority order for broadcast graphics (Transition, Stylize, Distort, Generate, Blur & Sharpen, Color Correction, Keying, then the rest; Audio and analysis effects last), each as a typed contract effect with a GPU kernel and a CPU reference within the 4.4 threshold on DX12 and Vulkan, every parameter keyframable, attributed per ADR-0003; the panel's "not yet ported" count falls with each batch and is the row's measure. From the user's direction of 18 Nov 2026 ("effects and presets shall be the main thing"; "support AE scripts or other extensions and plugins as After Effects does"); proposed by Claude. **Batch 1 done, 18 Nov 2026; the row stays open** (`docs/evidence/3.25`). Ported from EffectCraft: **Invert** (all, red, green or blue, with a blend back to the original), **Posterize** (2 to 255 levels), **Threshold** (Rec. 709 luminance at or above the level is white) and **Vibrance** (saturation weighted `(1-s)*min(s,0.5)`: greys and fully saturated colours are left alone, half-saturated ones gain most; not "dull colours gain more", which a first test assumed and the formula refutes). Each is a typed contract effect with one parameter table, a CPU reference and a WGSL kernel (ids 19 to 22) reading the same packed block; posterize rounds half up on both sides because WGSL `round` goes to even. The panel now lists **20 available, 286 not yet ported** (was 16 and 290). Tests: contract 283, engine 199 plus the hardware GPU parity test (7 new cases, default hardware backend, within the 2e-4 gate) and the engine-level GPU render test; 16 mutations each failed a named test (one survived first, a vibrance weight tested only at s = 0.5, and a case at s = 0.8 now catches it). Gate: fmt 0, clippy 0, `npm run check` 0. **Open:** the 4.4 threshold on Vulkan was not run (default hardware backend only); batches 2 onward. |
+| `11.60` | Layer styles: every Photoshop style and its blending options, animatable, on the GPU | BE | 3.19, 3.22, 11.36 | Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Satin, Color, Gradient and Pattern Overlay and Stroke, plus fill opacity, knockout, Blend If and several instances of one style, are scene properties with every parameter keyframable, rendered on the GPU in Photoshop's stacking order. Fixture scenes match committed Photoshop reference renders within the 4.4 threshold; the PSD (`lfx2`/`lmfx`) and Figma effect mappings used by 11.59 and 18.4 are specified against them; any style option not yet implemented (for example contours) is a named finding, never dropped |
+| `11.61` | Text animators: per-glyph range selectors | BE | 3.18, 11.20, 11.36 | Animators with range selectors (characters, characters excluding spaces, words, lines; start, end and offset; shapes; ease high and low; randomise with a seed derived from the object id) animate per-glyph position, scale, rotation, opacity, fill and tracking through 11.20 channels and render on the GPU from per-glyph instance data without per-frame re-shaping; the selector maths is ported from EffectCraft with attribution; the existing stagger presets are expressed through them; two renders of one frame are byte-identical, and a selector the engine cannot evaluate refuses by name |
+
+### Module B6 — Transport
+
+*Backend.* Location-transparent from the first line: the control, asset and media planes, session, auth and reconnect, locality in the capability exchange, scope enforcement at the transport, and the L0 asset handoff. Local is an optimisation, not another code path.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `5.1` | Control plane over a named pipe | BE | 1.9 | Ordered, acknowledged, sequenced |
 | `5.2` | Session, auth, epoch, reconnect and reconciliation | BE | 2.9 | Program survives a control disconnect |
 | `5.3` | Asset plane local: hash preflight, transfer only the difference | BE | 2.7 | Re-publish moves no unchanged bytes |
 | `5.4` | Media plane local: shared memory or handle passing | BE | 3.11 | Frames reach a consumer with no copy |
@@ -340,9 +228,9 @@ Location-transparent from the first line. Local is an optimisation, not a differ
 | `5.12` | Re-publish a take while an older revision of it is on Program or cued (added 8 Nov 2026, user decision, found while verifying `5.11`: the journal check refused the publish and inhibited output) | BE | 3.12, 5.11 | The recovery journal records a prepared scene for every revision Program or the cue names as well as each take's latest published revision, and its check accepts Program or the cue on any journaled revision of a published take, so publishing is additive on air as everywhere else (invariant 30). A test on a real worker publishes a take, takes it, and publishes an edit of it while revision 1 is on Program: the edit is Published as revision 2, Program keeps emitting revision 1 and is never inhibited, and revision 2 can be cued and taken. After a forced kill and restart both revisions are restored and Program is revision 1. `npm run check` passes. (Done 15 Nov 2026: the journal records every revision Program or the cue names as well as each take's latest; its check accepts them and nothing else; restore judges a take's revisions as one; a real worker publishes, takes, publishes an edit while revision 1 is on Program and keeps both across a forced kill; evidence `docs/evidence/5.12`.) |
 | `5.10` | Editor publishes by the engine's declared route: by path when co-located, chunked over a LAN (added 8 Nov 2026, user decision, split from `5.8`; reworded 8 Nov 2026, user decision: the Editor cannot read the control-plane capability exchange, because R6 bars a control client and 5.7 answers the control port only for Playout, so it reads the same declaration from the engine on its asset plane) | BE | 5.8, 5.9, 5.11, 5.12 | The Editor's publish (`cmd_publish` → `gx_editor::publish::publish_document` → `gx_asset_plane::publish_as_package`) learns the engine's declared locality only from the engine itself. It sends a closed `{locality:{}}` read to the asset-plane address it publishes to, and the engine answers from the same field it declares as `EngineCapability.locality`. The Editor holds no control-plane client (R6) and names no `Locality` (R9). The publish always writes one verified package, named by content hash and never by user text, into its package folder: `GX_EDITOR_PACKAGE_DIR` if set, else `platform::package_exchange_root()`. The launcher and `gx-engine-host` give a co-located engine that same folder as `--package-dir`. The package is published through `gx_asset_plane::publish_package`: co-located by path with 0 asset bytes, over a LAN chunked with only the missing bytes. It is removed after the reply. A LAN-declared engine reads no package path, and `gx-render-worker` refuses `--lan --package-dir`. Nothing about the directory goes on the wire or into `EngineCapability`. A conformance suite runs against two real workers (one with `--package-dir D`, one with `--lan`) and both mocks. It shows each peer's asset-plane answer equal to the `EngineCapability.locality` read over the control plane. It publishes the Inter lower third from an Editor `AssetStore` through the functions `cmd_publish` calls, with folder D, to each worker: `LocalPath` with 0 bytes and the package inside D, and `ChunkedUpload` with exactly the font's bytes. Both publications are Published with the document's content hash, D is empty afterwards, and the harness takes each with its pinned hash: Taken on the T0 workstation, a named skip below T0. The suite also shows each of these refused by name as `PublishRefused`, never `Unreachable`: a folder outside D, a co-located worker without `--package-dir` (`PackageDirectoryNotConfigured`, no fallback), and a path offered to a LAN-declared engine that holds a directory. An asset with no content hash is refused before any socket opens. Mutations of the declared value, of the peer's answer and of the server rule each fail a check. `npm run check` passes with check:boundaries clean. (Done 15 Nov 2026: `GX_EDITOR_PACKAGE_DIR` or `<cache root>/packages` is the Editor's package folder; the engine answers a closed `{locality:{}}` read on the asset plane from the field its capability declares; `gx_asset_plane::publish_as_package` writes, publishes and removes one package; a LAN-declared engine reads no path; `gx-render-worker` refuses `--lan` with `--package-dir`; conformance against three real workers and both mocks, 9 mutations; not run: the live check in the Tauri window; evidence `docs/evidence/5.10`.) |
 
-## Phase 6 — Playout service
+### Module B7 — Playout and Editor services
 
-Headless and fully testable before its UI exists.
+*Backend.* The two headless services, fully testable before any window exists: Playout (published library and stable Take IDs, take intents, rundown, outputs, overlay layers, the as-run record) and Editor (project and scene CRUD, validation, package build and publish, preflight).
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
@@ -352,24 +240,17 @@ Headless and fully testable before its UI exists.
 | `6.4` | Rundown persistence and sequence engine | BE | 6.1 | Cursor survives restart |
 | `6.5` | Output configuration; is_live gated on tier, platform and reference | BE | 3.2 | Live refused below T0, naming the failing condition |
 | `6.6` | Automation trigger evaluation; execution explicitly deferred | BE | 6.4 | Deferral is a named refusal, not silence |
-
-## Phase 7 — Editor service
-
-Also headless. Import, validation and publish must work before a designer sees a window.
-
-| Step | Work | Track | Needs | Done when |
-|---|---|---|---|---|
 | `7.1` | Project and scene CRUD | BE | 2.6 | Refuses writes until a project folder exists |
-| `7.2` | Import pipeline: four tiers, compatibility report, source retained | BE | 1.1 | Every substitution named in the report |
-| `7.3` | Import fidelity gate: source reference render versus imported render | BE | 4.3 | Diff stored with the template |
 | `7.4` | Scene validator: every unsupported case refused by name | BE | 3.13 | Shares one enum with the engine |
 | `7.5` | Design system enforcement: three severities plus override log (historical compatibility; not required for authoring or publish) | BE | 1.5 | Overrides recorded with a reason |
 | `7.6` | Package build, verify, publish; design-system version stamped when present (optional, historical) | BE | 1.8 | Publishing is all-or-nothing |
 | `7.7` | Preflight | BE | 7.4 | Returns structured refusals with allowed values |
+| `12.10` | Overlay layers with channel/layer targeting on one Program channel | BE | 1.9, 6.2 | Cue, Take, Update, Continue, Out and Clear carry a `channel` and `layer` target; only the Program channel is accepted and any other channel refuses by name; a bug, a lower third and a ticker on separate layers are cued, taken, updated and cleared independently on one output with deterministic z-order and a named refusal on conflict; a targeted clear removes only its layer when the expected page still matches (decision Q8) |
+| `12.11` | As-run record | BE | 2.9, 2.10, 2.11, 2.15, 6.2 | Every accepted or refused Cue, Take, Update, Continue, Out and Clear writes one as-run record to the 2.10 JSON Lines audit sink: monotonic sequence, intent id, operator identity and scope (2.9), page, revision, hash, channel/layer target, result and engine-committed frame; replaying a fixture show's records matches the engine's committed events exactly. UI and export follow later (decision Q8) Amended by user decision, 16 Nov 2026 (ADR-0004): a separate as-run file per channel and day, each record synced before the operator sees the result and carrying the SHA-256 of the record before it, so removing, reordering or editing a line is detected at that line; it names the signed-in operator (2.15); if it cannot be written the operator is told at once and Program commands are still accepted. |
 
-## Phase 8 — MCP automation surface
+### Module B8 — Automation: MCP and AI-native authoring
 
-Deliberately before the UI. The application becomes fully operable and automatable while still headless.
+*Backend.* Before the interface, on purpose: the whole domain is operable and automatable headless, and the interface is built against an API that is already proven. Tools are generated from the contracts, scope-gated and revision-checked, tiered (read, author on draft handles, propose), with AI-native authoring and a supervising agent on top. Agents never cue, take, continue, clear or configure outputs.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
@@ -392,235 +273,224 @@ Deliberately before the UI. The application becomes fully operable and automatab
 
 > **Milestone.** The application is fully operable and automatable with no interface at all.
 
+### Module B9 — Editor core: commands, revisions and the template contract
 
-## Phase 9 — UI research
-
-**Validation, not a gate (user decision Q1, 16 October 2026).** Phase 11 proceeded on the After Effects and XPression/Viz references (11.63, 15 October direction); these steps check that work with designers and operators. No Phase 11 step needs a Phase 9 step. The card sort (old 9.4) and three-direction concept test (old 9.6) were dropped.
-
-| Step | Work | Track | Needs | Done when |
-|---|---|---|---|---|
-| `9.1` | Artifact teardown of comparable professional tools | RES | P.3 | Vocabulary of density, chrome and controls |
-| `9.2` | Recruit designers, operators, producers | RES | P.3 | Segments filled (macOS-primary designers dropped 8 Nov 2026) |
-| `9.3` | Contextual interviews in the suite and the control room | RES | 9.2 | Not remote. Lighting and viewing distance observed |
-| `9.5` | Usability baseline against the previous build | RES | 9.2 | Timed tasks on the 11.63 workspace, including the disconnected-engine task; the results validate 11.5's layout |
-| `9.7` | Synthesis: validation report and anti-pattern list | RES | 9.3, 9.5 | Density, chrome and type-at-viewing-distance findings against the 11.63 workspace, each with a proposed amendment or a recorded no-change |
-
-## Phase 10 — Design system implementation
-
-Backend first — ingest and enforcement land before the panels that surface them.
+*Backend.* The foundations the editor modules build on, cheap now and expensive to retrofit: the typed command model, undo on the command log, hashed scene revisions with review state, asset provenance, the component registry and project variables, the headless render entry point, the lint framework, named animation phases and stop points, and the template control contract with its field constraints.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
+| `11.20` | Editable animation contract and service integration | CON | 1.6, 7.1, 8.12 | Document existing timeline/preset consumers and extend only missing scene channels, easing and validated edit operations; Rust/TS round-trip keys, evaluate rational-rate frames consistently, preserve old scenes and undo/revision semantics without widening preset-only MCP authoring |
+| `11.25` | Named animation phases on the scene timeline | CON | 11.20, 11.22 | The scene timeline carries named `in`, `hold`, `out`, `continue` and `update` phases as frame spans over the existing channels, matching the `MOTION_PHASES` vocabulary presets already use; phases round-trip Rust/TS, are authored and previewed independently in the Editor, refuse overlap and out-of-range spans by name, and a scene authored before phases existed still parses unchanged |
+| `11.26` | Template control contract: declared operator fields | CON | 11.18, 11.19 | A scene declares which object properties an operator may fill, as a typed, named field list carried on the document; each field names its target object/property, its type and its default, refuses an unknown or non-fillable target by name, round-trips Rust/TS, and is authored in the Editor without widening the preset-only MCP authoring surface |
+| `11.36` | Typed editor command model: every authoring mutation is a shared command | CON | 1.12, 7.1 | Every mutation of authoring content is a variant of one command type defined in `Shared/`, with TS generated and a JSON Schema (2020-12) generated beside it for every command; the codegen staleness check covers the schemas. Every mutation surface — the Editor shell's commands, the editor MCP tools, and project-api (4100) if it is built (no server binds 4100 today) — accepts only that type, and no surface accepts a client-supplied whole document. A boundary-guard test fails a build that adds a mutation path outside it, and a conformance test shows the Editor's mock Playout peer receives no command that alters Program or outputs (invariant 60) |
+| `11.37` | Undo/redo on the command log | BE | 11.36 | Project-level and per-module undo (Ctrl+Z) and redo (Ctrl+Shift+Z) are built on the 11.36 command log, not on per-module state snapshots. Applying N commands to a fixture scene then undoing all N gives a content hash equal to the original; redoing all N gives the post-edit hash exactly; per-module undo affects only commands tagged with that module, shown by a test with interleaved commands from two modules. 11.29's per-scene isolation and 11.9's one-transaction multi-select still hold |
+| `11.38` | Immutable, content-hashed scene revisions with review state | CON | 11.36, 6.3, 7.6 | Publishing creates an immutable revision identified by a content hash, carrying a state of `draft`, `proposed` or `approved` that only a human sets. Publishing the same content twice gives the same hash; changing one property changes it. Playout loads revisions by pinned hash only (invariant 61): the Playout mock refuses an unknown or unpinned hash by name (`RevisionMismatch` or a new named code), the real Playout service refuses identically, and the conformance suite confirms both. Invariant 30's additive, all-or-nothing publish still holds (8 Nov 2026: re-publishing a take while an older revision of it was on Program was refused by the journal check and inhibited output; fixed by `5.12`.) |
+| `11.39` | Asset provenance and licence fields | CON | 11.36, 2.7 | Every asset record in a `.gpx` project carries origin (`human`, `tool` or `model`), tool or model name and version, provider, licence class, optional prompt hash, source references, approving user and timestamp, and an optional C2PA manifest reference; the fields may be empty for human-made assets, but the schema exists. The `.gpx` schema version is bumped and a migration test upgrades a pre-11.39 project losslessly; save and reload preserve every provenance field byte-for-byte; importing through the asset manager fills `origin` and the tool name automatically |
+| `11.41` | Headless render entry point in the Render Engine | BE | 11.38, 3.13, 5.6 | One control request renders revision X at frame N to an image; the golden-frame gate and 8.9's `render.preview` use it, and thumbnails (11.65), approval previews (13.7) and Phase 13 parity use it when they land. The same revision and frame rendered twice on one machine and driver is byte-identical; the cross-machine tolerance is defined in this step's verification record and tested; the engine mock refuses exactly what the engine refuses, e.g. an unknown revision (invariant 45). The Program-timing criterion moved to 3.21 (user decision, 16 Oct 2026): the software Program path cannot hold cadence, so it cannot be shown here |
+| `11.40` | Component registry and project variables | CON | 11.36, 11.41 | Named project variables (colour, font, spacing, motion duration and easing) are referenced by name from objects instead of copied; a registry holds reusable components (scorebug, lower third, player card, bracket, …) with typed slots. Changing a variable updates every bound object, shown by 11.41 headless renders of a fixture scene before and after; deleting a variable still referenced is refused by name; components and variables round-trip through `.gpx` save/load. Design-system tokens are not required (15 Oct amendment) |
+| `11.42` | Lint framework and first rules | BE | 11.36, 11.41 | A lint command returns structured findings: severity, rule, object and fix hint. First rules: title/action-safe violation; missing glyph for any bound field or target language; text overflow against a worst-case string fixture (longest player names, CJK, Arabic RTL); required template field left unbound. Each rule has one failing and one passing fixture, run as tests. A missing glyph is a refusal-class finding, never resolved by a silent font fallback (invariant 66). Refusal-class findings block publish (7.6) and preflight (7.7); the rest warn. Findings use the 0.6 refusal structure (condition, cause, fix), so 11.58 renders them unchanged |
+| `11.53` | Timeline: named stop points and a looping hold | CON | 11.22, 11.25, 11.36, 11.38 | Extends 11.25's phases, which already give In (`in`), Out (`out`) and the held state (`hold`). A hold phase may be marked looping, and named stop points tell Playout's Continue where to pause. Moving or retiming a key is one 11.36 command; values evaluated at sampled frames match the expected curve exactly in rational time; stop points and the loop flag are carried in the published revision and the Playout mock reads them; Continue on the on-air revision advances to the next named stop point exactly once and never loads a new revision (decision Q4) |
+| `11.54` | Template field constraints | CON | 11.26, 11.27, 11.38 | Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published revision; a value outside a field's type, range, enum or length is refused by name by both the Playout mock and real Playout; a fallback rule never produces different pixels without a declared state (invariant 18). Each field also carries `liveUpdate`, default false: Update on air accepts only eligible fields and refuses an ineligible one by name with pixels unchanged; eligibility grants no authority, which stays with operator scope and engine-time intent (decision Q4) |
+
+### Module B10 — Object libraries and the text engine
+
+*Backend.* What the Editor can make, in Rust: 2D pen paths, masks, clip groups and trim paths; 3D assignable-face primitives and extrusion; the video layer with alpha; one physically lit material type and a material library; and the text engine's depth (auto-fit, complex scripts, font links).
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `11.47` | 2D object library: pen paths, masks, clip groups, trim paths | BE | 1.2, 11.41, 11.45, 11.46 | Text, image quad, shapes, pen-tool paths, masks and clip groups (a clip shape plus a content composition), keyframable paths and trim paths. Each object type has an 11.41 golden-frame test; a clip group clips its content correctly in a golden frame; a trim-path animation renders correctly at three sampled frames. This step owns the layer masks that memory rule 24 recorded as unowned (15 Nov 2026, user decision: the mask, clip-group and track-matte contract and rendering landed in 3.19; this step keeps the Editor tools for them, pen paths, animated trim and masks, and its golden frames.) (16 Nov 2026, user decision: the Editor MCP sets these through typed scene edits (setObjectMasks, setClipChild, setTrackMatte, setTrim, setPaint, setStroke, createShape, setGroupChildren; and, for the gaps, width, height and zIndex fields, setBlendMode, setAnchor, setEffects, setShapePath with compound paths and fill rule), refused by name and covered in `docs/evidence/mcp-render-edits` and `docs/evidence/mcp-layout-edits`; the Editor's own panels, pen tool and canvas gestures stay here.) |
+| `11.48` | 3D object library: assignable-face primitives, extrusion, nulls | BE | 3.7, 11.41, 11.45, 11.46 | Extends 3.7. Real 3D primitives with assignable faces, extruded text and logos, cameras, lights and null/locator objects. 11.41 golden frames show lights, cameras and Z/XYZ transforms affecting the render; assigning a material to one face affects only that face |
+| `11.49` | Video layer with alpha | BE | 11.41, 11.45, 11.46, 16.1 | A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants 18, 29) |
+| `11.50` | One physically lit material type and a material library | CON | 1.3, 11.12, 11.41, 11.48 | Supersedes 1.3's split of `MaterialKind` into solid colour, image, PBR and unlit: one physically lit material type replaces them in Rust, generated TS, validator, engine and UI, still consumed by all three from one Rust definition (the custom `shader` kind is unchanged). Scenes authored with the old kinds migrate losslessly; an unlit lower-third fill renders with no pixel change across the migration (invariant 18). One type covers every fixture in the material test set; an XPression-style library assigns materials to objects and faces and round-trips through `.gpx`; Editor viewport and engine golden frames match within 11.41's tolerance, a forward check for 13.6 |
+| `11.51` | Text engine depth: auto-fit, complex scripts, font links | BE | 3.6, 11.13, 11.28, 11.42, 11.47 | Extends 11.13/3.6. OTF, TTF and WOFF files, Adobe font links and CSS embed links resolve through the font manager; tracking, leading and auto-fit/shrink-to-box; complex-script shaping for at least Latin, CJK and Arabic RTL through a HarfBuzz-class shaper. The 11.42 worst-case string fixture renders without overflow or raises an overflow finding; a missing glyph raises a refusal-class finding; Arabic RTL renders correctly in a golden-frame test |
+
+### Module B11 — Import and design sources
+
+*Backend.* Figma is the primary source, read through an approved agent's Figma MCP with no token in GrapiX, and the source is retained beside the template. PSD, AI, After Effects and Lottie importers, the import report that names every substitution, fidelity gates against the source's own render, and token ingest kept for historical compatibility. Anything the engine cannot draw is refused or substituted by name, never approximated silently. The import panels are module F5.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `7.2` | Import pipeline: four tiers, compatibility report, source retained | BE | 1.1 | Every substitution named in the report |
+| `7.3` | Import fidelity gate: source reference render versus imported render | BE | 4.3 | Diff stored with the template |
 | `10.1` | Token ingest from W3C Design Tokens JSON | BE | 1.5 | Round-trips without loss |
 | `10.2` | Token ingest from Figma and Claude Design | BE | 10.1 | Variables and published styles mapped |
 | `10.3` | Unexpressible report at ingest | BE | 10.1 | Names what the source held and tokens cannot |
 | `10.4` | Versioned, immutable store with provenance | BE | 10.1 | Human confirmation before v1 |
 | `10.5` | Drift report across published templates | BE | 7.6 | Lists every template behind the current version |
+| `11.59` | Importers on 2.0 objects: PSD/AI and After Effects | BE | 7.2, 11.39, 11.41, 11.47, 11.48, 11.50, 11.51, 11.53 | PSD/AI and After Effects importers rebuilt on the 2.0 objects (Figma is Phase 18). After Effects precomps import as live scenes, not flattened clips; every imported asset is stamped with an 11.39 provenance record. A fixture file per importer imports and renders with every asset exact in 11.41 golden-frame tests; any unsupported node type produces a named finding, never a silent drop |
+| `16.5` | Lottie import path | BE | 7.2 | Reduces the Adobe dependency |
+| `18.1` | Figma reference corpus | RES | — | At least 20 real broadcast files (lower thirds, scorebugs, full-frames, tickers, vertical social), each with Figma's own PNG render at 1× and 2× committed as the reference |
+| `18.2` | Figma ingest through the Figma MCP, with the source retained and no token in GrapiX | BE | 7.2, 11.39, 8.1 | **Decided by the user, 18 Nov 2026:** Figma works the way it does in Claude and Codex, signed in through the MCP, with no personal access token and no keychain entry in GrapiX. Figma's remote MCP server (`mcp.figma.com`) admits only clients on its catalog (Claude Code, Codex, Cursor, VS Code and a few more; others are refused at client registration, and a personal access token or a self-made OAuth app does not open it: Figma forum threads and write-ups, May 2026; not checked against Figma's own docs), so GrapiX does not sign in to it itself. The design is **agent-brokered**: the user's own approved agent reads the frame through its Figma MCP (`get_metadata`, `get_design_context`, `get_screenshot`, variables and image fills) and hands it to GrapiX through GrapiX's Editor MCP tool (8.x scopes; authoring only, never Program). A second path to **verify** before relying on it: the Figma desktop app's local MCP server (no OAuth, the user's open Figma session), which GrapiX could read as an MCP client. Either way the raw response is stored content-hashed beside the template, so a re-import can be diffed and an offline re-run needs no network; no token or sign-in is ever stored in a scene, package or log; every imported asset carries an 11.39 provenance record; all layers, layer styles and variables map or are named as findings. Replaces the earlier REST design (a file key and a token in the OS keychain), which is dropped. |
+| `18.3` | Scene boundaries: one Figma frame is one scene | BE | 18.2, 11.29, 11.47 | Each top-level frame the user selects becomes exactly one scene. Its resolution is the frame's width × height, its origin is the frame's top-left, and its background is the frame fill. `clipsContent` is honoured as an 11.47 nested clip composition: content outside a clipping frame is kept but clipped, and never widens the scene. Nothing is re-parented across scenes. Nested frames stay nested groups with their own bounds and clipping. Multi-frame import produces N independent scene sessions |
+| `18.4` | Node and property coverage matrix | BE | 18.3, 1.2, 1.3 | Every Figma node type (frame, group, section, rectangle, ellipse, polygon, star, line, vector, boolean operation, text, component, instance, image fill) and property (per-corner radius, strokes with align/dash/cap/join, solid, linear, radial, angular and diamond gradients, image fill modes and crop, drop and inner shadow, layer and background blur, blend modes, opacity, masks, auto-layout resolved to absolute positions, constraints recorded) has a row in a committed coverage table marked **mapped**, **substituted (named)** or **refused (named)**, and each row has a test. Import never stops on an unsupported node: it becomes a named finding and the walk continues |
+| `18.5` | Text fidelity | BE | 18.4, 11.13, 3.6 | Per-character style runs, line height, letter spacing, paragraph spacing, alignment, auto-resize modes and text case survive import. Every Figma font is resolved through 11.13 ingest; a font that cannot be resolved blocks the import by name instead of falling back |
+| `18.6` | Components, instances and variants | BE | 18.4 | Components import once and instances reference them with their overrides applied. Variants are kept as named alternatives, not flattened copies. An instance's override that the engine cannot express is named in the report |
+| `18.7` | Variables and styles to project variables | BE | 11.40, 18.2 | Figma colour, number and string variables and published styles land as 11.40 project variables with provenance, and imported objects reference them instead of copying their values, so a brand change flows through |
+| `18.8` | Fidelity gate on the corpus | BE | 18.1, 18.4, 7.3, 4.4 | Every corpus frame's engine render is diffed against Figma's PNG under the 4.4 threshold and the diff is stored with the template (7.3). A regression fails CI. The target is 100% of corpus frames passing with zero unnamed substitutions |
+| `18.9` | Re-import updates in place | BE | 18.3, 11.20, 11.19 | Re-importing the same file updates the existing scenes in place, keyed by the Figma node id. Animation channels, phases, bindings and control fields on unchanged nodes are preserved. A deleted node that still carried animation or bindings is reported by name, not dropped silently |
+| `18.11` | A real Figma frame end to end: PAC - PIC 2026 three-caster lower third to air | BE | 18.2, 7.3 | The frame `Kn05sACr8HOcZhZnx8EqAz` node `1945-12449` is imported, every layer and style mapped or named as a finding, animated, published and taken to air, and its render is compared with Figma's own render of the frame (the 7.3 diff stored with the template). From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. **Dependencies now:** 18.2 as redesigned (agent-brokered, no token) and 7.3; the credential decision that blocked it is gone. The frame can be read today through the Figma MCP an approved agent already holds. |
 
-## Phase 11 — Editor UI
+### Module B12 — Scripting, logic and plug-ins (runtime)
 
-Deferred to here on purpose. Everything above is usable without it, and this is built against research output, not guesswork.
+*Backend.* The runtime side of extending GrapiX: a deterministic sandbox for per-scene JavaScript, conditional logic and widgets, After Effects .jsx scripts running through undoable commands, and effect plug-ins from a Plug-ins folder, sandboxed. Any download needs the user's approval; agent authoring still goes through MCP. The script panels are module F5.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `11.1` | Tauri 2 shell on Windows; signed (macOS and notarising dropped 8 Nov 2026) | UI | 0.3 | Installers produced by CI |
-| `11.2` | WebGPU capability probe on both target OS versions | PLAT | 11.1 | Result recorded; decides the WASM fallback |
+| `16.4` | Script sandbox on rquickjs: deterministic per-scene JS | BE | 2.9, 11.36, 11.58 | CPU and memory bounded, disposable. No wall-clock access (`Date.now`, `performance.now`, timers) and no network (`fetch`, sockets); time comes only from the engine frame number and rational rate, data only through bindings, and typed APIs limit which objects a script may touch (invariant 62). A script calling a banned API is refused by name and the console (11.58) shows it; a fixture script driven only by frame number gives identical output across two runs; a script touching an object outside its declared scope is refused |
+| `11.55` | Logic: conditional triggers, scene transitions, per-scene JS modules | BE | 6.6, 11.53, 11.54, 16.3, 16.4 | Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes renders identically across two runs; any banned API inside a module is refused by name |
+| `11.56` | Widgets: clock, countdown, counter, round timer | BE | 11.55, 16.4 | Time is derived from the engine frame count and rational rate, never from the wall clock (invariant 62). At 60000/1001 a countdown shows exactly the rationally computed value after N frames; a long-run test shows zero drift; pause and resume are commands |
+| `16.14` | After Effects scripting: .jsx scripts run against GrapiX through undoable commands | BE | 16.4, 11.36 | Scripts written for After Effects' documented object model (`app`, `app.project`, `CompItem`, layers, `Property` with keys and eases, `app.beginUndoGroup`) run in the Editor: File, Scripts lists a Scripts folder and Run Script File; every edit a script makes is an `EditorCommand` (undoable, journaled, the same as the UI's action); writing files and network access are off unless the user allows them (as After Effects' own setting); `#include` and `#target` are understood; `.jsxbin` is refused by name (no public specification). EffectCraft's scripting host is the component source (ADR-0003, attributed). Scripts are authoring only and can never cue, take or clear Program. From the user's direction of 18 Nov 2026 ("effects and presets shall be the main thing"; "support AE scripts or other extensions and plugins as After Effects does"); proposed by Claude. |
+| `16.16` | Effect plug-ins: sandboxed modules from a Plug-ins folder | BE | 3.22, 16.4 | A third-party effect loads from a `Plug-ins` folder as a sandboxed WebAssembly module with declared typed parameters, appears in Effects & Presets under its own category, renders on the GPU path or through a bounded CPU bridge that can never delay Program (3.24), and is refused by name when it breaks its budget or its declaration. After Effects' native `.aex` plug-ins cannot run (a different ABI) and are refused by name. The WebAssembly runtime is a download that needs the user's approval. From the user's direction of 18 Nov 2026 ("effects and presets shall be the main thing"; "support AE scripts or other extensions and plugins as After Effects does"); proposed by Claude. |
+
+### Module B13 — Parity and approval
+
+*Backend.* What a designer approves is what goes to air, from the engine side: viewport latency, binary alpha frames, engine picking, adaptive resolution, a pixel gate that holds the viewport equal to Program, the approval pipeline and provenance in use.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `13.1` | Measure viewport interaction latency on the existing stream | BE | 5.4 | Handle-drag round trip recorded on target hardware |
+| `13.2` | Binary alpha frames | BE | 13.1 | Alpha correct at the viewport edge |
+| `13.3` | Picking and bounds metadata from the engine | BE | 13.2 | Hit-testing without a browser renderer |
+| `13.4` | Adaptive resolution | BE | 13.2 | Degrades resolution before latency |
+| `13.6` | Pixel gate: viewport equals Program | BE | 4.4 | Byte-identical across the reference set |
+| `13.7` | Approval pipeline | BE | 8.14, 11.41, 11.42, 13.6 | Changeset → headless engine render (11.41) → lint and conformance gate (11.42) → named human approval → hash-pinned revision (11.38) loadable by Playout. Only the Admin role may approve. A changeset that fails lint cannot be approved; Playout loads only `approved` revisions; the approval record names the approver and the time and is written to the JSON Lines audit trail (2.10) |
+| `13.8` | Provenance in use | BE | 11.39, 13.7 | Playout refuses an asset whose licence class is incompatible with the show profile; a per-show AI-usage report is generated; an optional AI-disclosure label element is available. A fixture show profile refuses a fixture asset marked non-commercial; the report lists every model-origin asset used in a show |
+
+> **Milestone.** What a designer approves is what goes to air.
+
+### Module B14 — Content depth
+
+*Backend.* Feature work that is not release-blocking, after parity and reliability: the video decoder tier, transitions beyond cut, 3D shadows, transparent depth ordering and camera parity, and the rasteriser benchmark.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `16.1` | Video decoder tier: FFmpeg with NVDEC | BE | — | Licence position settled first (the licensing row P.2 was removed from the plan on 18 Nov 2026; the written positions are in `docs/p2-licensing-positions.md`) |
+| `16.3` | Transitions beyond cut, dual-target | BE | 3.8 | Dropped-frame behaviour certified |
+| `16.6` | 3D: shadows | BE | 3.7 | Separate branch, own pixel gate |
+| `16.7` | 3D: transparent depth ordering | BE | 3.7 | Separate branch, own pixel gate |
+| `16.8` | 3D: camera parity in Program | BE | 13.6 | Perspective and orthographic match |
+| `16.9` | Rasteriser benchmark; Vello evaluated against the gate | BE | 4.4 | Measured on broadcast content, not demos |
+
+## Frontend modules
+
+The two Tauri apps' interfaces, built against the backend modules above. The Editor follows After Effects conventions, with XPression's layout knowledge; Playout follows XPression and Viz conventions.
+
+### Module F1 — Editor workspace: the After Effects and XPression feel
+
+*Frontend.* The Tauri 2 shell on Windows and the layout: the GrapiX identity, the dockable workspace, one command registry behind every menu, shortcut and agent action, the save model, tabbed groups, resizable and pop-out panels, named workspaces, a compact SKWAD live-mode UI, and the viewport with its overlays, gizmos and guides. Layout rows follow the measurements in docs/evidence/11.71.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `0.14` | GrapiX identity: "Graphics by SKWAD" marks, app icons and fonts under the SKWAD design system | UI | 0.11 | GrapiX is presented as a SKWAD product: the name is always written GrapiX; the Editor mark (title-safe frame around the SKWAD star) and the Playout mark (SKWAD burst cut by a play triangle, with an on-air light) are the application, window, taskbar and exe icons and the favicons of both apps, generated from masters in `docs/brand/`; both apps run SKWAD live (dark) mode with Manrope, JetBrains Mono and Anybody bundled (no remote load); a product sheet `docs/brand/GrapiX-by-SKWAD.pdf` states the logo units, what they depict, the fonts and the colours. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. (Done 18 Nov 2026: marks, icons, favicons, SKWAD tokens and fonts in both apps, product sheet; gate exit 0, checked in the running windows. Left to 11.67: hard-coded colours and compact spacing.) |
+| `11.1` | Tauri 2 shell on Windows, signed | UI | 0.3 | Installers produced by CI |
+| `11.2` | WebGPU capability probe on Windows | PLAT | 11.1 | Result recorded; decides the WASM fallback. Closed 19 Nov 2026 (user, Windows only): with macOS out of scope the Windows record in `docs/webgpu-capability.md` is the whole probe, and it decides the fallback (viable). Verified: gpu-probe tests 8 of 8, and the live Editor logged the verdict at launch. |
 | `11.3` | DPI: fractional scaling, scale change, monitor move | UI | 11.1 | Correct at 100, 125, 150 and 200 per cent |
 | `11.4` | Colour management in the browser layer, matching the engine | UI | 3.3 | Colour ramp matches the engine render |
-| `11.5` | Dockable workspace | UI | — | Layout follows the 11.63 EffectCraft/After Effects reference (criterion amended 16 Oct 2026, decision Q1; it formerly read "follows the card sort", which Phase 9 no longer gates); 9.5's timed tasks validate it afterwards |
+| `11.5` | Dockable workspace | UI | — | Layout follows the 11.63 EffectCraft/After Effects reference (criterion amended 16 Oct 2026, decision Q1; it formerly read "follows the card sort") |
 | `11.6` | Three.js viewport: 2D on an orthographic camera plus 3D | UI | 11.4 | A 2D object renders between two 3D objects |
 | `11.7` | Overlay layer: handles, guides, selection, marquee | UI | 11.6 | Structured so the engine can take over the raster |
-| `11.8` | Object manager treegrid | UI | 11.5 | Hierarchy, visibility, lock, alpha, transforms |
-| `11.9` | Type-aware inspector | UI | 11.8 | Multi-select Mixed state, one undo transaction |
-| `11.10` | Timeline: virtualised rows, canvas layers, dirty-rect repaint | UI | 11.5 | Node count flat from 100 to 100,000 keys |
-| `11.11` | Speed graph and curve editing | UI | 11.10 | Scrub causes no static-layer repaint |
-| `11.12` | Material manager | UI | 11.9 | Shared instances, relink, usage lookup |
-| `11.13` | Font manager panel | UI | 2.8 | Ported from the 1.x panel (archive branch), not redesigned, and proven by one strict scripted case: several font files (OTF, TTF, WOFF, WOFF2) ingested in a single action into the running Editor, each content-hashed and deduplicated, registered before any text is measured and usable at once; a font leaves the scene only through an explicit Remove action, never implicitly; removing a font still in use is refused naming the objects that use it; ingest and removal each form one undo entry and survive save/reopen; an unresolved font still blocks the take by name |
-| `11.14` | Design system panel; tokens as editor defaults (historical compatibility; not part of the 15 Oct authoring workflow) | UI | 10.4 | Palette and type scale are the path of least resistance |
-| `11.15` | Motion preset browser; save selection as preset | UI | 1.6 | Library grows from real designer work |
-| `11.16` | Live conformance indicator (historical compatibility) | UI | 7.5 | Drift visible as it happens, not at publish |
-| `11.17` | Import UI with tier and substitution report | UI | 7.2 | Nothing substituted without being named |
-
-| `11.18` | Editor 1.x panel parity in the Editor 2.0 workspace | UI | 11.5, 11.8, 11.9, 11.12, 11.13, 11.16, 7.1 | Templates/scenes CRUD, object creation and management, object details/properties, fonts, assets and materials are reachable and functional in Tauri; reuse existing modules, preserve selection, validate writes, undo and save/reopen |
-| `11.19` | Data binding panel integrated with object properties | UI | 11.18, 8.6 | Discover the data schema; create, edit and remove property bindings, preview sample data, show invalid paths/types explicitly and preserve bindings through save/reopen |
-| `11.20` | Editable animation contract and service integration | CON | 1.6, 7.1, 8.12 | Document existing timeline/preset consumers and extend only missing scene channels, easing and validated edit operations; Rust/TS round-trip keys, evaluate rational-rate frames consistently, preserve old scenes and undo/revision semantics without widening preset-only MCP authoring |
-| `11.21` | Inspector keyframe diamonds and Auto-Key | UI | 11.9, 11.20 | Position, Scale, Rotation, Opacity, Size and other supported properties show empty/filled current-playhead diamonds; toggling keys and Auto-Key creates or updates exactly one key, with defined first-key/base-value/off behavior, multi-select and undo/redo |
-| `11.22` | Selection-driven timeline and keyframe editing | UI | 11.10, 11.21 | Object selection automatically reveals property tracks; expand/collapse, select, drag/move, delete and copy/paste keys with frame snapping, explicit collision behavior and one undo per gesture; preserve flat node count from 100 to 100,000 keys |
-| `11.23` | Simple easing, Custom Bezier and starter presets | UI | 11.11, 11.15, 11.22 | Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier persist and evaluate correctly; Fade, Slide, Scale and Pop use the existing preset library, supported parameters and save-selection workflow; advanced curves appear on demand and scrubbing avoids static-layer repaint |
-| `11.24` | Spacebar preview and integrated Editor parity verification | UI | 11.6, 11.19, 11.23 | Spacebar smoothly plays/pauses local animation without stealing typing/control shortcuts; verify panel-to-animation workflows, frame-consistent scrubbing, undo/redo and save/reopen in Tauri on Windows (the macOS run was dropped from this step by user decision, 7 Nov 2026), measure playback on the Windows workstation and confirm no Program/output side effects |
-| `11.25` | Named animation phases on the scene timeline | CON | 11.20, 11.22 | The scene timeline carries named `in`, `hold`, `out`, `continue` and `update` phases as frame spans over the existing channels, matching the `MOTION_PHASES` vocabulary presets already use; phases round-trip Rust/TS, are authored and previewed independently in the Editor, refuse overlap and out-of-range spans by name, and a scene authored before phases existed still parses unchanged |
-| `11.26` | Template control contract: declared operator fields | CON | 11.18, 11.19 | A scene declares which object properties an operator may fill, as a typed, named field list carried on the document; each field names its target object/property, its type and its default, refuses an unknown or non-fillable target by name, round-trips Rust/TS, and is authored in the Editor without widening the preset-only MCP authoring surface |
-| `11.27` | Test fill in the Editor: fill a template instance (operator pages are 12.8) | UI | 11.26 | The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, and saves and reopens named instances without mutating the template they were filled from. Amended 16 Oct 2026 (decision Q5): the panel is renamed Test fill; operator pages and their storage are 12.8's work in Playout. The criteria above were verified earlier and stand for the Editor's test fill |
-| `11.28` | Named text style presets | UI | 11.13 | Font, size, tracking, line height, case and fill/stroke are saved as one named, reusable style; applying a style to a text object sets exactly those properties as one undo entry; a style whose font the scene does not carry refuses by name; styles survive save/reopen |
-| `11.29` | Multi-scene workspace: scenes as first-class entities | UI | 11.18 | A broadcast carries many graphics, so each open scene is a distinct session owning its own document, selection, playhead, collapse state and undo history; one workspace module lists every open scene and switches the active one; viewport, object manager, inspector, timeline, animation and binding panels are children of the active scene and render it alone; switching preserves each scene's own state, an edit or undo in one scene cannot alter another, and closing a scene with unsaved changes refuses by name |
 | `11.30` | Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version | UI | 11.29, 11.15 | Ctrl+S writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S is the only way to create a new version: the next free numbered copy (`<name>_v002`, `_v003`, …) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason |
 | `11.31` | One command registry behind every menu, toolbar, shortcut and agent action | UI | 11.30, 11.36 | Every user action is one named command with a label, shortcut, enabled state and refusal reason; the menu bar, toolbar, keyboard shortcuts and the agent surface all dispatch the same command, so a disabled menu item and a refused shortcut give the same named reason; every registry command that changes the document dispatches an 11.36 command; no action is reachable by a shortcut alone; shortcuts never fire while a text field has focus |
 | `11.32` | Menu bar and toolbar (After Effects conventions) | UI | 11.31 | A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete (Delete key), Select All; **Composition**; **Layer**; **View**; **Window**; **Help** — plus a slim toolbar of the common commands. Exit and Close with unsaved scenes refuse by name until each is saved or explicitly discarded; Delete removes the selection as one undo entry |
 | `11.33` | Window menu: every module reachable; tabbed docks and saved layouts | UI | 11.5, 11.32 | The Window menu lists every Editor module and shows, focuses or hides it; a hidden panel is never lost and reopens where it was; panels stack as tabs inside any dock and drag between docks and tab groups; the user can save named layouts, switch between them and reset to the card-sort default; layouts survive restart |
 | `11.34` | Floating panel windows | UI | 11.33 | Any panel tears off into its own OS window (e.g. a second monitor) and docks back; the main window stays the only owner of the document, and a floating panel is a projection of the active scene that sends commands through 11.31 — never a second copy of the document; floating windows restore to their monitor and bounds on restart, and fall back on screen when that monitor is gone; closing the main window closes them |
 | `11.35` | Workspace modes | UI | 11.33 | Named workspace modes — at least Design, Animate and Data binding — each a saved layout of panels and docks, switched from the Window menu and toolbar without touching the document, selection or undo history; a mode the user rearranges can be saved over or saved as a new mode, and reset to its default |
-| `11.36` | Typed editor command model: every authoring mutation is a shared command | CON | 1.12, 7.1 | Every mutation of authoring content is a variant of one command type defined in `Shared/`, with TS generated and a JSON Schema (2020-12) generated beside it for every command; the codegen staleness check covers the schemas. Every mutation surface — the Editor shell's commands, the editor MCP tools, and project-api (4100) if it is built (no server binds 4100 today) — accepts only that type, and no surface accepts a client-supplied whole document. A boundary-guard test fails a build that adds a mutation path outside it, and a conformance test shows the Editor's mock Playout peer receives no command that alters Program or outputs (invariant 60) |
-| `11.37` | Undo/redo on the command log | BE | 11.36 | Project-level and per-module undo (Ctrl+Z) and redo (Ctrl+Shift+Z) are built on the 11.36 command log, not on per-module state snapshots. Applying N commands to a fixture scene then undoing all N gives a content hash equal to the original; redoing all N gives the post-edit hash exactly; per-module undo affects only commands tagged with that module, shown by a test with interleaved commands from two modules. 11.29's per-scene isolation and 11.9's one-transaction multi-select still hold |
-| `11.38` | Immutable, content-hashed scene revisions with review state | CON | 11.36, 6.3, 7.6 | Publishing creates an immutable revision identified by a content hash, carrying a state of `draft`, `proposed` or `approved` that only a human sets. Publishing the same content twice gives the same hash; changing one property changes it. Playout loads revisions by pinned hash only (invariant 61): the Playout mock refuses an unknown or unpinned hash by name (`RevisionMismatch` or a new named code), the real Playout service refuses identically, and the conformance suite confirms both. Invariant 30's additive, all-or-nothing publish still holds (8 Nov 2026: re-publishing a take while an older revision of it was on Program was refused by the journal check and inhibited output; fixed by `5.12`.) |
-| `11.39` | Asset provenance and licence fields | CON | 11.36, 2.7 | Every asset record in a `.gpx` project carries origin (`human`, `tool` or `model`), tool or model name and version, provider, licence class, optional prompt hash, source references, approving user and timestamp, and an optional C2PA manifest reference; the fields may be empty for human-made assets, but the schema exists. The `.gpx` schema version is bumped and a migration test upgrades a pre-11.39 project losslessly; save and reload preserve every provenance field byte-for-byte; importing through the asset manager fills `origin` and the tool name automatically |
-| `11.40` | Component registry and project variables | CON | 11.36, 11.41 | Named project variables (colour, font, spacing, motion duration and easing) are referenced by name from objects instead of copied; a registry holds reusable components (scorebug, lower third, player card, bracket, …) with typed slots. Changing a variable updates every bound object, shown by 11.41 headless renders of a fixture scene before and after; deleting a variable still referenced is refused by name; components and variables round-trip through `.gpx` save/load. Design-system tokens are not required (15 Oct amendment) |
-| `11.41` | Headless render entry point in the Render Engine | BE | 11.38, 3.13, 5.6 | One control request renders revision X at frame N to an image; the golden-frame gate and 8.9's `render.preview` use it, and thumbnails (11.65), approval previews (13.7) and Phase 13 parity use it when they land. The same revision and frame rendered twice on one machine and driver is byte-identical; the cross-machine tolerance is defined in this step's verification record and tested; the engine mock refuses exactly what the engine refuses, e.g. an unknown revision (invariant 45). The Program-timing criterion moved to 3.21 (user decision, 16 Oct 2026): the software Program path cannot hold cadence, so it cannot be shown here |
-| `11.42` | Lint framework and first rules | BE | 11.36, 11.41 | A lint command returns structured findings: severity, rule, object and fix hint. First rules: title/action-safe violation; missing glyph for any bound field or target language; text overflow against a worst-case string fixture (longest player names, CJK, Arabic RTL); required template field left unbound. Each rule has one failing and one passing fixture, run as tests. A missing glyph is a refusal-class finding, never resolved by a silent font fallback (invariant 66). Refusal-class findings block publish (7.6) and preflight (7.7); the rest warn. Findings use the 0.6 refusal structure (condition, cause, fix), so 11.58 renders them unchanged |
 | `11.43` | Project settings, explicit save and single-file `.gpx` packaging | UI | 11.18, 11.29, 11.30, 11.36, 11.37, 11.38 | Work is saved as a `.gpx` project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and background. Unsaved work cannot be published (named refusal); a non-rational frame rate cannot be entered and the attempt is refused. **Explicit save is the only project writer** (decision Q3, 16 Oct 2026): 2.6's autosave ring writes crash-recovery snapshots to a separate recovery folder, never into the project, and they are offered at next launch; 2.6's kill -9 mid-write test still passes |
 | `11.44` | Viewport: gizmos, rulers, margins and safe guides | UI | 11.7, 11.36, 11.41, 11.43 | Extends 11.6/11.7. Scene cameras plus an editor camera; move, rotate-XYZ and scale gizmos; single and multi selection; After Effects/Photoshop-style rulers and margins configured in the project tab; title/action-safe guides; an empty scene shows nothing. Every gizmo interaction produces 11.36 commands, never direct state writes; Z position and XYZ rotation visibly change the render, shown by 11.41 headless renders of a fixture scene before and after; guide and margin settings round-trip through save/load |
-| `11.45` | Object manager on the command model: parenting, groups, order, unique names | UI | 11.8, 11.36, 11.37, 11.44 | Extends 11.8. The object manager is the authoritative hierarchy driving the viewport, inspector and every scene view; parenting, groups, reordering, show/hide and lock are 11.36 commands and all undoable. A test shows the viewport and inspector reflect hierarchy changes made only through the object manager. A duplicate name is refused by name with a suggested free name (`object1`, `object2`, …) |
-| `11.46` | Inspector: per-type property sets, scrub fields, animation stopwatch | UI | 11.9, 11.21, 11.36, 11.37, 11.45 | Extends 11.9/11.21. Each object type in 11.47–11.49 shows exactly its defined property set; numeric fields scrub by dragging and accept negative values, and one scrub is committed as one command, not one per mouse move. Each animatable property carries an After Effects-style stopwatch beside 11.21's current-frame diamond, with no separate Animation tab; toggling it creates a keyframe at the current frame and undo removes it |
-| `11.47` | 2D object library: pen paths, masks, clip groups, trim paths | BE | 1.2, 11.41, 11.45, 11.46 | Text, image quad, shapes, pen-tool paths, masks and clip groups (a clip shape plus a content composition), keyframable paths and trim paths. Each object type has an 11.41 golden-frame test; a clip group clips its content correctly in a golden frame; a trim-path animation renders correctly at three sampled frames. This step owns the layer masks that memory rule 24 recorded as unowned (15 Nov 2026, user decision: the mask, clip-group and track-matte contract and rendering landed in 3.19; this step keeps the Editor tools for them, pen paths, animated trim and masks, and its golden frames.) (16 Nov 2026, user decision: the Editor MCP sets these through typed scene edits (setObjectMasks, setClipChild, setTrackMatte, setTrim, setPaint, setStroke, createShape, setGroupChildren; and, for the gaps, width, height and zIndex fields, setBlendMode, setAnchor, setEffects, setShapePath with compound paths and fill rule), refused by name and covered in `docs/evidence/mcp-render-edits` and `docs/evidence/mcp-layout-edits`; the Editor's own panels, pen tool and canvas gestures stay here.) |
-| `11.48` | 3D object library: assignable-face primitives, extrusion, nulls | BE | 3.7, 11.41, 11.45, 11.46 | Extends 3.7. Real 3D primitives with assignable faces, extruded text and logos, cameras, lights and null/locator objects. 11.41 golden frames show lights, cameras and Z/XYZ transforms affecting the render; assigning a material to one face affects only that face |
-| `11.49` | Video layer with alpha | BE | 11.41, 11.45, 11.46, 16.1 | A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants 18, 29) |
-| `11.50` | One physically lit material type and a material library | CON | 1.3, 11.12, 11.41, 11.48 | Supersedes 1.3's split of `MaterialKind` into solid colour, image, PBR and unlit: one physically lit material type replaces them in Rust, generated TS, validator, engine and UI, still consumed by all three from one Rust definition (the custom `shader` kind is unchanged). Scenes authored with the old kinds migrate losslessly; an unlit lower-third fill renders with no pixel change across the migration (invariant 18). One type covers every fixture in the material test set; an XPression-style library assigns materials to objects and faces and round-trips through `.gpx`; Editor viewport and engine golden frames match within 11.41's tolerance, a forward check for 13.6 |
-| `11.51` | Text engine depth: auto-fit, complex scripts, font links | BE | 3.6, 11.13, 11.28, 11.42, 11.47 | Extends 11.13/3.6. OTF, TTF and WOFF files, Adobe font links and CSS embed links resolve through the font manager; tracking, leading and auto-fit/shrink-to-box; complex-script shaping for at least Latin, CJK and Arabic RTL through a HarfBuzz-class shaper. The 11.42 worst-case string fixture renders without overflow or raises an overflow finding; a missing glyph raises a refusal-class finding; Arabic RTL renders correctly in a golden-frame test |
-| `11.52` | Asset manager: versioned replace and provenance shown | UI | 2.7, 11.18, 11.39 | Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; replacing an asset creates a new version and leaves earlier revisions pinned to the old hash. Resuming an interrupted transfer is 14.3's done-when and is not duplicated here |
-| `11.53` | Timeline: named stop points and a looping hold | CON | 11.22, 11.25, 11.36, 11.38 | Extends 11.25's phases, which already give In (`in`), Out (`out`) and the held state (`hold`). A hold phase may be marked looping, and named stop points tell Playout's Continue where to pause. Moving or retiming a key is one 11.36 command; values evaluated at sampled frames match the expected curve exactly in rational time; stop points and the loop flag are carried in the published revision and the Playout mock reads them; Continue on the on-air revision advances to the next named stop point exactly once and never loads a new revision (decision Q4) |
-| `11.54` | Template field constraints | CON | 11.26, 11.27, 11.38 | Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published revision; a value outside a field's type, range, enum or length is refused by name by both the Playout mock and real Playout; a fallback rule never produces different pixels without a declared state (invariant 18). Each field also carries `liveUpdate`, default false: Update on air accepts only eligible fields and refuses an ineligible one by name with pixels unchanged; eligibility grants no authority, which stays with operator scope and engine-time intent (decision Q4) |
-| `11.55` | Logic: conditional triggers, scene transitions, per-scene JS modules | BE | 6.6, 11.53, 11.54, 16.3, 16.4 | Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes renders identically across two runs; any banned API inside a module is refused by name |
-| `11.56` | Widgets: clock, countdown, counter, round timer | BE | 11.55, 16.4 | Time is derived from the engine frame count and rational rate, never from the wall clock (invariant 62). At 60000/1001 a countdown shows exactly the rationally computed value after N frames; a long-run test shows zero drift; pause and resume are commands |
-| `11.57` | Hash publish to Playout from the engine-rendered preview | UI | 7.6, 8.10, 11.38, 11.53, 11.65 | Builds on 11.65's engine preview monitor (split 16 Oct 2026, decision Q2) and publishes a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of the same revision and frame match within its tolerance; a conformance test confirms the Editor cannot Cue, Take, Continue or Clear (invariant 4) |
-| `11.58` | Console and debugger | UI | 0.6, 11.36, 11.42 | Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, and a test enumerates the codes; 11.42 lint findings appear in the console |
-| `11.59` | Importers on 2.0 objects: PSD/AI and After Effects | BE | 7.2, 11.39, 11.41, 11.47, 11.48, 11.50, 11.51, 11.53 | PSD/AI and After Effects importers rebuilt on the 2.0 objects (Figma is Phase 18). After Effects precomps import as live scenes, not flattened clips; every imported asset is stamped with an 11.39 provenance record. A fixture file per importer imports and renders with every asset exact in 11.41 golden-frame tests; any unsupported node type produces a named finding, never a silent drop |
-| `11.60` | Layer styles: every Photoshop style and its blending options, animatable, on the GPU | BE | 3.19, 3.22, 11.36 | Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Satin, Color, Gradient and Pattern Overlay and Stroke, plus fill opacity, knockout, Blend If and several instances of one style, are scene properties with every parameter keyframable, rendered on the GPU in Photoshop's stacking order. Fixture scenes match committed Photoshop reference renders within the 4.4 threshold; the PSD (`lfx2`/`lmfx`) and Figma effect mappings used by 11.59 and 18.4 are specified against them; any style option not yet implemented (for example contours) is a named finding, never dropped |
-| `11.61` | Text animators: per-glyph range selectors | BE | 3.18, 11.20, 11.36 | Animators with range selectors (characters, characters excluding spaces, words, lines; start, end and offset; shapes; ease high and low; randomise with a seed derived from the object id) animate per-glyph position, scale, rotation, opacity, fill and tracking through 11.20 channels and render on the GPU from per-glyph instance data without per-frame re-shaping; the selector maths is ported from EffectCraft with attribution; the existing stagger presets are expressed through them; two renders of one frame are byte-identical, and a selector the engine cannot evaluate refuses by name |
-| `11.62` | Effects and layer-style controls in the Editor | UI | 3.22, 11.46, 11.60 | Adding, removing, reordering, enabling and duplicating effects and layer styles on any object are 11.36 commands with one undo each; every parameter shows in the inspector with scrub fields and an animation stopwatch; a refused effect or style shows its refusal code and fix |
 | `11.63` | EffectCraft / After Effects workspace presentation | UI | 11.5, 11.20, 11.36 | The Editor presents a charcoal workspace with project/layers/assets at left, the composition viewer in the centre, Preview and grouped Properties at right, and a layer timeline below. Menus, creation tools, transport, visibility/lock switches and panel disclosure use the existing command and view-state paths. Both frame readouts use one integer playhead and the scene's rational rate, with fractional timecode labelled NDF. Unanimated objects appear as layer rows; selecting a layer reveals its tracks. Node count remains flat from 100 to 100,000 keys and scrub does not repaint the static layer. Captured Tauri screenshots are compared with the EffectCraft workspace reference, and live create/select/edit, switch, step/play, undo and panel-reopen interactions pass; screenshots or interactions that cannot run are recorded as unverified |
 | `11.64` | Scene Manager: one container, multiple independent graphics | UI | 11.5, 11.36, 11.37, 11.38 | A Scene Manager module creates and selects a saved container, adds and saves independent graphics, searches them by name or id, and opens each through the existing Rust command model. Graphic switching preserves separate content, selection, playhead and undo history, including unsaved graphics. The catalog and accessible/agent projections show editing, open, saved, unsaved, unavailable and published-revision status without design-system confirmation, stamps or drift. Existing container/graphic addresses remain compatible and legacy metadata is preserved. Execute a live create-container, add-two-graphics, edit/save/search/switch/undo, restart/reopen check and the complete check gate before marking done. Storage remains the existing project-folder format; single-file `.gpx` packaging remains 11.43 |
-| `11.65` | Engine preview monitor in the Editor | UI | 11.41 | The Preview panel shows an engine-rendered frame (11.41) of the active graphic at the playhead, labelled "Engine", within 250 ms of an edit on the reference machine (method recorded); the Three.js viewport is labelled "Draft"; a disconnected or refusing engine shows a named unavailable state, never a stale frame presented as current; parity with Program is not claimed until 13.6. Verified in the running Tauri Editor. Scheduled ahead of 11.31–11.35 (decision Q2) |
 | `11.66` | Glossary label lint | UI | 11.63, 11.64 | Every visible Editor label, agent-surface node and MCP tool description uses only the glossary in `docs/README.md` (Project → Graphic → Layer, viewer "Composition"; Take, Page, Playout library; output channel/layer); a test fails on "New scene", "Publish scene" or any term outside the glossary (decision Q6) |
-| `11.67` | Compact, clean UI and UX pass on both apps under SKWAD, reviewed by Jev and Laya | UI | 0.14 | Both apps are compact and clean: SKWAD spacing and control sizes, no hard-coded colour left outside the tokens, the name written GrapiX, one ember emphasis per view, named states for empty, disconnected and refused; Jev and Laya review the UI and the UX from screenshots of the running windows and every finding is fixed or named. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. |
-| `11.68` | Keyframes the way After Effects and EffectCraft do them: per-property tracks, easing, graph editor | UI | 11.36 | Every animatable property has its own keyframe track with stopwatch-style enable, keyframe selection and nudging, easy ease and custom bezier easing, and a value and speed graph editor, matching the After Effects interaction model and the EffectCraft engine semantics the render core ports; the engine renders the same curve the Editor shows (a parity test at keyframes and between them). From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. |
+| `11.67` | Compact, clean UI and UX pass on both apps under SKWAD, reviewed by Jev and Laya | UI | 0.14 | Both apps are compact and clean: SKWAD spacing and control sizes, no hard-coded colour left outside the tokens, the name written GrapiX, one ember emphasis per view, named states for empty, disconnected and refused; Jev and Laya review the UI and the UX from screenshots of the running windows and every finding is fixed or named. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. **First slice done, 18 Nov 2026, row stays open** (`docs/evidence/11.67`): the reviewers take text only, so they got measured facts, not the screenshots, and their confidence was low (0.18, 0.43, 0.49; Laya disagreed on all three). Done: every hard-coded colour outside the SKWAD tokens replaced (66 in the Editor, 17 in Playout; the canvas guide colour and alpha overlays kept on purpose); the Editor's selected tool, tab, rows and playhead are ember, not blue; Playout's header reads `GrapiX Playout`; Playout labels are sentence case at 12 px with capitals kept for states and the transport; setup controls 28 px. **Open:** where Help lives (the native row is about 30 px for one word; Jev 0.18 for in-page, left as it is, the user's call); the Editor's spacing pass (it was already at or under 28 px); panels' empty, disconnected and refused states; a review from real screenshots when a reviewer that can see images is available. |
+| `11.71` | XPression-informed layout: use the Editor's real estate | UI | 11.5, 11.63 | The default layout, measured on the 3862 x 2122 reference window, meets three numbers: the drawn frame is at least 35 % of the window area (26.5 % on 18 Nov 2026); no dock holds more panel content than its height without a scroll inside one panel (the right column held about twice its height); and the chrome above the workspace and the log below it together take under 10 % of the height (15.5 %). Reached by the rows 11.72 to 11.76, in the order Jev gave (Scene Manager list, then tab groups, then chrome, then pop-out and workspaces). The borrowed XPression modules and the ones left out are in the evidence README (Sequencer, Take, Play and Cue are never borrowed: that is Playout, invariant 4). From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. **Design done, 18 Nov 2026; the row stays open until the three numbers are measured again.** |
+| `11.72` | Scene Manager as a dense list, with a row menu and keys, as XPression's Scene Manager is worked | UI | 11.64, 11.71 | The Scene Manager shows one 26 px row per scene by default (a thumbnail view stays one click away and is remembered per user); a click opens the scene, the arrows, Home and End walk the rows, Enter opens, Delete takes two presses on the same row within 3 seconds, the menu key, Shift+F10 or a right-click offers the row's commands with the same refusals as its buttons, and no preview is drawn in the list. Still to do from XPression: Rename (F2), Change ID (F7), Convert Dimensions, Export Scene and Regenerate Thumbnails on the menu, and a thumbnail size. From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. **First build done, 18 Nov 2026; the row stays open.** Built: `Editor/src/scene-manager.ts` (`view: "list"`, `rowStatus`), `Editor/src/scene-list-nav.ts` (`moveRow`, `rowCommand`, a Delete that arms first), the page wiring in `Editor/web/main.ts`, `index.html`, `style.css`. Measured in the running Editor on the 3862 x 2122 window: two scenes took 515 of 647 px of the left column as thumbnail cards (190 px each) and take 44 px as rows (22 px each), so Objects and Assets now show in full, and a project of 20 scenes needs about 440 px instead of 3800. Tests: 21 (8 keyboard rules, 13 projection); 14 mutations each failed a named test (one survived as an equivalent mutant, a redundant branch, which was removed). Seen live: one Delete arms the row (red, and the log says to press again within 3 seconds) with focus kept across the re-render; the second Delete, which deletes, was not pressed live so as not to delete a scene. Open: no unit test of the page glue (it is type-checked by `npm run typecheck:web`). |
+| `11.73` | Tabbed panel groups in the dock regions | UI | 11.71, 11.72 | A dock region can hold panel groups: a row of tabs with one panel visible, stored in the layout (version 3), moved by dragging a tab, and reconciled on load like panels are today. The default right column is two groups, Inspector (Properties, Effect Controls, Text styles, Fonts) and Library (Effects & Presets, Assets, Materials, Take page, Bindings), so every panel is reachable without scrolling the column. Preview stays above them and collapsible. From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. Jev: tab groups 0.92, one-open accordion 0.01, keep the scrolling stack 0.02, floating only 0.05. **First build done, 18 Nov 2026; the row stays open.** Built: the layout model has tab groups (`Editor/src/workspace-layout.ts`: `TabGroup`, `groupOf`, `regionEntries`, `activateTab`, `groupPanels`, `moveToGroup`, `ungroup`; layout version 3, so a stored version 2 layout is replaced once and the replacement is said once), rendered as a tab strip over the showing panel (`Editor/web/main.ts`: click, arrow keys, Home and End, drag a tab onto another strip to join it, drag it out to a dock to tear it off, the Window menu brings a hidden tab forward; `style.css`). The default arrangement: the right dock is Preview, then an Inspector group (Properties, Animation, Effect Controls, Text styles, Fonts) and a Library group (Effects & Presets, Materials); the four delivery panels (Take page, Template controls, Data bindings, Publish) are a group at the left under Assets, where the Scene Manager list left about 220 px empty (Jev 0.51 for the left dock against 0.31 and 0.18 for the right; Laya preferred folding Preview, 0.86, and answered 0.98 to the yes/no, so it did not discriminate; this departs from the 14 Sep 2026 card-sort placement of the delivery panels and is one drag to undo). The groups share the dock's height and the showing panel scrolls inside its group, so the right dock no longer scrolls (it held 13 panels at about twice its height); the engine preview's picture is limited to 14 % of the window height. Seen live: the groups render in the running Editor, the version note appears and is stored once, and clicking the Fonts tab shows the Fonts panel. Tests: 36 in `tests/workspace-layout.test.ts` (21 new: default groups, adjacency, activation, tear-off, join, reorder, refusals by name, restore repairs); 19 mutations each failed a named test. Gate: fmt 0, clippy 0, `npm run check` 0. **Open, and named:** arrow keys between tabs, dragging a tab and the Window-menu focus were not exercised live (the user was working in XPression at the time and window driving was stopped), and the page wiring has no unit test; the Effects & Presets list shows only about three rows at the default sizes, so the Effects workspace of 11.76 or a smaller Preview is still needed; a group's size is shared, not stored. |
+| `11.74` | Chrome savings: a status line for the Activity log, one header row, a one-row timeline toolbar | UI | 11.71 | The Activity log is one status line showing the latest entry that opens to the full log as a drawer (6.2 % of the height now for two lines); the header row (scene id, name, New, Open, Import, Save, Undo, Redo, Reset layout) and the tool row become one; and the timeline's Keys, Presets and Phases rows become one row with the rarer controls in a popover, if a measured use shows the popover costs no more clicks than the row saved pixels. From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. Jev: status line 0.92; one-row timeline toolbar only 0.54, so it is the last of the three and conditional. |
+| `11.75` | Pop out any panel into its own window | UI | 11.73 | Any panel or panel group can be popped out into a second Editor window (for the second monitor, as the user spreads XPression's Object Manager, Scene Director, Material Manager and Key Graph Editor), shows the same state, and returns to its dock on close; a popped-out panel never gives the second window a control-plane client (R6) or a document of its own (R4). From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. Jev 0.77. |
+| `11.76` | Named workspaces: Author, Animate, Effects, Review | UI | 11.73 | The layout is saved under a name and switched from the Window menu, as After Effects does and as an XPression operator keeps a layout per task; four ship (Author, Animate with the timeline and speed graph large, Effects with Effect Controls and Effects & Presets wide and the Engine preview beside the Draft viewport, Review with the Preview large). The user can save their own and reset to a shipped one. From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. Jev 0.80. |
+| `11.80` | Resizable panels: splitters between stacked panels and groups, and a drop indicator | UI | 11.73 | Every panel and tab group stacked in the left and right docks can be resized with a splitter between it and the next, as in After Effects: drag the bar, press the arrow keys on it, double-click to go back to sizing by content; the sizes are stored per dock and are kept only for the very panels they were measured for. Panels are dragged by their heading or tab, and a line shows where a dragged panel will land. From the user's direction of 18 Nov 2026 ("the effects shall be collapsable dropdowns of each category and also each module shall be draggable and resizable similar to After Effects"; the user also shared the After Effects install folder as read-only reference); proposed by Claude. **First build done, 18 Nov 2026; the row stays open.** Built: `Editor/src/workspace-layout.ts` (`RegionSplit`, `splitRegion`, `clearSplit`, `dragSplitter`, `entryIds`, `MIN_SPLIT`; sizes are dropped when a dock's panels change and at restore when they do not match; additive, so the layout version stays 3), the page (`wireSplitters`, `measureDock`, `commitSplit`, `showDropLine`) and `style.css`. 21 tests added (56 in the file); 27 mutations (S1 to S19, FF1 to FF8) each failed a named test (one survived at first, an un-normalised restore, and a case with sizes that do not add to one now catches it). Seen live: dragging the splitter between the Inspector and Library groups resized them, the sizes survived a relaunch, and the dock filled with no gap. That live drag found two faults, both fixed: a hidden panel measures zero, and lifting it to the minimum share then re-normalising pushed it below the minimum so the save was refused (now `floorFractions`); and flex-grow values adding to less than one left a blank strip at the foot of the dock (now scaled by 100). Open: the keyboard on a splitter, the double-click reset, the left dock's splitters and the drop line were not exercised live; the bottom dock (timeline) and the centre are not stacked, so their splitters are the existing dock resizers; floating panels are row 11.75; dropping a panel on another panel's body to make a tab group (After Effects' centre drop zone) is not built. |
 
-### Phase 11 UI requirements — Editor 2.0 parity and animation
+### Module F2 — Authoring panels
 
-**Status: Planned.** The new requirements are tracked by 11.18–11.24; they do not claim that the existing component-level steps deliver a complete editor. All dependencies listed in a row must be done before that step starts.
-
-**Inspection baseline (12 September 2026):** `Editor/web/main.ts` mounts object-manager and inspector projections and the Three.js viewport. Reusable scene/template, font, material and motion-preset modules exist under `Editor/src`, but are not all integrated into the shell entry point. No interactive timeline module is present there. `Shared/contracts/src/scene.rs` currently stores scene timeline duration; `design_system.rs` already defines normalized motion channels, keys and outgoing easing token references. These are foundations to extend, not systems to replace. Verify current wiring again when implementation begins.
-
-- Visual direction, amended by the user on 15 October 2026: recreate the shared EffectCraft / After Effects workspace structure and presentation under 11.63. Keep advanced panels collapsible and reuse GrapiX's authoring commands and virtualised timeline.
-
-- Editor 1.x parity is required in Editor 2.0: restore the templates/scenes manager, object creation and object manager, object details and type-aware property inspector, data binding panel, font manager, asset browser and material manager as reachable, functional panels in the Tauri workspace.
-
-- Inspect and reuse the existing architecture before implementation. Extend the current object-manager, inspector, scene-manager, font-manager, material-manager, motion-preset-browser, agent-surface and viewport modules and Rust editor services; do not unnecessarily rewrite working systems or create a second scene model.
-
-- Place keyframe diamonds beside supported animatable properties, including Position, Scale, Rotation, Opacity and Size. Empty means no keyframe at the current playhead; filled means a keyframe exists there. Indicate animation elsewhere separately so an empty diamond does not imply the whole track is unanimated. Clicking adds or removes the current-frame key, with accessible labels and keyboard operation.
-
-- Provide a clearly visible Auto-Key mode. When enabled, changing an animatable property at a new timeline position creates a keyframe; editing an existing key updates it without duplicates. Specify base-value and first-key behavior, multi-selection, undo/redo and Auto-Key-off behavior before implementation so edits do not unexpectedly alter other frames.
-
-- Selecting an object automatically reveals its animation tracks. Expand/collapse tracks by property and keep selection synchronized across viewport, object manager, inspector and timeline. Support selecting, dragging/moving, deleting and copying/pasting keyframes, with frame snapping, defined collision behavior and one undo transaction per gesture.
-
-- Offer Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier easing. Keep common easing one action away and show the curve editor on demand. Add simple Fade, Slide, Scale and Pop presets through the existing preset library, with adjustable supported parameters and save-selection-as-preset.
-
-- Spacebar toggles smooth local animation preview and pause from the current playhead; it must not steal typing or native control shortcuts when an input, editable field or button has focus. Scrubbing and playback evaluate the same animation at the scene rational frame rate, preserve editing state and never send Program/take/output commands.
-
-- Preserve Rust-owned contracts and generated TypeScript, validated writes, revision checks, undo transactions, design-system motion tokens and the existing preview/production separation. Reconcile editable scene channels with existing normalized preset channels and easing tokens; extend contracts only where necessary. Human keyframe authoring must not silently widen the agent/MCP surface, which selects and parameterizes presets under ADR Part G.
-
-- Acceptance requires actual Tauri workflows on Windows (macOS dropped 8 Nov 2026, user decision): create/open a scene or template, add/select/edit objects, bind data, manage fonts/assets/materials, animate with diamonds and Auto-Key, edit/copy keys, apply easing/presets, preview, undo/redo, save and reopen. Verify animation persistence and evaluated values, report unsupported cases, and retain the 11.10 flat-node-count and 11.11 no-static-repaint gates. Isolated panel projections or headless tests alone do not establish Editor 1.x parity.
-
-### Phase 11 additions — broadcast CG editor parity (13 September 2026)
-
-**Status: Planned.** Tracked by 11.25–11.28. Added after comparing the Editor
-against the authoring UI of established broadcast real-time graphics tools:
-Vizrt (Viz Artist Stage/Directors, Viz Trio Page Editor and Tab Fields, Viz
-Template Wizard variants), Ross XPression (Scene Director, Take Item Template
-Data, Font Manager), Singular.live Composer (In/Out timelines, Control Nodes,
-subcompositions), and the CasparCG ecosystem (Loopic, the OGraf typed template
-definition). These four rows are the modules that survived that comparison as
-genuinely missing rather than merely different.
-
-- **11.25 exists because the contract is already half-committed.** `MOTION_PHASES`
-  (`in`, `out`, `hold`, `continue`, `update`) is in `Shared/contracts/src/mcp.rs`
-  and `MotionPhases` in `design_system.rs` — but only presets speak it. The scene
-  timeline is one linear span, so an authored scene cannot say where its take-in
-  ends and its take-out begins. Every tool surveyed models this. Without it
-  Playout (Phase 12) can only cut.
-
-- **11.26 is the typed handoff Phase 12 consumes.** Four independent tools
-  converged on the same idea: Viz Trio Tab Fields, XPression's Template Data
-  tab, Singular Control Nodes and Loopic's OGraf definition all let the author
-  declare which properties an operator may drive. 11.19 binds data *into*
-  properties; nothing declares the outward contract. Invariants 4 and 5 split
-  authoring from taking, so this interface is load-bearing rather than cosmetic.
-
-- **11.27 separates the template from a filled instance**, as Viz Trio's Page
-  Editor and XPression's take items do. A filled page must never mutate the
-  template it came from.
-
-- **11.28 is a named applyable style, which design tokens are not.** 10.x tokens
-  are defaults; Viz's Fontstyle Editor and XPression's style reuse are saved
-  bundles an author applies. 11.28 resolves tokens rather than copying them, so
-  the two do not become two sources of brand truth.
-
-**Deliberately not added, and why.** Rundown and playlist authoring belong to
-Playout (Phase 12) — CasparCG's client, SOFIE and Singular Studio all place it
-in the control application, not the design editor. In-editor scripting (Viz
-scene scripts, Singular composition scripts, Loopic actions) was refused here on
-13 September 2026 because ADR Part G routes programmatic authoring through MCP
-agents. **That refusal was reversed on 2 October 2026:** per-scene JS modules
-now run inside 16.4's deterministic sandbox (11.55), while agent authoring
-still goes through MCP. A Graphic Hub-style
-asset database browser duplicates Phases 7–9. Viz's full spline editor is
-excluded by this phase's own "do not copy After Effects complexity" rule.
-
-**Live data-source connectors — scoped 25 September 2026 as Phase 19.**
-(XPression DataLinq, Viz DataPool, Singular's Sheets widget and Data Streams.)
-This was deferred: 8.6 makes a data *schema* discoverable and
-`Editor/src/bindings.ts` resolves against a static `dataContext`, but no step
-said where live data comes from. The user decided on a standalone Data Server
-application read by both Editor and Playout; see Phase 19. Subcompositions as addressable overlay units,
-template variants and a selectable poster frame are also recorded here as
-understood gaps that depend on 11.26/11.27 landing first.
-
-### Phase 11 additions — Editor core and AI readiness (2 October 2026)
-
-**Status: Planned.** Tracked by 11.36–11.59, plus 8.14, 13.7, 13.8, 15.12,
-15.13, 16.10–16.13 and 19.10, with folds into 11.31, 15.8, 16.4, 17.4, 17.7,
-18.2–18.4, 19.4, 19.6 and 19.8. Merged with the user's approval from
-`docs/proposals/GrapiX-Editor-Core-and-AI-Readiness-Proposal.md` (memory,
-2 October 2026).
-
-- **11.36–11.42 are foundations:** command model, command-log undo, hashed
-  revisions, provenance, token bindings, headless render and lint. The editor
-  module rows build on them, and they are cheap now and expensive to retrofit.
-- **Overlap rule.** Where a proposal item overlapped a done or active step,
-  the new step covers only the missing delta and names the step it extends in
-  its Needs. No done step was reopened. Items overlapping a pending step were
-  folded into it.
-- **Decisions taken at merge.** Per-scene JavaScript is accepted inside 16.4's
-  deterministic sandbox, reversing the 13 September refusal above. 8.11's
-  operator-scoped Program tools stay; the rule is that no author- or
-  agent-scoped tool reaches playout-control. `MaterialKind` collapses into one
-  physically lit material (11.50). 2.6's autosave ring is removed (11.43).
-  Refusal-class lint findings block publish and the rest warn (11.42). Only
-  Admin may approve (13.7).
-- **Standing prohibitions, all phases:** no neural frame generation or
-  temporal AI upscaling on Program; nothing generative runs at Take time;
-  agents never Cue, Take, Continue, Clear or configure outputs. These are
-  invariants 60–66.
-- The proposal's data-source module was folded into Phase 19, whose Data
-  Server owns sources. "Phase 7 done" in the command model's Needs was
-  narrowed to 7.1, the only Phase 7 step it reads; 7.2 and 7.3 are import work.
-
-### Phase 11 additions — layer styles, effects and text animators (12 October 2026)
-
-**Status: Planned.** Added at the user's request. 11.60 gives Photoshop layer
-styles the owning step `memory.md` rule 24 said they lacked; 3.22 and 11.62
-own the effects library; 11.61 owns text animators. All three render on the
-GPU compositor of 3.16–3.22 and port EffectCraft algorithms with attribution
-(ADR-0003's reuse catalogue). None of them may silently drop an option it
-cannot render: a missing capability is a named finding.
-
-## Phase 12 — Playout UI
-
-Second because the control surface is smaller and the service beneath it is already proven. XPression/Viz conventions govern this surface; After Effects conventions govern the Editor.
-
-**First-release scope (user decision Q8, 16 October 2026):** sports/esports first. In scope: overlay layers with channel/layer targeting on one Program channel (12.10) and an as-run record (12.11). **Named out of scope, no rows yet:** MOS/NRCS newsroom integration, mirrored-engine failover, multiple output channels, programmable control panels, XPN/AMCP protocol adapters, switcher automation, GPI/GPO and tally.
+*Frontend.* What the author works in: Scene Manager, object manager, inspector, fonts, materials, assets, data bindings, text styles, the Test fill and the console. Every panel is a projection of the command model and reachable from the Window menu.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `12.1` | Tauri 2 shell | UI | 0.3 | Signed on Windows (macOS dropped 8 Nov 2026) |
+| `11.8` | Object manager treegrid | UI | 11.5 | Hierarchy, visibility, lock, alpha, transforms |
+| `11.9` | Type-aware inspector | UI | 11.8 | Multi-select Mixed state, one undo transaction |
+| `11.12` | Material manager | UI | 11.9 | Shared instances, relink, usage lookup |
+| `11.13` | Font manager panel | UI | 2.8 | Ported from the 1.x panel (archive branch), not redesigned, and proven by one strict scripted case: several font files (OTF, TTF, WOFF, WOFF2) ingested in a single action into the running Editor, each content-hashed and deduplicated, registered before any text is measured and usable at once; a font leaves the scene only through an explicit Remove action, never implicitly; removing a font still in use is refused naming the objects that use it; ingest and removal each form one undo entry and survive save/reopen; an unresolved font still blocks the take by name |
+| `11.14` | Design system panel; tokens as editor defaults (historical compatibility; not part of the 15 Oct authoring workflow) | UI | 10.4 | Palette and type scale are the path of least resistance |
+| `11.16` | Live conformance indicator (historical compatibility) | UI | 7.5 | Drift visible as it happens, not at publish |
+| `11.18` | Editor 1.x panel parity in the Editor 2.0 workspace | UI | 11.5, 11.8, 11.9, 11.12, 11.13, 11.16, 7.1 | Templates/scenes CRUD, object creation and management, object details/properties, fonts, assets and materials are reachable and functional in Tauri; reuse existing modules, preserve selection, validate writes, undo and save/reopen |
+| `11.19` | Data binding panel integrated with object properties | UI | 11.18, 8.6 | Discover the data schema; create, edit and remove property bindings, preview sample data, show invalid paths/types explicitly and preserve bindings through save/reopen |
+| `11.27` | Test fill in the Editor: fill a template instance (operator pages are 12.8) | UI | 11.26 | The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, and saves and reopens named instances without mutating the template they were filled from. Amended 16 Oct 2026 (decision Q5): the panel is renamed Test fill; operator pages and their storage are 12.8's work in Playout. The criteria above were verified earlier and stand for the Editor's test fill |
+| `11.28` | Named text style presets | UI | 11.13 | Font, size, tracking, line height, case and fill/stroke are saved as one named, reusable style; applying a style to a text object sets exactly those properties as one undo entry; a style whose font the scene does not carry refuses by name; styles survive save/reopen |
+| `11.29` | Multi-scene workspace: scenes as first-class entities | UI | 11.18 | A broadcast carries many graphics, so each open scene is a distinct session owning its own document, selection, playhead, collapse state and undo history; one workspace module lists every open scene and switches the active one; viewport, object manager, inspector, timeline, animation and binding panels are children of the active scene and render it alone; switching preserves each scene's own state, an edit or undo in one scene cannot alter another, and closing a scene with unsaved changes refuses by name |
+| `11.45` | Object manager on the command model: parenting, groups, order, unique names | UI | 11.8, 11.36, 11.37, 11.44 | Extends 11.8. The object manager is the authoritative hierarchy driving the viewport, inspector and every scene view; parenting, groups, reordering, show/hide and lock are 11.36 commands and all undoable. A test shows the viewport and inspector reflect hierarchy changes made only through the object manager. A duplicate name is refused by name with a suggested free name (`object1`, `object2`, …) |
+| `11.46` | Inspector: per-type property sets, scrub fields, animation stopwatch | UI | 11.9, 11.21, 11.36, 11.37, 11.45 | Extends 11.9/11.21. Each object type in 11.47–11.49 shows exactly its defined property set; numeric fields scrub by dragging and accept negative values, and one scrub is committed as one command, not one per mouse move. Each animatable property carries an After Effects-style stopwatch beside 11.21's current-frame diamond, with no separate Animation tab; toggling it creates a keyframe at the current frame and undo removes it |
+| `11.52` | Asset manager: versioned replace and provenance shown | UI | 2.7, 11.18, 11.39 | Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; replacing an asset creates a new version and leaves earlier revisions pinned to the old hash. Resuming an interrupted transfer is 14.3's done-when and is not duplicated here |
+| `11.58` | Console and debugger | UI | 0.6, 11.36, 11.42 | Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, and a test enumerates the codes; 11.42 lint findings appear in the console |
+
+### Module F3 — Animation: timeline, keyframes and easing
+
+*Frontend.* After Effects behaviour: per-property tracks, keyframe diamonds and Auto-Key, selection-driven timeline editing, easing and Bezier curves, the speed graph, stagger and infinity modes. Every property is animatable, and every imported Figma or PSD layer is an ordinary animatable object.
+
+**Editor 2.0 parity and animation requirements.** Tracked by 11.18 to 11.24 and 11.68; they do not claim that the existing component-level steps deliver a complete editor.
+
+- Visual direction: keep the UI clean, minimal and Figma-like; target roughly 70% Figma simplicity and 30% simplified After Effects animation control. Reveal advanced controls only when needed; do not copy After Effects complexity.
+- Editor 1.x parity is required in Editor 2.0: restore the templates/scenes manager, object creation and object manager, object details and type-aware property inspector, data binding panel, font manager, asset browser and material manager as reachable, functional panels in the Tauri workspace.
+- Inspect and reuse the existing architecture before implementation. Extend the current object-manager, inspector, scene-manager, font-manager, material-manager, motion-preset-browser, agent-surface and viewport modules and Rust editor services; do not unnecessarily rewrite working systems or create a second scene model.
+- Place keyframe diamonds beside supported animatable properties, including Position, Scale, Rotation, Opacity and Size. Empty means no keyframe at the current playhead; filled means a keyframe exists there. Indicate animation elsewhere separately so an empty diamond does not imply the whole track is unanimated. Clicking adds or removes the current-frame key, with accessible labels and keyboard operation.
+- Provide a clearly visible Auto-Key mode. When enabled, changing an animatable property at a new timeline position creates a keyframe; editing an existing key updates it without duplicates. Specify base-value and first-key behavior, multi-selection, undo/redo and Auto-Key-off behavior before implementation so edits do not unexpectedly alter other frames.
+- Selecting an object automatically reveals its animation tracks. Expand/collapse tracks by property and keep selection synchronized across viewport, object manager, inspector and timeline. Support selecting, dragging/moving, deleting and copying/pasting keyframes, with frame snapping, defined collision behavior and one undo transaction per gesture.
+- Offer Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier easing. Keep common easing one action away and show the curve editor on demand. Add simple Fade, Slide, Scale and Pop presets through the existing preset library, with adjustable supported parameters and save-selection-as-preset.
+- Spacebar toggles smooth local animation preview and pause from the current playhead; it must not steal typing or native control shortcuts when an input, editable field or button has focus. Scrubbing and playback evaluate the same animation at the scene rational frame rate, preserve editing state and never send Program/take/output commands.
+- Preserve Rust-owned contracts and generated TypeScript, validated writes, revision checks, undo transactions, design-system motion tokens and the existing preview/production separation. Reconcile editable scene channels with existing normalized preset channels and easing tokens; extend contracts only where necessary. Human keyframe authoring must not silently widen the agent/MCP surface, which selects and parameterizes presets under ADR Part G.
+- Acceptance requires actual Tauri workflows on Windows: create/open a scene or template, add/select/edit objects, bind data, manage fonts/assets/materials, animate with diamonds and Auto-Key, edit/copy keys, apply easing/presets, preview, undo/redo, save and reopen. Verify animation persistence and evaluated values, report unsupported cases, and retain the 11.10 flat-node-count and 11.11 no-static-repaint gates. Isolated panel projections or headless tests alone do not establish Editor 1.x parity.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `11.10` | Timeline: virtualised rows, canvas layers, dirty-rect repaint | UI | 11.5 | Node count flat from 100 to 100,000 keys |
+| `11.11` | Speed graph and curve editing | UI | 11.10 | Scrub causes no static-layer repaint |
+| `11.21` | Inspector keyframe diamonds and Auto-Key | UI | 11.9, 11.20 | Position, Scale, Rotation, Opacity, Size and other supported properties show empty/filled current-playhead diamonds; toggling keys and Auto-Key creates or updates exactly one key, with defined first-key/base-value/off behavior, multi-select and undo/redo |
+| `11.22` | Selection-driven timeline and keyframe editing | UI | 11.10, 11.21 | Object selection automatically reveals property tracks; expand/collapse, select, drag/move, delete and copy/paste keys with frame snapping, explicit collision behavior and one undo per gesture; preserve flat node count from 100 to 100,000 keys |
+| `11.23` | Simple easing, Custom Bezier and starter presets | UI | 11.11, 11.15, 11.22 | Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier persist and evaluate correctly; Fade, Slide, Scale and Pop use the existing preset library, supported parameters and save-selection workflow; advanced curves appear on demand and scrubbing avoids static-layer repaint |
+| `11.24` | Spacebar preview and integrated Editor parity verification | UI | 11.6, 11.19, 11.23 | Spacebar smoothly plays/pauses local animation without stealing typing/control shortcuts; verify panel-to-animation workflows, frame-consistent scrubbing, undo/redo and save/reopen in Tauri on Windows, measure playback on the Windows workstation and confirm no Program/output side effects |
+| `11.68` | Keyframes the way After Effects and EffectCraft do them: per-property tracks, easing, graph editor | UI | 11.36 | Every animatable property has its own keyframe track with stopwatch-style enable, keyframe selection and nudging, easy ease and custom bezier easing, and a value and speed graph editor, matching the After Effects interaction model and the EffectCraft engine semantics the render core ports; the engine renders the same curve the Editor shows (a parity test at keyframes and between them). From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. **Audited 18 Nov 2026.** What exists (11.10, 11.11, 11.36): per-property channels, a stopwatch-style toggle and key nudging (`keyframe-editor.ts`, `timeline/key-edit.ts`), named easings and a custom bezier stored per segment (`(x1,y1)` is the outgoing handle and `(x2,y2)` the incoming one, so the **contract already carries After Effects' in and out influence**), a TypeScript easing mirror pinned against the Rust evaluator (`timeline/easing.ts`), and a value-over-time graph module (`timeline/speed-graph.ts`, 12 tests). **Gaps found:** the graph draws only the outgoing handle and `bezierFromHandleDrag` is not wired to any pointer handling or command in the app, so no curve can be edited in it; no incoming-handle display or drag; no After Effects "Easy Ease" (33.33% influence, `(1/3,0,2/3,1)`) presets; no true speed (velocity) graph beside the value graph; no multi-key selection of handles; the engine-versus-Editor parity test between keys is the existing pinned reference only. No contract change is needed for the first build: incoming handle, Easy Ease presets, and wiring the drag to the existing edit command. The graph's canvas theme was still hard-coded blue and is now the SKWAD ember (done). Needs Jev and Laya on the interaction model before the build. **First build done, 18 Nov 2026; the row stays open** (`docs/evidence/11.68`). The interaction model is After Effects' own, so it was not put to Jev and Laya. Built: both handles of a segment are drawn and edited (the contract already stored them: `(x1,y1)` out, `(x2,y2)` in); dragging a handle on the value graph shows the curve live and saves one undoable `updateKeyframe` gesture on release; **Easy Ease** (speed 0, 33.33% influence) on the selected keys by F9 (both sides), Shift+F9 (in), Ctrl+Shift+F9 (out), or the Easing picker, rewriting the arriving segment on the previous key and the leaving segment on the key itself and keeping each segment's other handle; a read-only **speed graph** beside the value graph (a button in the timeline header); the graph is now a continuous curve (it was drawn as one flat step per frame) and uses the SKWAD ember. Easy Ease is exactly smoothstep `3t^2 - 2t^3`, pinned on the engine evaluator (`easy_ease_is_smoothstep_on_the_engine_evaluator`) and in the Editor (`Editor/tests/easy-ease.test.ts`, 17 tests) with the same numbers. Seen in the running Editor: handle drag, F9 and Shift+F9 giving handles at exactly one third and two thirds, the speed parabola, and the playhead no longer jumping after a drag (found live, fixed). 13 mutations each failed a named test. **Not built, and named:** dragging handles in the speed graph (After Effects edits influence there); multi-key handle editing; a custom bezier numeric editor beyond the key detail panel; temporal handles on separate dimensions (X and Y are separate channels here by design); the pointer glue in `main.ts` (drag, the click after it) has no unit test and is covered by the live check only; the timeline dock is short on a default layout, so the graph is hard to use until it is enlarged (a layout item for 11.67). |
+| `11.77` | Stagger animations: offset the keys of several selected objects by a step | UI | 11.22 | With several objects selected, a Stagger command offsets each one's selected keys by a step (frames, in the order of selection or the layer order, with a reverse and a from-centre option), as one undoable gesture, ported from XPression's Stagger Animations. From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. Jev 0.77. |
+| `11.78` | Pre- and post-infinity on the speed graph: constant, reset, repeat | UI | 11.68 | A property's curve can continue before its first key and after its last as constant, reset or repeat (cycle), previewed in the speed graph and evaluated by the engine's animation evaluator and the contract, so a looping broadcast element needs no copied keys; ported from XPression's Key Graph Editor. The engine side is a contract change and has its own proof. From the user's direction of 18 Nov 2026 ("borrow the XPression UI knowledge from the xpression-builder skill and work out the modules that can be incorporated and improvise the UI layouts by optimally using the real estate on the application"); design read by Jev (Laya answered 0.90 to 0.95 to every yes/no question and disagreed on every choice, so Jev led and this is disclosed); proposed by Claude. Evidence: `docs/evidence/11.71`. Jev 0.74. |
+
+### Module F4 — Effects & Presets and Effect Controls
+
+*Frontend.* The main thing (user, 18 Nov 2026), on screen: the Effects & Presets and Effect Controls panels listing EffectCraft's 306 effects in collapsible category dropdowns with the engine's usable ones marked, and the preset library (EffectCraft's 8 original presets and GrapiX's own looks and motion presets). Fed by module B5.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `11.15` | Motion preset browser; save selection as preset | UI | 1.6 | Library grows from real designer work |
+| `11.62` | Effects and layer-style controls in the Editor | UI | 3.22, 11.46, 11.60 | Adding, removing, reordering, enabling and duplicating effects and layer styles on any object are 11.36 commands with one undo each; every parameter shows in the inspector with scrub fields and an animation stopwatch; a refused effect or style shows its refusal code and fix |
+| `11.69` | Effects & Presets and Effect Controls in the Editor: EffectCraft's 306 effects listed, the ones GrapiX renders marked usable | UI | 3.22, 11.36 | An Effects & Presets panel lists EffectCraft's whole catalogue (306 effects in After Effects' categories, attributed, generated into the contract from the pinned reference) with search; the 16 effects the GrapiX engine renders apply to the selected scene object by double-click or Apply; the others are shown as catalogued and not yet ported and refuse by name, never as working. An Effect Controls panel shows the object's stack: enable, reorder, duplicate, remove, every parameter typed from the contract's one parameter table (number with its range, switch, choice), and a keyframe on any parameter (`effects.<id>.<path>`); every change is one undoable `setEffects` or keyframe command; seen in the running Editor with the engine preview. From the user's direction of 18 Nov 2026 ("effects and presets shall be the main thing"; "support AE scripts or other extensions and plugins as After Effects does"); proposed by Claude. **First build done, 18 Nov 2026; the row stays open** (`docs/evidence/11.69`). Built: the catalogue of EffectCraft's 306 effects generated into the contract (`tools/gen-effect-catalog.mjs` writes `Shared/contracts/src/effect_catalog_data.rs` from the pinned reference, attributed); `effect_catalog.rs` builds the surface: each effect with its category, whether this engine renders it (exactly the 16 of `Effect`), its default instance and its parameters read from `Effect::visit` (range, switch, choice options as wire values); `cmd_effect_surface`; `Editor/src/effects-panel.ts` and two panels: **Effects & Presets** (search, After Effects' categories, "16 of 306 effects render on the GrapiX engine", Apply or double-click, unported ones shown as not ported and never applicable, a toggle to hide them) and **Effect Controls** (the selected object's stack: on/off, up, down, duplicate, remove; a typed control and a Key button per parameter). Every change is one undoable `setEffects` or `createKeyframe` command. Seen in the running Editor: Glow applied to a rectangle, radius set to 40, 5000 refused by name ("Radius must be between 0 and 1000"), a key added and shown as an `Effects.glow.radius` timeline track. Tests: 7 Rust, 19 Editor; 14 mutations, 13 caught by a named test, 1 equivalent (a defensive copy). **Open, and named:** the Editor's draft viewport does not draw an object that has effects (it shows the outline and says so: effects run in the engine), so an effect cannot be *seen* in the Editor until the engine preview monitor (11.65) exists: that is the next thing to build for this row; colour parameters are four number fields, not a colour picker; curves have no curve editor; no drag to reorder; one object at a time; the handlers in `main.ts` are covered by the live check only. |
+| `11.70` | Preset library: EffectCraft's 8 original presets and GrapiX's own animation and effect presets | UI | 11.69, 11.23 | The Effects & Presets panel carries animation presets beside effects: EffectCraft's 8 original text-animator presets (attributed; they apply once text animators exist, 11.61, and say so until then) and GrapiX's own broadcast set (in, out and emphasis motion; effect-stack looks such as soft glow, lower-third shadow and a grade), each applied as one undoable gesture and saved by the user as their own. From the user's direction of 18 Nov 2026 ("effects and presets shall be the main thing"; "support AE scripts or other extensions and plugins as After Effects does"); proposed by Claude. **First slice, 18 Nov 2026; open.** Listed in Effects & Presets: EffectCraft's 8 original text-animator presets (attributed, shown as waiting on 11.61 with that reason) and four GrapiX effect-stack looks that apply now (Lower-third shadow, Soft glow, Punch grade, Frosted backing), each validated as a stack by a Rust test. Not built: more animation presets beyond fade, slide, scale and pop; saving the user's own effect presets. |
+| `11.79` | Effects & Presets categories as collapsible dropdowns | UI | 11.69, 11.70 | Each category of the Effects & Presets panel (EffectCraft's catalogue categories and the preset categories) is a bar that opens and folds, folded until opened as After Effects' tree is; the open set is kept per user; a typed search opens every category that has a match; Expand all and Collapse all, and the keyboard (Enter or Space flips a category, Right opens, Left folds). From the user's direction of 18 Nov 2026 ("the effects shall be collapsable dropdowns of each category and also each module shall be draggable and resizable similar to After Effects"; the user also shared the After Effects install folder as read-only reference); proposed by Claude. **First build done, 18 Nov 2026; the row stays open.** Built: `Editor/src/effects-panel.ts` (`expanded` on each group node, `toggleGroup`, `browserGroupIds`; a folded category keeps its effects in the agent's view), the page wiring in `Editor/web/main.ts` (header click and keys, Expand all, Collapse all, a per-user open set), `style.css` (a caret, the list hidden when folded). 8 tests added (25 in the file); 8 mutations each failed a named test. Seen live in the running Editor: the categories show folded with their counts (for example "Blur & Sharpen · 3 of 16 usable", "Distort · 0 of 39 usable") and Expand all opens them. Open: search, the keyboard and Collapse all were not exercised live; the category order follows the catalogue (alphabetical), not After Effects' menu order; preset categories could take After Effects' preset folder names (Behaviors, Shapes, Text, Transitions). |
+
+### Module F5 — Import and scripting panels
+
+*Frontend.* The panels that surface import and scripting: the Import UI with its tier and substitution report, the Figma import UI, and ScriptUI-style dockable script panels. Fed by modules B11 and B12.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `11.17` | Import UI with tier and substitution report | UI | 7.2 | Nothing substituted without being named |
+| `16.15` | ScriptUI panels and extensions: dockable script panels | UI | 16.14, 11.33 | A script in `Scripts/ScriptUI Panels` is listed at the bottom of the Window menu, builds its interface into the panel it is given (`this`), docks, floats and closes like any Editor panel and reopens at the next launch; the common ScriptUI controls (button, text, edit, dropdown, checkbox, slider, group, panel) are supported and an unsupported one is named. From the user's direction of 18 Nov 2026 ("effects and presets shall be the main thing"; "support AE scripts or other extensions and plugins as After Effects does"); proposed by Claude. |
+| `18.10` | Import UI for Figma | UI | 18.3, 11.17 | Paste a Figma file or frame link, pick frames from thumbnails, see the coverage and substitution report before confirming, and land in one scene tab per frame |
+
+### Module F6 — Playout application
+
+*Frontend.* The operator's surface, under XPression and Viz conventions: library by Take ID, take list and rundown, transport (cue, take, continue, out, clear), confidence monitors, status, live telemetry in Help (Playout only), output configuration with its refusal reasons shown, the operator fill form, and the hash publish from the Editor. First release is sports and esports on one Program channel (Q8, 16 Oct 2026). Named out of scope, no rows yet: MOS and NRCS newsroom integration, mirrored-engine failover, multiple output channels, programmable control panels, XPN and AMCP adapters, switcher automation, GPI/GPO and tally.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `2.27` | Live telemetry in Help: a small, detailed performance graph in Playout | UI | 2.14, 2.22 | Playout's Help menu opens a compact telemetry panel fed by the engine (the existing `performance` request and heartbeat, extended where needed): a live graph per resource, not just CPU and RAM: GPU frame time and readback latency per adapter, render time per output, late and missed Program frames (never coalesced), the CPU twin's load, memory per process, each output's state and the control and asset connections. A failure names what failed and what to check (for example "adapter X lost", "readback stalled 3 frames", "output 2 not locked"), with the record id so the diagnostic bundle (2.14) finds it. Shown in the running apps against a real engine, including an injected GPU fault. From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. (Done 18 Nov 2026 for the engine and Playout. Jev and Laya, `docs/evidence/2.27/jev-laya-design.json`: the engine decides every finding once (both agreed); the reply carries a components list, additive, no protocol bump (Jev 1.00; Laya preferred fixed fields). `Shared/control-plane/src/telemetry.rs` assesses frame loop, GPU adapter, readback ring, output and reference into per-component state and series and typed findings with a stable id, what failed with its numbers, what to check and the log record: `readback.stalled` (3 clock frames behind), `readback.ring_full`, `readback.slow`, `frame.missed`, `frame.late`, `frame.headroom`, `gpu.no_hardware`, `output.inhibited`, `reference.lost`, `reference.free_run`. A resource the engine does not measure is NOT MEASURED, never OK: GPU time per frame is not measured (timestamp queries are off) and the adapter component says so. One panel, `Shared/web-panels/telemetry-panel.js`, copied into both apps by `tools/sync-shared-web.mjs` (checked in the gate), opened from Help, Live telemetry (native menu, both shells) and from Playout's header; a failed read is named with the age of the last good reading. Seen in the running Playout against the real engine (`docs/evidence/2.27/playout-telemetry-panel.png`): it reported, from real numbers, 425 Program frames never emitted, the output refusing Program, every frame late at 25 ms against 20 ms (a debug engine) and free-run. Mutations: 12 of 13 each failed a named check and were restored byte-identical (two were first missed by my own harness and a test that did not isolate them, then fixed). **Not covered, and named:** the engine's mapping of the real readback ring needs a hardware GPU and has no test; no GPU fault was injected live (the findings shown were real ones, not an injected adapter loss); GPU time and the CPU twin's load are not measured, so they have no series.) **Scope changed by the user, 18 Nov 2026:** live telemetry is Playout's alone; the Editor has nothing to do with live broadcast, so the Editor has no telemetry panel and no engine link (row 2.28, which proposed one, is cancelled). The Editor's Help menu moved into its own menu row beside Window and carries only the diagnostic bundle export (2.14); the native Help row is gone from the Editor and stays in Playout. |
+| `11.57` | Hash publish to Playout from the engine-rendered preview | UI | 7.6, 8.10, 11.38, 11.53, 11.65 | Builds on 11.65's engine preview monitor (split 16 Oct 2026, decision Q2) and publishes a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of the same revision and frame match within its tolerance; a conformance test confirms the Editor cannot Cue, Take, Continue or Clear (invariant 4) |
+| `12.1` | Tauri 2 shell | UI | 0.3 | Signed on Windows |
 | `12.2` | Playout library: published graphics by Take ID | UI | 6.1 | Search, import, fetch, direct recall |
 | `12.3` | Take list and rundown | UI | 6.4 | Persisted cursor, continue behaviour |
 | `12.4` | Transport controls: cue, take, continue, out, clear | UI | 6.2 | Committed frame number shown |
@@ -629,30 +499,23 @@ Second because the control surface is smaller and the service beneath it is alre
 | `12.7` | Output configuration with refusal reasons shown | UI | 6.5 | A refused live adapter names the failing condition |
 | `12.8` | Playout operator fill form and pages | UI | 11.26, 11.54, 12.3 | Publish a graphic with text, colour and required fields; open it in Playout without the Editor project; the form is built from the published package alone; fill valid values, get a named refusal for an invalid or missing required value, save and reopen the rundown and reproduce the same page and revision. A page lives in the rundown, pinned to the published revision, hash and field-schema version (decision Q5) |
 | `12.9` | Lower-third operator workflow acceptance (end to end) | UI | 11.25, 11.54, 11.57, 12.1, 12.2, 12.3, 12.4, 12.5, 12.8, 12.10 | In the running Editor, create a lower third with named In/Hold/Continue/Update/Out phases and typed required fields and publish it. In the running Playout, find it in the library, add it to a persisted rundown page, fill it, pass readiness and show it in Preview with its pinned revision and hash; cue, take to Program, update one live-updatable field, continue through a stop point, run Out and clear its layer, recording each engine-committed frame and comparing Preview to Program under the declared tolerance. Repeated requests and a disconnect/restart before send, after send and after reply cause no duplicate take or clear, and reconnect reconciles from engine status. Removing and restoring a font or asset gives a named readiness refusal. `npm run check` passes. Native-resolution monitor claims name the media transport and hardware; hardware tests wait on 15.1 |
-| `12.10` | Overlay layers with channel/layer targeting on one Program channel | BE | 1.9, 6.2 | Cue, Take, Update, Continue, Out and Clear carry a `channel` and `layer` target; only the Program channel is accepted and any other channel refuses by name; a bug, a lower third and a ticker on separate layers are cued, taken, updated and cleared independently on one output with deterministic z-order and a named refusal on conflict; a targeted clear removes only its layer when the expected page still matches (decision Q8) |
-| `12.11` | As-run record | BE | 2.9, 2.10, 2.11, 2.15, 6.2 | Every accepted or refused Cue, Take, Update, Continue, Out and Clear writes one as-run record to the 2.10 JSON Lines audit sink: monotonic sequence, intent id, operator identity and scope (2.9), page, revision, hash, channel/layer target, result and engine-committed frame; replaying a fixture show's records matches the engine's committed events exactly. UI and export follow later (decision Q8) Amended by user decision, 16 Nov 2026 (ADR-0004): a separate as-run file per channel and day, each record synced before the operator sees the result and carrying the SHA-256 of the record before it, so removing, reordering or editing a line is detected at that line; it names the signed-in operator (2.15); if it cannot be written the operator is told at once and Program commands are still accepted. |
 
-## Phase 13 — Parity — the engine renders the viewport
+### Module F7 — Preview and parity
 
-The gap-register item. Only possible once both the engine and the overlay architecture exist.
+*Frontend.* The Editor's engine preview monitor, and the browser reduced to overlays only, so what a designer approves is what goes to air. Fed by module B13.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `13.1` | Measure viewport interaction latency on the existing stream | BE | 5.4 | Handle-drag round trip recorded on target hardware |
-| `13.2` | Binary alpha frames | BE | 13.1 | Alpha correct at the viewport edge |
-| `13.3` | Picking and bounds metadata from the engine | BE | 13.2 | Hit-testing without a browser renderer |
-| `13.4` | Adaptive resolution | BE | 13.2 | Degrades resolution before latency |
+| `11.65` | Engine preview monitor in the Editor | UI | 11.41 | The Preview panel shows an engine-rendered frame (11.41) of the active graphic at the playhead, labelled "Engine", within 250 ms of an edit on the reference machine (method recorded); the Three.js viewport is labelled "Draft"; a disconnected or refusing engine shows a named unavailable state, never a stale frame presented as current; parity with Program is not claimed until 13.6. Verified in the running Tauri Editor. Scheduled ahead of 11.31–11.35 (decision Q2) **First build done, 18 Nov 2026; the row stays open** (`docs/evidence/11.65`). Design reviewed by Jev and Laya (text only): asset-plane preview (Jev 0.96, Laya agreed), latest-only coalescing (0.76, agreed), a labelled out-of-date frame (0.98; Laya preferred blank, not taken). Built: a closed `preview` request on the asset plane (`Shared/asset-plane/src/publish.rs`: the draft `SceneDocument` and a frame; reply is the PNG with its SHA-256, re-hashed by the client; named refusals; the peer builds a job under its lock and the **render runs outside it**, invariant 14); the engine prepares the draft transiently (cached by content hash, 4 entries), draws it on the CPU reference (which draws effects, masks and clips) behind the same detached gate as headless renders so a preview never competes with Program under load (3.24), creates no revision and touches nothing on air; `gx_editor::preview::preview_document` and the shell's `cmd_engine_preview` (async, takes a target never a document, no control-plane client: R6 holds); `Editor/src/engine-preview.ts`, a pure scheduler: one render in flight and one pending, the newest wins, a frame is `current` only when it is the latest request's, otherwise `Out of date`, and an unreachable or declining engine is `Engine unavailable` or `Engine declined` with the reason; the Preview panel shows the Engine frame with its status and render time and the viewport is labelled Draft. Seen in the running Editor: a rectangle drawn by the engine, then an orange soft drop shadow beside it that the Draft viewport cannot draw. Tests: 7 asset-plane dialect, 4 engine, 2 editor, 13 scheduler; 13 mutations each failed a named test; the CSP now allows `blob:` images. **Open, and named:** the render takes about 0.6 to 1.0 s on this debug engine against the row's 250 ms, so the budget is **not met or measured**: it needs a release build, the reference machine and a recorded method; a draft that uses assets the engine does not hold is refused by name (`AssetMissing`) because the preview does not yet send them; no preview while the Draft plays; no GPU path (the GPU compositor serves Program); no zoom or compare. |
 | `13.5` | Browser reduced to overlays only | UI | 11.7 | Three.js draws no scene content |
-| `13.6` | Pixel gate: viewport equals Program | BE | 4.4 | Byte-identical across the reference set |
-| `13.7` | Approval pipeline | BE | 8.14, 11.41, 11.42, 13.6 | Changeset → headless engine render (11.41) → lint and conformance gate (11.42) → named human approval → hash-pinned revision (11.38) loadable by Playout. Only the Admin role may approve. A changeset that fails lint cannot be approved; Playout loads only `approved` revisions; the approval record names the approver and the time and is written to the JSON Lines audit trail (2.10) |
-| `13.8` | Provenance in use | BE | 11.39, 13.7 | Playout refuses an asset whose licence class is incompatible with the show profile; a per-show AI-usage report is generated; an optional AI-disclosure label element is available. A fixture show profile refuses a fixture asset marked non-commercial; the report lists every model-origin asset used in a show |
 
-> **Milestone.** What a designer approves is what goes to air.
+## Later — parked, kept with their IDs and dependencies
 
+Parked on 18 November 2026 because they are not part of the EffectCraft-core application as it is now being built. Nothing here was deleted; each module can be pulled back into the main order when the user says so.
 
-## Phase 14 — Remote engine
+### Module X1 — Later: remote engine
 
-Deployment change, not an architecture change — if the earlier phases held the line.
+*Backend.* A deployment change, not an architecture change, if the earlier modules held the line: QUIC and mTLS, the control plane over a remote transport, resumable assets, codec negotiation, NVENC, two engine instances by role, the build hash pinned at publish, and the conformance suite at L1. Parked 18 Nov 2026 with its IDs and dependencies.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
@@ -660,18 +523,18 @@ Deployment change, not an architecture change — if the earlier phases held the
 | `14.2` | Control plane over the remote transport | BE | 14.1 | Same messages, same semantics |
 | `14.3` | Resumable asset transfer | BE | 5.3 | Survives a disconnect mid-package |
 | `14.4` | Media codec negotiation by locality and consumer role | BE | 5.5 | Interactive and observational streams differ |
-| `14.5` | NVENC encode (VideoToolbox on macOS clients dropped 8 Nov 2026) | BE | 14.4 | Bandwidth within a LAN budget |
+| `14.5` | NVENC encode | BE | 14.4 | Bandwidth within a LAN budget |
 | `14.6` | Two engine instances by role: design and program | BE | 3.2 | Design engine structurally cannot go live |
 | `14.7` | Build hash pinned at publish; skew warning in Playout | BE | 7.6 | Version skew is visible, not silent |
 | `14.8` | Conformance suite passes at L1 exactly as at L0 | BE | 5.6 | Same suite, remote transport |
 
-## Phase 15 — Output server and genlock
+### Module X2 — Later: output server and genlock
 
-External gate. Cannot be closed by engineering. Started at day one via P.1.
+*Backend.* The external hardware gate: DeckLink and AJA, reference lock, ProgramClock slaved to the card, scheduled playback, NDI certification, SRT and OMT, the soaks, device-loss recovery and ST 2110. Engineering cannot close it alone. Parked 18 Nov 2026; the hardware procurement row it used to need (P.1) was removed from the plan, so 15.1 now has no dependency.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `15.1` | Hardware, SDKs and lab access in hand | EXT | P.1 | Devices on a bench, SDKs licensed |
+| `15.1` | Hardware, SDKs and lab access in hand | EXT | — | Devices on a bench, SDKs licensed |
 | `15.2` | DeckLink integration via thin FFI | EXT | 15.1 | C++ confined to the boundary |
 | `15.3` | AJA integration | EXT | 15.1 | Same wrapper shape |
 | `15.4` | Reference input and lock detection | EXT | 15.2 | Lock state in capability and status |
@@ -687,29 +550,9 @@ External gate. Cannot be closed by engineering. Started at day one via P.1.
 
 > **Milestone.** The only phase engineering cannot finish alone.
 
+### Module X3 — Later: Gen-AI template factory
 
-## Phase 16 — Content depth
-
-Feature work that is not release-blocking. Sequenced after parity and reliability.
-
-| Step | Work | Track | Needs | Done when |
-|---|---|---|---|---|
-| `16.1` | Video decoder tier: FFmpeg with NVDEC | BE | P.2 | Licence position settled first |
-| `16.3` | Transitions beyond cut, dual-target | BE | 3.8 | Dropped-frame behaviour certified |
-| `16.4` | Script sandbox on rquickjs: deterministic per-scene JS | BE | 2.9, 11.36, 11.58 | CPU and memory bounded, disposable. No wall-clock access (`Date.now`, `performance.now`, timers) and no network (`fetch`, sockets); time comes only from the engine frame number and rational rate, data only through bindings, and typed APIs limit which objects a script may touch (invariant 62). A script calling a banned API is refused by name and the console (11.58) shows it; a fixture script driven only by frame number gives identical output across two runs; a script touching an object outside its declared scope is refused |
-| `16.5` | Lottie import path | BE | 7.2 | Reduces the Adobe dependency |
-| `16.6` | 3D: shadows | BE | 3.7 | Separate branch, own pixel gate |
-| `16.7` | 3D: transparent depth ordering | BE | 3.7 | Separate branch, own pixel gate |
-| `16.8` | 3D: camera parity in Program | BE | 13.6 | Perspective and orthographic match |
-| `16.9` | Rasteriser benchmark; Vello evaluated against the gate | BE | 4.4 | Measured on broadcast content, not demos |
-| `16.10` | Generative asset adapters | AI | 11.39, 11.52 | Pluggable generators for images, 3D and video loops, baked offline into hashed assets with a licence class; no GPL or non-commercial model is bundled, and region-restricted models are flagged. Every generated asset carries a complete 11.39 provenance record; an adapter whose model licence class is not set is refused; nothing generative runs at Take time (invariant 63) |
-| `16.11` | AI keyer sidecar | BE | 15.6 | Matting runs as a separate supervised process publishing fill+key on the Media plane; the engine uses the latest key that arrives in time and drops late keys (invariant 14). Killing the keyer causes no Program frame drop; the layer goes to its declared "no key" state and the console raises an alarm |
-| `16.12` | Gaussian splat layer | BE | 11.48, 13.6 | `KHR_gaussian_splatting` glTF loads with deterministic sorting. Two runs give identical golden frames; the frame-time budget holds at 1080p |
-| `16.13` | Interchange: OpenUSD/MaterialX import, OpenTimelineIO export | BE | 11.50, 11.53 | OpenUSD/MaterialX import maps onto 11.50's unified material, and sequencer timelines export as OpenTimelineIO. **Done-when not yet defined:** it must be written before this step may start |
-
-## Phase 17 — Gen-AI template factory
-
-Depends only on Phases 1–8 plus the design system. Independent of the certification gates, so it moves at its own pace.
+*Backend.* Depends only on the foundations, the services, MCP and the design system, and is independent of the certification gates, so it moves at its own pace once pulled back in. Parked 18 Nov 2026.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
@@ -723,81 +566,71 @@ Depends only on Phases 1–8 plus the design system. Independent of the certific
 | `17.8` | Zero-edit publish rate reported per class | AI | 17.7 | Reportable metric, per tournament |
 | `17.9` | Per-class graduation with a named sign-off owner | AI | 17.8 | One class auto-publishing, with an owner |
 
-## Phase 18 — Figma import at full fidelity
+### Module X4 — Later: GrapiX Data Server (services)
 
-**Status: Planned (added 25 September 2026 at the user's request).** Figma is
-the primary design source. "Perfect" is not a feeling; it is defined here as
-two measurable things on a real corpus: **(a)** the imported scene renders
-within the pixel-gate threshold of Figma's own render of the same frame, and
-**(b)** the 7.2 compatibility report names every substitution, with zero
-unnamed ones. Anything Figma can express that the engine cannot is refused
-or substituted **by name**, never approximated silently (invariant 18). No
-Figma desktop or plugin host is required. The source is read through the
-Figma REST API and retained beside the template (7.2 "source retained").
-Every imported layer stays an ordinary scene object, so every layer is
-animatable.
-
-| Step | Work | Track | Needs | Done when |
-|---|---|---|---|---|
-| `18.1` | Figma reference corpus | RES | P.3 | At least 20 real broadcast files (lower thirds, scorebugs, full-frames, tickers, vertical social), each with Figma's own PNG render at 1× and 2× committed as the reference |
-| `18.2` | Figma REST ingest with the source retained | BE | 7.2, 11.39 | A file key and a token stored in the OS keychain (never in a scene, package or log) fetch the document, components, styles, variables and image fills, with `geometry=paths` and no recursion depth limit; the raw response is stored content-hashed beside the template, so a re-import can be diffed and an offline re-run needs no network; every imported asset carries an 11.39 provenance record |
-| `18.3` | Scene boundaries: one Figma frame is one scene | BE | 18.2, 11.29, 11.47 | Each top-level frame the user selects becomes exactly one scene. Its resolution is the frame's width × height, its origin is the frame's top-left, and its background is the frame fill. `clipsContent` is honoured as an 11.47 nested clip composition: content outside a clipping frame is kept but clipped, and never widens the scene. Nothing is re-parented across scenes. Nested frames stay nested groups with their own bounds and clipping. Multi-frame import produces N independent scene sessions |
-| `18.4` | Node and property coverage matrix | BE | 18.3, 1.2, 1.3 | Every Figma node type (frame, group, section, rectangle, ellipse, polygon, star, line, vector, boolean operation, text, component, instance, image fill) and property (per-corner radius, strokes with align/dash/cap/join, solid, linear, radial, angular and diamond gradients, image fill modes and crop, drop and inner shadow, layer and background blur, blend modes, opacity, masks, auto-layout resolved to absolute positions, constraints recorded) has a row in a committed coverage table marked **mapped**, **substituted (named)** or **refused (named)**, and each row has a test. Import never stops on an unsupported node: it becomes a named finding and the walk continues |
-| `18.5` | Text fidelity | BE | 18.4, 11.13, 3.6 | Per-character style runs, line height, letter spacing, paragraph spacing, alignment, auto-resize modes and text case survive import. Every Figma font is resolved through 11.13 ingest; a font that cannot be resolved blocks the import by name instead of falling back |
-| `18.6` | Components, instances and variants | BE | 18.4 | Components import once and instances reference them with their overrides applied. Variants are kept as named alternatives, not flattened copies. An instance's override that the engine cannot express is named in the report |
-| `18.7` | Variables and styles to project variables | BE | 11.40, 18.2 | Figma colour, number and string variables and published styles land as 11.40 project variables with provenance, and imported objects reference them instead of copying their values, so a brand change flows through |
-| `18.8` | Fidelity gate on the corpus | BE | 18.1, 18.4, 7.3, 4.4 | Every corpus frame's engine render is diffed against Figma's PNG under the 4.4 threshold and the diff is stored with the template (7.3). A regression fails CI. The target is 100% of corpus frames passing with zero unnamed substitutions |
-| `18.9` | Re-import updates in place | BE | 18.3, 11.20, 11.19 | Re-importing the same file updates the existing scenes in place, keyed by the Figma node id. Animation channels, phases, bindings and control fields on unchanged nodes are preserved. A deleted node that still carried animation or bindings is reported by name, not dropped silently |
-| `18.10` | Import UI for Figma | UI | 18.3, 11.17 | Paste a Figma file or frame link, pick frames from thumbnails, see the coverage and substitution report before confirming, and land in one scene tab per frame |
-| `18.11` | A real Figma frame end to end: PAC - PIC 2026 three-caster lower third to air | BE | 18.2, 7.3 | The frame `Kn05sACr8HOcZhZnx8EqAz` node `1945-12449` is imported, every layer and style mapped or named as a finding, animated, published and taken to air, and its render is compared with Figma's own render of the frame (the 7.3 diff stored with the template). From the user's product direction of 18 Nov 2026 and the market scan `docs/research/market-scan-2026-11-18.md`; proposed by Claude. |
-
-## Phase 19 — GrapiX Data Server (a DataLinq-class standalone application)
-
-**Status: Planned (added 25 September 2026 at the user's request).** This
-resolves the scoping decision deferred in the Phase 11 additions. Live data
-lives in its own **standalone application**, like Ross XPression DataLinq
-Server. It holds many data sources at once and serves them to both the
-Editor and Playout. Because it is a new process in the distributed
-architecture, its boundaries are fixed by an ADR before any code (19.1). Two
-constraints are carried in from existing invariants and must not be relaxed
-by that ADR:
-- the engine never fetches data itself, and a take stays intent-based;
-- the data a frame was rendered with is recorded with the take, so a frame
-  can be reproduced.
+*Backend.* A DataLinq-class standalone application that holds many data sources and serves both the Editor and Playout, bounded by an ADR before any code (19.1). Two constraints carry in from existing invariants and may not be relaxed by that ADR: the engine never fetches data itself and a take stays intent-based, and the data a frame was rendered with is recorded with the take, so a frame can be reproduced. Parked 18 Nov 2026.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `19.1` | ADR-0004: Data Server boundaries | CON | 1.9, 5.1 | Accepted ADR fixing: process model (desktop app plus headless service mode), transport (reuses the 5.x control plane and gx1 tokens, 2.9), who resolves a binding at take time (Playout, never the engine), how values reach the engine (as data carried with the take intent), revision pinning of data, and failure policy per field (refuse, hold last good, or warn) |
 | `19.2` | Data contract | CON | 19.1 | `DataSource`, `DataTable`, `DataRecord` and typed `DataField` values, plus a source revision and timestamp and a staleness state, defined in Rust (`gx-contracts`) with TS generated; round-trips both ways; a schema change is a named event, never silent |
-| `19.3` | Standalone Data Server app | UI | 19.2, 11.1 | Its own Tauri 2 executable, installable separately from Editor and Playout. It lists sources, their status, last update, error and sample rows, and also runs headless as a service on a playout machine |
 | `19.4` | Connectors: files and web | BE | 19.2 | CSV, Excel (xlsx), JSON and XML from a file, HTTP (with a poll interval) or WebSocket, RSS/Atom, and manually edited tables. Each connector detects schema drift and names it, and a file watch uses 2.5 |
 | `19.5` | Connectors: databases and sheets | BE | 19.4 | SQL through PostgreSQL, MySQL, SQL Server and ODBC; Google Sheets. Source credentials live in the OS keychain and never appear in scenes, packages, logs or the MCP surface |
 | `19.6` | Many sources, change propagation and staleness | BE | 19.4 | Multiple sources run concurrently. Subscribers get a snapshot then ordered deltas. The last good value is retained, and staleness past a source's declared limit is surfaced to every subscriber (never silently stale). A deliberately stalled fixture feed produces its declared 19.1 state (hold last good or refuse the update), never a guessed value. Reconnect resumes from a revision without a full reload |
-| `19.7` | Editor reads the Data Server | UI | 19.6, 11.19, 8.6 | The Data binding panel browses sources, tables and fields from a running server; binding a property to a server field writes a portable reference, not the value; sample data for preview is a pinned snapshot, so a scene previews offline |
 | `19.8` | Playout reads the Data Server | BE | 19.6, 6.2, 6.3 | At cue/take, Playout resolves each bound field from the server and sends the values with the intent. The committed frame records the data revision it used. A missing or stale field follows the 19.1 policy and names the field; a feed value whose type does not match the bound field is refused by name. Output is never blocked on a slow source without saying so |
 | `19.9` | Data Server soak and failure tests | BE | 19.8 | Eight hours with at least 20 sources at mixed update rates, source outages, server restarts and network loss; zero silent staleness and zero takes rendered with unrecorded data |
 | `19.10` | Live esports data and an AI suggestion lane | BE | 19.8, 11.55 | Esports feeds (GRID or others) ingest into a typed, timestamped model with deterministic triggers; data reaches the engine only as Control-plane intent. Suggestions need producer confirmation unless their class is pre-approved. Replaying a recorded feed produces the same trigger sequence on every run; a suggestion never changes Program without a confirm action or a pre-approved class |
 
----
+### Module X5 — Later: generative and spatial content
+
+*Backend.* Generative asset adapters, an AI keyer sidecar, a Gaussian splat layer, and OpenUSD and MaterialX interchange. Parked 18 Nov 2026 with their IDs and dependencies.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `16.10` | Generative asset adapters | AI | 11.39, 11.52 | Pluggable generators for images, 3D and video loops, baked offline into hashed assets with a licence class; no GPL or non-commercial model is bundled, and region-restricted models are flagged. Every generated asset carries a complete 11.39 provenance record; an adapter whose model licence class is not set is refused; nothing generative runs at Take time (invariant 63) |
+| `16.11` | AI keyer sidecar | BE | 15.6 | Matting runs as a separate supervised process publishing fill+key on the Media plane; the engine uses the latest key that arrives in time and drops late keys (invariant 14). Killing the keyer causes no Program frame drop; the layer goes to its declared "no key" state and the console raises an alarm |
+| `16.12` | Gaussian splat layer | BE | 11.48, 13.6 | `KHR_gaussian_splatting` glTF loads with deterministic sorting. Two runs give identical golden frames; the frame-time budget holds at 1080p |
+| `16.13` | Interchange: OpenUSD/MaterialX import, OpenTimelineIO export | BE | 11.50, 11.53 | OpenUSD/MaterialX import maps onto 11.50's unified material, and sequencer timelines export as OpenTimelineIO. **Done-when not yet defined:** it must be written before this step may start |
+
+### Module X6 — Later: Data Server app and panels
+
+*Frontend.* The standalone Data Server application and the Editor's panel that reads it. Parked 18 Nov 2026 with module X4.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `19.3` | Standalone Data Server app | UI | 19.2, 11.1 | Its own Tauri 2 executable, installable separately from Editor and Playout. It lists sources, their status, last update, error and sample rows, and also runs headless as a service on a playout machine |
+| `19.7` | Editor reads the Data Server | UI | 19.6, 11.19, 8.6 | The Data binding panel browses sources, tables and fields from a running server; binding a property to a server field writes a portable reference, not the value; sample data for preview is a pinned snapshot, so a scene previews offline |
+
+## Standing notes
+
+### Render-core acceptance (modules B3 and B5)
+
+- **GPU-first is an acceptance requirement.** Main production drawing, transforms, masks, effects and composition run primarily on the GPU. CPU scene logic and bounded preparation are allowed; CPU full-frame rasterisation or silent fallback cannot qualify. 3.14 reported this gate even where a cached-composition benchmark passed.
+- **Colour follows the project (3.15).** This amends ADR-0002 B.1's "render internally in linear, always". 3.3 stays done for what it verified: tagged sources, the two output transforms and the colour ramp. 3.15's done-when was corrected on 13 Oct 2026: as first written it asked for a rendered anti-aliased edge, gradient and blur, which the engine could not draw before 3.17 and 3.22. The overlap is checked as an engine render, and coverage, interpolation and averaging as working-space reference operations the GPU steps must match. **Named gap:** the Editor's Three.js viewport (11.6) does not read the scene's declared space, and which space its blending matches is unmeasured; the engine is the renderer of record, and 13.5 closes the gap unless a measured browser fix lands first.
+- **Effects (3.22, 3.25, 11.60 to 11.62).** Every effect and layer style renders on the GPU compositor, ports EffectCraft algorithms with attribution (ADR-0003's reuse catalogue), and may not silently drop an option it cannot render.
+
+### Reopened on 13 October 2026, since closed
+
+Five steps were re-run against their done-when and failed, and went back to active: 3.13 (no silent fallback: non-default trim, object opacity on vector paths and unloadable glTF geometry must render correctly or refuse by name), 3.7 (glTF primitives load their real vertices and the sphere and torus are triangulated grids), 8.1 (every listed tool carries its generated JSON Schema, closed 16 Nov 2026), 8.9 (render.preview answers with an MCP image block for the requested frame) and 8.12 (the editor MCP edit path takes if_revision and an idempotency key through gx-write-semantics, closed 16 Nov 2026). All five are done in the tracker. Steps that needed a reopened step kept their state, because their own done-when was not contradicted: 4.1 and 7.4 (need 3.13) and 11.20 (needs 8.12).
+
+### Open defect: the engine-host test leg does not terminate (found 13 September 2026)
+
+`cargo test -p gx-engine-host` hangs in `the_host_spawns_when_nothing_is_listening` (`services/render-engine/host/tests/ensure.rs`), while the sibling `ensure_refuses_a_reserved_port` passes in the same run: it is the spawn-and-adopt path itself, and the hang survives an external timeout, which points at a spawned gx-render-worker the harness never reaps. Because of it `npm run test:rust` runs `cargo test --workspace --exclude gx-engine-host` so the gate terminates, and `npm run test:rust:host` runs the host leg alone. **That exclusion is a named hole, not a permanent carve-out**: until the hang is fixed, no run of `npm run check` has exercised host supervision, and no claim about it should rest on that gate.
+
+### Design notes carried forward
+
+- **11.25 to 11.28 (13 September 2026, after comparing Viz Artist and Trio, XPression, Singular.live Composer and the CasparCG ecosystem).** 11.25: the contract already names the motion phases (in, out, hold, continue, update) but only presets speak them, so an authored scene could not say where its take-in ends; without it Playout can only cut. 11.26: four tools converged on letting the author declare which properties an operator may drive; 11.19 binds data into properties but nothing declared the outward contract, and invariants 4 and 5 split authoring from taking, so it is load-bearing. 11.27: a filled page must never mutate the template it came from. 11.28: tokens are defaults, a named text style is a saved bundle an author applies, and it resolves tokens rather than copying them, so the two do not become two sources of brand truth.
+- **Deliberately not added.** Rundown and playlist authoring belong to Playout, not the design editor. A Graphic Hub-style asset database browser duplicates the services and MCP modules. Viz's full spline editor is excluded by the "do not copy After Effects complexity" rule. In-editor scripting was refused on 13 September 2026 because ADR Part G routes programmatic authoring through MCP, and **reversed on 2 October 2026**: per-scene JS modules run inside 16.4's deterministic sandbox (11.55), while agent authoring still goes through MCP. Live data-source connectors became the Data Server (X4 and X6), because 8.6 makes a data schema discoverable but nothing said where live data comes from.
+- **The 2 October 2026 merge (docs/proposals/GrapiX-Editor-Core-and-AI-Readiness-Proposal.md).** 11.36 to 11.42 are foundations, cheap now and expensive to retrofit. Where a proposal item overlapped a done or active step, the new step covers only the missing delta; items overlapping a pending step were folded into it. 8.11's operator-scoped Program tools stay. MaterialKind collapses into one physically lit material (11.50). 2.6's autosave ring is removed (11.43). Refusal-class lint findings block publish and the rest warn (11.42). Only Admin may approve (13.7).
+- **Importing from Figma (modules B11 and F5).** "Perfect" is two measurable things on a real corpus: the imported scene renders within the pixel-gate threshold of Figma's own render of the same frame, and the 7.2 compatibility report names every substitution, with zero unnamed ones. No Figma desktop or plugin host is required. Every imported layer stays an ordinary scene object, so every layer is animatable.
+- **Layer styles, effects and text animators (12 October 2026).** 11.60 gives Photoshop layer styles the owning step `memory.md` rule 24 said they lacked; 3.22 and 11.62 own the effects library; 11.61 owns text animators. All render on the GPU compositor and port EffectCraft algorithms with attribution.
 
 ## Why the order is this order
 
-**Contracts before anything reads them.** Three products developing
-against each other serialises three teams on whoever's build is broken.
-Against mock peers and a conformance suite, they move independently.
+**Contracts before anything reads them.** Three products developing against each other serialises three teams on whoever's build is broken. Against mock peers and a conformance suite, they move independently (B1).
 
-**The pixel gate before anything that changes pixels.** Capture the
-baseline first or the reference is gone permanently.
+**The render core and its pixel gate before anything that changes pixels.** Capture the baseline first or the reference is gone permanently (B3, B4). The effects engine sits straight after it because effects and presets are the main thing and every later module draws them (B5).
 
-**The MCP surface before the interface.** It exercises the whole domain
-headlessly, it is the automation story, and it means the interface gets
-built against an API that is already proven.
+**Backend before frontend.** Services and MCP exercise the whole domain headlessly, they are the automation story, and they mean the interface is built against an API that is already proven (B6 to B8). The editor core (commands, revisions, the template contract) is cheap now and expensive to retrofit (B9).
 
-**Research validates the interface (amended 16 October 2026).** Phase 9
-was planned as a gate before Phase 11. The user superseded that (decision
-Q1): Phase 11 builds against the After Effects and XPression/Viz references,
-and Phase 9 checks the result with designers and operators.
-
-**External gates started on day one.** Hardware, SDKs, lab time and
-licensing have the longest lead time in the plan and no amount of
-engineering shortens them.
+**The frontend reads the backend.** The workspace, panels, animation and effects panels read the command model and the engine (F1 to F4); import, scripting, Playout and parity each read the backend module that feeds them (F5 to F7). What is parked (X1 to X6) is independent of all of that and can wait.

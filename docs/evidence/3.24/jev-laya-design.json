@@ -1,0 +1,149 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 2308,
+    "output_tokens": 0,
+    "state_tokens": 638,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "product": "GrapiX: broadcast graphics, Rust engine process, Windows first. A render loop emits Program (and Preview) at a fixed cadence, 1080p50 (20 ms interval). Program goes to air; a late or missed Program frame is the failure to prevent. The product has an Editor, a Playout operator app and MCP agents that can ask the engine for work.",
+    "row": "3.24: a GPU/CPU load balancer. The engine budgets each Program frame first; when the frame budget is at risk, non-live work is throttled or moved to the CPU renderer, in a named order, and returns when load falls; every shift is a log record with its reason. A sustained load test (headless renders and previews pushed until the GPU saturates) must show Program with no late or missed frame while the shifts happen, on DX12 and Vulkan.",
+    "facts": [
+      "Program and Preview are produced in the same GPU submission on the render loop thread (scene.submit makes both tile plans, a bounded asynchronous readback ring returns frames later). The loop never waits on the GPU. Preview therefore costs GPU dispatches and readback bandwidth on every frame even if nobody looks at it.",
+      "A headless render (ClientRequest::Render) already runs on the CPU reference rasteriser (PreparedScene::frame_at), detached from Program's thread after the engine lock is released (invariant 14). It is unbounded in concurrency: each request runs on its own control or MCP connection thread, so N concurrent renders use N cores. No thread priority is set anywhere in the engine.",
+      "Scene preparation (publish: GPU resource builds, font and image upload, pipeline build, about a second for the vector drawer on first use) runs on the engine's thread under its lock and on the GPU; it can delay the render loop.",
+      "ADR-0003 (decided): Program's backend is GPU-only; a CPU full-frame path is a reference, never Program's backend. So 'moved to the CPU renderer' can only apply to non-live work, never to Program.",
+      "What the engine can measure now (2.27): per-frame render wall time and interval, late and missed counts (never coalesced), readback ring: frames behind (1 to 2 is healthy), ring-full count, latency. GPU time per frame is NOT measurable (timestamp queries off), and nothing may be fabricated.",
+      "On the user's machine an idle debug engine already takes about 25 ms per frame against 20 ms, so a balancer that only reacts to lateness would trip permanently there; a release build is expected to be far below.",
+      "Constraints from the product: every state change is a log record with its reason; telemetry (2.27) shows it as a finding; agents never cue, take or clear Program; the shedding must be reversible and must not drop operator intent (a refused or deferred request says so by name, with a retry hint); no wall-clock in the control plane."
+    ]
+  },
+  "questions": {
+    "signal": {
+      "type": "choice",
+      "instructions": "What should say 'the Program frame budget is at risk'?",
+      "criteria": {
+        "late_only": "A: any late or missed Program frame in the last second. Simple, but Program has already failed by the time it fires.",
+        "leading_with_hysteresis": "B: leading indicators first: a rolling 95th percentile of render time above 70% of the interval, or the readback ring more than 2 frames behind or full, with hysteresis (enter quickly, leave only after several seconds under a lower bar); AND any late or missed frame trips it at once. So it acts before Program fails and still catches what the indicators miss.",
+        "gpu_utilisation": "C: GPU utilisation or temperature from the driver (vendor APIs), shedding above a percentage."
+      }
+    },
+    "order": {
+      "type": "choice",
+      "instructions": "In what order should non-live work be shed when the budget is at risk?",
+      "criteria": {
+        "graded": "A: graded and reversible, cheapest to the user first: (1) lower detached work's thread priority and cap concurrent headless renders; (2) decimate Preview (fewer Preview updates, Program untouched); (3) defer new scene preparation and asset builds until pressure clears, queueing them; (4) refuse new headless renders and prepares with a named retryable refusal. Each step is entered only if the previous did not relieve pressure, and left in reverse order.",
+        "all_at_once": "B: on pressure, pause every kind of non-live work at once and resume when clear.",
+        "thread_priority_only": "C: only lower the OS priority of non-live threads and let Windows schedule, with no engine-level shedding.",
+        "queue_everything": "D: route every non-live request through one bounded queue with a worker pool whose size is reduced under pressure."
+      }
+    },
+    "preview_shed": {
+      "type": "choice",
+      "instructions": "How should Preview be shed in step 2?",
+      "criteria": {
+        "decimate": "A: reduce its update rate (for example 50 to 25 to 10 fps) by skipping the Preview tile plan on the frames it is not wanted, and say so on the Preview output; the last Preview frame repeats and is marked stale. Program is untouched.",
+        "lower_resolution": "B: render Preview at a lower resolution.",
+        "pause": "C: stop Preview entirely until pressure clears.",
+        "move_to_cpu": "D: render Preview on the CPU reference rasteriser while pressure lasts."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "signal",
+      "jev": "leading_with_hysteresis",
+      "laya": "late_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "leading_with_hysteresis",
+        "confidence": 1,
+        "probabilities": {
+          "late_only": 0,
+          "leading_with_hysteresis": 1,
+          "gpu_utilisation": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "late_only",
+        "probabilities": {
+          "late_only": 0.6129,
+          "leading_with_hysteresis": 0.1072,
+          "gpu_utilisation": 0.28
+        },
+        "confidence": 0.1846,
+        "answer_confidence": 0.6129,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "order",
+      "jev": "graded",
+      "laya": "queue_everything",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "graded",
+        "confidence": 1,
+        "probabilities": {
+          "graded": 1,
+          "all_at_once": 0,
+          "thread_priority_only": 0,
+          "queue_everything": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "queue_everything",
+        "probabilities": {
+          "graded": 0.186,
+          "all_at_once": 0.2297,
+          "thread_priority_only": 0.227,
+          "queue_everything": 0.3573
+        },
+        "confidence": 0.0225,
+        "answer_confidence": 0.3573,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "preview_shed",
+      "jev": "decimate",
+      "laya": "move_to_cpu",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "decimate",
+        "confidence": 0.55,
+        "probabilities": {
+          "decimate": 0.66,
+          "lower_resolution": 0.04,
+          "pause": 0.08,
+          "move_to_cpu": 0.22
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "move_to_cpu",
+        "probabilities": {
+          "decimate": 0.0727,
+          "lower_resolution": 0.1135,
+          "pause": 0.1828,
+          "move_to_cpu": 0.631
+        },
+        "confidence": 0.2507,
+        "answer_confidence": 0.631,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

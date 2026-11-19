@@ -23,9 +23,7 @@ A worker started with `--recovery-journal PATH` uses `PATH`, `PATH.assets`
 and `PATH.dropped.json`.
 
 The location is derived from `gx_contracts::platform::service_data_root()`,
-which resolves to the per-user data directory the operating system provides
-(`%APPDATA%` on Windows, `~/Library/Application Support` on macOS,
-`~/.local/share` on Linux).
+which resolves to the per-user data directory Windows provides (`%APPDATA%`).
 
 The journal holds:
 

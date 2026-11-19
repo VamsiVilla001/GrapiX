@@ -1,0 +1,308 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 8824,
+    "output_tokens": 0,
+    "state_tokens": 911,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "11.71 design consult: the Editor layout, borrowing XPression Designer's modules and window handling",
+    "context": "\nGrapiX Editor is a Tauri authoring app for broadcast graphics. The user also runs Ross XPression Designer 12.5 every day and\nwants the Editor to borrow what works there and use its screen better. The user's screen is two 4K monitors; the Editor is\nmaximised on one, 3862 x 2122 physical pixels at scale 1.5.\n\nMEASURED, the Editor now (one capture, fractions of window height 2122 and width 3862):\n- Chrome above the workspace: menu bar 3.3 %, app header row (scene id, name, New, Open, Import SVG, Save, Undo, Redo, Reset layout) 3.5 %, tool row 2.2 %. Together 9 %.\n- Workspace row 61 %; timeline 22.6 %; the Activity log strip 6.2 % (it shows 2 lines).\n- Centre: the drawn 1920 x 1080 frame is 983 x 553 px in a 1134 x 647 px viewport pane. Frame area is 26.5 % of the window.\n- Right column is 20 % of the width and holds 13 stacked panels in one scrolling column. Content height is about 2 x the visible height. Preview is open and takes 52 % of the visible column height. Fonts, Text styles, Effect Controls and Effects & Presets are one header row each; the Effects & Presets list shows 1 row of a 306-effect list. Materials, Take page, Bindings, Publish and others are below the fold.\n- Left column is 19 % of the width: Scene Manager 80 % of its height showing 2 scene cards (each about 190 px of thumbnail plus buttons) of the project's scenes, Objects 12 %, Assets 5 % collapsed.\n- Timeline: two toolbar rows (Keys + Presets, then Phases) take 60 px, the ruler 30 px, and the empty layers area 120 px (half the timeline) holds one italic hint line when no object is selected.\nThe layout model (Editor/src/workspace-layout.ts) has four regions (left, centre, right, bottom), each a stack of panels with collapse and resize, one stored layout per user, panels can be moved between regions. There are no tabs, no pop-out windows and no named workspaces.\n\nXPRESSION DESIGNER 12.5 (from the user's machine and notes of working in it): the Scene Manager is docked at the right and\nreverts to a Thumbnails view on every launch; the user switches it to List each time (View > List) because rows are denser.\nA scene card's context menu: New, Duplicate, Rename (F2), Change ID (F7), Convert Dimensions, Detach from Parent, Export Scene,\nRegenerate All Thumbnails, Delete (Del). Object Manager, Scene Director (timeline with a ruler, a frame counter and several\ndirectors per scene), Material Manager (folders, thumbnails, a Filter box), Key Graph Editor, Font Manager, Object Inspector\n(a Tabs & Options tab holds text alignment) and Stagger Animations are floating panels the user spreads over the second 4K\nmonitor, leaving the viewport the whole first screen. Key Graph Editor interpolation: TCB Spline, Bezier Spline, Simple\nBezier, Linear, Hold, with Pre / Post-Infinity Constant, Reset and Repeat. Stagger Animations offsets the keys of several\nselected objects by a step. Edit Script Events and Edit Visual Logic are on the scene card's menu.\nAfter Effects (the other reference the user named): panels in tabbed groups, named workspaces (Standard, Animation, Effects,\n...), a large viewport, panels can float.\nNot to be borrowed: the Sequencer, Take, Play and Cue (the Editor must never reach Program: that is Playout).\n"
+  },
+  "questions": {
+    "right_column": {
+      "type": "choice",
+      "instructions": "The right column holds 13 panels and is 2 x taller than the screen. How should it be organised?",
+      "criteria": {
+        "tab_groups": "Two tabbed panel groups stacked in the column: an Inspector group (Properties, Effect Controls, Text styles, Fonts) and a Library group (Effects and Presets, Assets, Materials, Take page ...), one panel visible per group.",
+        "one_open_accordion": "Keep the stack, but only one panel is open at a time.",
+        "keep_scrolling_stack": "Keep the single scrolling stack as it is.",
+        "floating_only": "Every panel floats like XPression and the user arranges them."
+      }
+    },
+    "scene_manager_default": {
+      "type": "choice",
+      "instructions": "What should the Scene Manager show by default?",
+      "criteria": {
+        "list_default": "A dense list of rows by default, with a toggle to thumbnails, remembered per user.",
+        "thumbnails_default": "Thumbnail cards by default, with a toggle to a list.",
+        "adaptive": "Thumbnails up to 6 scenes, a list beyond that."
+      }
+    },
+    "activity_strip": {
+      "type": "choice",
+      "instructions": "The Activity log takes 6.2 % of the window height for 2 lines. What should it be?",
+      "criteria": {
+        "status_line": "One status line at the bottom showing the latest entry, expandable to the full log as a drawer.",
+        "keep": "Keep the two-line strip.",
+        "move_to_panel": "Move it to a panel in the right column."
+      }
+    },
+    "popout": {
+      "type": "noul",
+      "instructions": "Is letting any panel be popped out into its own window (for the second monitor) worth a build row, given the user spreads XPression panels over a second 4K monitor?",
+      "criteria": {
+        "true": "Yes, worth its own row after tab groups.",
+        "false": "No, not worth it yet."
+      }
+    },
+    "workspaces": {
+      "type": "noul",
+      "instructions": "Are named workspaces (for example Author, Animate, Effects, Review: each a stored arrangement) worth building once panel groups exist?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "timeline_toolbars": {
+      "type": "noul",
+      "instructions": "Should the timeline's two toolbar rows (60 px) become one row, with the Phases controls moved into a popover?",
+      "criteria": {
+        "true": "Yes, one row.",
+        "false": "No, keep two rows."
+      }
+    },
+    "order": {
+      "type": "choice",
+      "instructions": "Which should be built first?",
+      "criteria": {
+        "tab_groups_first": "Tabbed panel groups in the right column (and left).",
+        "scene_list_first": "The Scene Manager list view, context menu and XPression shortcuts.",
+        "chrome_first": "Header, timeline toolbar and Activity strip savings.",
+        "popout_first": "Pop-out windows."
+      }
+    },
+    "borrow_stagger": {
+      "type": "noul",
+      "instructions": "Is XPression's Stagger Animations (offset the keys of several selected objects by a step) worth porting as a timeline tool?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "borrow_infinity": {
+      "type": "noul",
+      "instructions": "Are the Key Graph Editor's Pre / Post-Infinity modes (constant, reset, repeat) worth porting to the speed graph for looping broadcast animation?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "right_column",
+      "jev": "tab_groups",
+      "laya": "floating_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "tab_groups",
+        "confidence": 0.89,
+        "probabilities": {
+          "tab_groups": 0.92,
+          "one_open_accordion": 0.01,
+          "keep_scrolling_stack": 0.02,
+          "floating_only": 0.05
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "floating_only",
+        "probabilities": {
+          "tab_groups": 0.1494,
+          "one_open_accordion": 0.1506,
+          "keep_scrolling_stack": 0.2346,
+          "floating_only": 0.4654
+        },
+        "confidence": 0.0873,
+        "answer_confidence": 0.4654,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "scene_manager_default",
+      "jev": "list_default",
+      "laya": "thumbnails_default",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "list_default",
+        "confidence": 0.86,
+        "probabilities": {
+          "list_default": 0.91,
+          "thumbnails_default": 0.08,
+          "adaptive": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "thumbnails_default",
+        "probabilities": {
+          "list_default": 0.1386,
+          "thumbnails_default": 0.6814,
+          "adaptive": 0.18
+        },
+        "confidence": 0.2318,
+        "answer_confidence": 0.6814,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "activity_strip",
+      "jev": "status_line",
+      "laya": "keep",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "status_line",
+        "confidence": 0.88,
+        "probabilities": {
+          "status_line": 0.92,
+          "keep": 0.01,
+          "move_to_panel": 0.07
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep",
+        "probabilities": {
+          "status_line": 0.054,
+          "keep": 0.8676,
+          "move_to_panel": 0.0785
+        },
+        "confidence": 0.5626,
+        "answer_confidence": 0.8676,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "popout",
+      "jev": 0.77,
+      "laya": 0.9521,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.77
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9521,
+        "confidence": 0.9521,
+        "answer_confidence": 0.9521,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "workspaces",
+      "jev": 0.8,
+      "laya": 0.9014,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9014,
+        "confidence": 0.9014,
+        "answer_confidence": 0.9014,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "timeline_toolbars",
+      "jev": 0.54,
+      "laya": 0.9477,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.54
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9477,
+        "confidence": 0.9477,
+        "answer_confidence": 0.9477,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "order",
+      "jev": "scene_list_first",
+      "laya": "chrome_first",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "scene_list_first",
+        "confidence": 0.63,
+        "probabilities": {
+          "tab_groups_first": 0.1,
+          "scene_list_first": 0.72,
+          "chrome_first": 0.05,
+          "popout_first": 0.13
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "chrome_first",
+        "probabilities": {
+          "tab_groups_first": 0.1112,
+          "scene_list_first": 0.2696,
+          "chrome_first": 0.3421,
+          "popout_first": 0.2771
+        },
+        "confidence": 0.0477,
+        "answer_confidence": 0.3421,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "borrow_stagger",
+      "jev": 0.77,
+      "laya": 0.9463,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.77
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9463,
+        "confidence": 0.9463,
+        "answer_confidence": 0.9463,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "borrow_infinity",
+      "jev": 0.74,
+      "laya": 0.9467,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.74
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9467,
+        "confidence": 0.9467,
+        "answer_confidence": 0.9467,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}
