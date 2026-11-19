@@ -210,6 +210,32 @@ pub(crate) fn frame(sample: &FrameSample, epoch: u64) {
     }
 }
 
+/// 3.24: the load governor moved the level non-live work is shed at. Climbing is
+/// a warning (Program was at risk); falling is info. Every shift has its reason.
+pub(crate) fn load_shift(transition: &crate::governor::Transition, frame: u64, epoch: u64) {
+    if transition.to > transition.from {
+        tracing::warn!(
+            event = "load.shift",
+            epoch,
+            frame,
+            from = %transition.from,
+            to = %transition.to,
+            shed = transition.to.describes(),
+            reason = %transition.reason,
+        );
+    } else {
+        tracing::info!(
+            event = "load.shift",
+            epoch,
+            frame,
+            from = %transition.from,
+            to = %transition.to,
+            shed = transition.to.describes(),
+            reason = %transition.reason,
+        );
+    }
+}
+
 /// The once-a-second record that the engine is running and how it is doing.
 #[derive(Debug)]
 pub(crate) struct Heartbeat {

@@ -25,7 +25,10 @@ import type {
   ControlValue,
   EditEffect,
   EditorModule,
+  CubicBezier,
   EditorCommand,
+  EffectInstance,
+  EffectSurface,
   MotionPreset,
   Refusal,
   SceneDocument,
@@ -45,6 +48,7 @@ import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plug
 import { presetBlocker, presetBrowserPanel } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
 import { GraphicPreviewRenderer } from "../src/graphic-preview";
+import { createEnginePreview, statusWords, type Failure, type PreviewState } from "../src/engine-preview";
 import { renderNode } from "../src/agent-surface";
 import { BROADCAST_RATES, parseRateChoice, rateKey, sameRate } from "../src/frame-rate";
 import { sceneImportPanel } from "../src/import-panel";
@@ -90,6 +94,26 @@ import {
   usersOf,
 } from "../src/material-manager";
 import {
+  addEffect,
+  addPreset,
+  availability,
+  duplicateEffect,
+  effectChannel,
+  effectControlsPanel,
+  effectsBrowserPanel,
+  toggleGroup,
+  isRefused as isEffectRefused,
+  listingFor,
+  moveEffect,
+  parameterLabel,
+  parameterValue,
+  parseControlId,
+  removeEffect,
+  setEnabled,
+  setParameter,
+  type Stack as EffectStack,
+} from "../src/effects-panel";
+import {
   ASSET_FILE_EXTENSIONS,
   assetManagerPanel,
   assetUsers,
@@ -101,7 +125,9 @@ import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
   sceneManagerPanel,
   type ManagedScene,
+  type SceneListView,
 } from "../src/scene-manager";
+import { createDeleteArm, moveRow, rowCommand } from "../src/scene-list-nav";
 import {
   bindingLabel,
   bindingPanel,
@@ -162,16 +188,27 @@ import { quoteCorr } from "../src/shell-bridge";
 import { sizeCanvasForRatio, watchDevicePixelRatio } from "../src/dpi";
 import { probeWebGpu, summariseGpuReport, type GpuReport } from "../src/gpu-probe";
 import {
+  activateTab,
   allPanels,
+  clearSplit,
   defaultLayout,
+  dragSplitter,
+  entryIds,
+  floorFractions,
+  groupOf,
   isRefused as isLayoutRefused,
   movePanel,
+  moveToGroup,
   persistLayout,
+  regionEntries,
   resizeRegion,
   restoreLayout,
+  splitRegion,
+  MIN_SPLIT,
   REGIONS,
   type Layout,
   type RegionId,
+  type TabGroup,
 } from "../src/workspace-layout";
 import { phaseAddress } from "../src/timeline/phases";
 import { keyId, parseKeyId, timelineModel, type TimelineModel } from "../src/timeline/model";
@@ -186,9 +223,21 @@ import {
   snapFrame,
   SNAP_TOLERANCE_FRAMES,
   planSetEasing,
+  planEasyEase,
+  planSetSegmentBezier,
   type ClipboardKey,
   type EditPlan,
 } from "../src/timeline/key-edit";
+import {
+  bezierFromHandleDrag,
+  buildSpeedGraph,
+  hitGraph,
+  withDraftBezier,
+  type GraphHit,
+  type GraphMode,
+  type SpeedGraphModel,
+} from "../src/timeline/speed-graph";
+import type { EasyEaseKind } from "../src/timeline/easing";
 import { HIT_TOLERANCE_FRAMES, keyNear } from "../src/timeline/key-index";
 import {
   paintLayer,
@@ -305,6 +354,8 @@ const ui = {
   managerName: need<HTMLInputElement>("manager-create-name"),
   managerError: need<HTMLParagraphElement>("manager-create-error"),
   sceneManagerMount: need<HTMLDivElement>("scene-manager-mount"),
+  sceneViewToggle: need<HTMLButtonElement>("scene-view-toggle"),
+  sceneMenu: need<HTMLDivElement>("scene-context-menu"),
   sceneManagerEmpty: need<HTMLParagraphElement>("scene-manager-empty"),
   canvas: need<HTMLCanvasElement>("viewport"),
   previewPlay: need<HTMLButtonElement>("preview-play"),
@@ -343,6 +394,19 @@ const ui = {
   fontDisplayName: need<HTMLInputElement>("font-display-name"),
   fontLicence: need<HTMLInputElement>("font-licence"),
   materialMount: need<HTMLDivElement>("material-mount"),
+  engineFrame: need<HTMLDivElement>("engine-frame"),
+  engineImage: need<HTMLImageElement>("engine-image"),
+  engineStatus: need<HTMLSpanElement>("engine-status"),
+  engineTime: need<HTMLSpanElement>("engine-time"),
+  engineDetail: need<HTMLParagraphElement>("engine-detail"),
+  effectsMount: need<HTMLDivElement>("effects-mount"),
+  effectsExpandAll: need<HTMLButtonElement>("effects-expand-all"),
+  effectsCollapseAll: need<HTMLButtonElement>("effects-collapse-all"),
+  effectsSearch: need<HTMLInputElement>("effects-search"),
+  effectsShowUnported: need<HTMLInputElement>("effects-show-unported"),
+  effectsSummary: need<HTMLParagraphElement>("effects-summary"),
+  effectControlsMount: need<HTMLDivElement>("effect-controls-mount"),
+  effectControlsEmpty: need<HTMLParagraphElement>("effect-controls-empty"),
   textStyleMount: need<HTMLDivElement>("text-style-mount"),
   textStyleEmpty: need<HTMLParagraphElement>("text-style-empty"),
   materialEmpty: need<HTMLParagraphElement>("material-empty"),
@@ -395,6 +459,7 @@ const ui = {
   timelineMeta: need<HTMLSpanElement>("timeline-meta"),
   timelineZoom: need<HTMLInputElement>("timeline-zoom"),
   timelineGraphClose: need<HTMLButtonElement>("timeline-graph-close"),
+  timelineGraphMode: need<HTMLButtonElement>("timeline-graph-mode"),
 };
 
 // ---------------------------------------------------------------------------
@@ -423,6 +488,47 @@ let selection: string[] = [];
 let projects: string[] = [];
 let currentProject: string | undefined;
 let projectCatalog: ProjectSceneCatalog | undefined;
+/// The Scene Manager's view (11.72): a dense list by default, the way XPression's
+/// Scene Manager is worked in; the author's choice is a per-user preference.
+const SCENE_VIEW_KEY = "grapix.editor.sceneView";
+let sceneView: SceneListView = readSceneView();
+const sceneDeleteArm = createDeleteArm();
+
+/// The Effects & Presets categories the author has opened (11.79), kept per user: the
+/// tree is folded the way After Effects' is until a category is opened.
+const EFFECTS_OPEN_KEY = "grapix.editor.effectsOpen";
+let effectsOpen: Set<string> = readEffectsOpen();
+
+function readEffectsOpen(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(window.localStorage.getItem(EFFECTS_OPEN_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function setEffectsOpen(next: Set<string>): void {
+  effectsOpen = next;
+  try {
+    window.localStorage.setItem(EFFECTS_OPEN_KEY, JSON.stringify([...next]));
+  } catch {
+    // A preference that cannot be stored is used for this session only.
+  }
+  if (scene) renderEffects(scene);
+}
+
+function effectsGroupIds(): string[] {
+  return Array.from(ui.effectsMount.querySelectorAll<HTMLElement>('[role="group"][id^="effects-browser/"]')).map((node) => node.id);
+}
+
+function readSceneView(): SceneListView {
+  try {
+    return window.localStorage.getItem(SCENE_VIEW_KEY) === "thumbnails" ? "thumbnails" : "list";
+  } catch {
+    return "list";
+  }
+}
 const graphicPreviews = new Map<string, { document?: SceneDocument; src?: string; note: string }>();
 const graphicPreviewsPending = new Set<string>();
 let graphicPreviewRenderer: GraphicPreviewRenderer | undefined;
@@ -482,6 +588,69 @@ let controlPropertiesKind: string | undefined;
 let marquee: OverlayBounds | undefined;
 let guides: OverlayGuide[] = [];
 let animationSurface: AnimationSurface | null = null;
+/// 11.65: the engine's picture of the open scene. One render in flight and one
+/// pending; a frame is current only when it is the latest request's.
+interface EngineFrameRequest {
+  readonly endpoint: string;
+  readonly target: SceneTarget;
+  readonly frame: number;
+}
+const sceneVersions = new WeakMap<object, number>();
+let sceneVersionCounter = 0;
+function sceneVersion(document_: object): number {
+  let version = sceneVersions.get(document_);
+  if (version === undefined) {
+    version = sceneVersionCounter += 1;
+    sceneVersions.set(document_, version);
+  }
+  return version;
+}
+const enginePreview = createEnginePreview<EngineFrameRequest>({
+  render: async ({ endpoint, target, frame }) =>
+    new Uint8Array(await shell().invoke<ArrayBuffer>("cmd_engine_preview", { endpoint, target, frame })),
+  makeUrl: (bytes) => URL.createObjectURL(new Blob([bytes as BlobPart], { type: "image/png" })),
+  revokeUrl: (url) => URL.revokeObjectURL(url),
+  onState: (state) => renderEngineFrame(state),
+  classify: (error): Failure => {
+    const kind = typeof error === "object" && error !== null && "error" in error ? String((error as { error: unknown }).error) : "";
+    // The engine declined by name: a different thing from one that is not there.
+    return { status: kind === "commandRefused" ? "refused" : "unavailable", detail: describe(error) };
+  },
+});
+
+function renderEngineFrame(state: PreviewState): void {
+  const words = statusWords(state);
+  ui.engineFrame.dataset.status = state.status;
+  ui.engineStatus.textContent = words.word;
+  ui.engineStatus.dataset.tone = words.tone;
+  ui.engineTime.textContent = state.renderMs === undefined ? "" : `${Math.round(state.renderMs)} ms`;
+  ui.engineDetail.textContent = state.status === "unavailable" || state.status === "refused" ? (state.detail ?? "") : "";
+  ui.engineImage.hidden = state.imageUrl === undefined;
+  if (state.imageUrl !== undefined && ui.engineImage.src !== state.imageUrl) ui.engineImage.src = state.imageUrl;
+  if (state.imageUrl === undefined) ui.engineImage.removeAttribute("src");
+}
+
+/** Ask the engine for the open scene at the playhead. While the preview plays the
+ *  Draft view carries the motion and the engine frame resumes on pause. */
+function scheduleEnginePreview(): void {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
+    enginePreview.clear();
+    return;
+  }
+  if (playback !== undefined) return;
+  const endpoint = ui.endpoint.value.trim();
+  const frame = currentFrame;
+  enginePreview.request(`${session.key}/${sceneVersion(scene)}/${frame}/${endpoint}`, {
+    endpoint,
+    target: { target: "session", session: session.key },
+    frame,
+  });
+}
+
+/// The effect and preset catalogue, read from Rust once (11.69): EffectCraft's
+/// whole listing with the effects this engine renders marked available.
+let effectSurface: EffectSurface | null = null;
 let currentFrame = 0;
 let playback:
   | {
@@ -843,6 +1012,7 @@ function renderSceneState(): void {
   // objects.
   pausePreview("the document changed");
   ui.canvasSize.textContent = `${scene.canvas.width} × ${scene.canvas.height} · ${formatRate(scene.canvas.frameRate)}`;
+  scheduleEnginePreview();
   showRateChoice(ui.canvasRate, scene.canvas.frameRate);
   ui.canvas.width = scene.canvas.width;
   ui.canvas.height = scene.canvas.height;
@@ -912,24 +1082,82 @@ function renderProjectManager(): void {
     ui.sceneManagerEmpty.hidden = false;
     ui.sceneManagerEmpty.textContent =
       projects.length === 0
-        ? "Create a scene to keep your graphics together."
-        : "Choose a scene to browse its graphics.";
+        ? "Create a project to keep your scenes together."
+        : "Choose a project to browse its scenes.";
     return;
   }
   const managed = managedProjectScenes(catalog);
-  const panel = sceneManagerPanel({ project: catalog.project, scenes: managed, query: ui.graphicSearch.value });
+  const panel = sceneManagerPanel({ project: catalog.project, scenes: managed, query: ui.graphicSearch.value, view: sceneView });
   const matches = panel.children?.[0]?.children?.length ?? 0;
   ui.sceneManagerEmpty.hidden = matches > 0;
   ui.sceneManagerEmpty.textContent = managed.length === 0
-    ? `No graphics in ${catalog.project}. Add your first graphic.`
-    : "No graphics match your search.";
+    ? `No scenes in ${catalog.project}. Add your first scene.`
+    : "No scenes match your search.";
+  // A re-render replaces every row; keep the keyboard on the row it was on.
+  const focused = document.activeElement;
+  const focusedRow = focused instanceof HTMLElement && ui.sceneManagerMount.contains(focused) ? focused.id : undefined;
   ui.sceneManagerMount.replaceChildren(
     renderNode(
       document,
       panel,
     ) as unknown as Node,
   );
-  queueGraphicPreviews(catalog);
+  ui.sceneManagerMount.classList.toggle("list-view", sceneView === "list");
+  ui.sceneViewToggle.setAttribute("aria-pressed", String(sceneView === "list"));
+  // A list row is focusable so the keyboard can walk it; a preview is drawn only
+  // for the thumbnail view, so a long list costs no rendering.
+  for (const row of sceneRows()) {
+    row.tabIndex = sceneView === "list" ? 0 : -1;
+    row.classList.toggle("delete-armed", row.id === sceneDeleteArm.armed());
+  }
+  if (focusedRow?.startsWith("scene/")) document.getElementById(focusedRow)?.focus();
+  if (sceneView === "thumbnails") queueGraphicPreviews(catalog);
+}
+
+function sceneRows(): HTMLElement[] {
+  return Array.from(ui.sceneManagerMount.querySelectorAll<HTMLElement>('[role="listitem"][id^="scene/"]'));
+}
+
+function setSceneView(view: SceneListView): void {
+  sceneView = view;
+  try {
+    window.localStorage.setItem(SCENE_VIEW_KEY, view);
+  } catch {
+    // A preference that cannot be stored is used for this session only.
+  }
+  renderProjectManager();
+}
+
+function closeSceneMenu(): void {
+  ui.sceneMenu.hidden = true;
+  ui.sceneMenu.replaceChildren();
+}
+
+/// A scene row's own action buttons, offered as a menu: the same commands, the same
+/// refusals (a disabled item carries its reason), nothing the buttons do not already do.
+function openSceneMenu(row: HTMLElement, x: number, y: number): void {
+  const buttons = Array.from(row.querySelectorAll<HTMLButtonElement>(":scope > button[data-action]"));
+  ui.sceneMenu.replaceChildren();
+  for (const source of buttons) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.role = "menuitem";
+    item.textContent = source.textContent;
+    item.dataset.action = source.dataset.action ?? "";
+    item.dataset.for = source.dataset.for ?? "";
+    if (source.dataset.unavailable) {
+      item.dataset.unavailable = source.dataset.unavailable;
+      item.title = source.dataset.unavailable;
+      item.classList.add("unavailable");
+    }
+    ui.sceneMenu.append(item);
+  }
+  ui.sceneMenu.hidden = false;
+  const width = ui.sceneMenu.offsetWidth;
+  const height = ui.sceneMenu.offsetHeight;
+  ui.sceneMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
+  ui.sceneMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
+  ui.sceneMenu.querySelector<HTMLButtonElement>("button")?.focus();
 }
 
 function queueGraphicPreviews(catalog: ProjectSceneCatalog): void {
@@ -1201,6 +1429,8 @@ function renderPanels(document_: SceneDocument): void {
     renderNode(document, textStylePanel(document_, { selectedObjectIds: selection })) as unknown as Node,
   );
 
+  renderEffects(document_);
+
   ui.materialEmpty.hidden = document_.materials.length > 0;
   const materials = materialManagerPanel(
     document_,
@@ -1348,6 +1578,23 @@ let keyDrag:
 /// Which track is open as a speed graph, if any. Advanced curves appear on
 /// demand rather than permanently (11.23).
 let graphTrack: number | undefined;
+/// The open graph's view (11.68): the value graph is editable, the speed graph is for reading.
+let graphMode: GraphMode = "value";
+/// A handle drag in progress. `draft` is the curve under the pointer; nothing is
+/// saved until the pointer is released, and then as one undoable gesture.
+let graphDrag:
+  | {
+      readonly pointerId: number;
+      readonly objectId: string;
+      readonly property: string;
+      readonly segment: number;
+      readonly side: "out" | "in";
+      draft?: CubicBezier;
+    }
+  | undefined;
+/// The click that ends a handle drag is not a click on the stage: it would move
+/// the playhead to wherever the handle was let go.
+let suppressGraphClick = false;
 /// Bumped when a phase is added, moved or removed, so the static layer — and
 /// only then — repaints. A scrub never touches this (11.25).
 let phaseRevision = 0;
@@ -1560,6 +1807,8 @@ function onTimelineWheel(event: WheelEvent): void {
 /** Paint only the layers the transition dirtied. */
 function paintTimeline(model: TimelineModel): void {
   if (!timelineLayers) return;
+  ui.timelineGraphMode.hidden = graphTrack === undefined;
+  ui.timelineGraphMode.textContent = graphMode === "value" ? "Speed graph" : "Value graph";
   const next = timelineSnapshot(model);
   const dirty = planRepaint(lastSnapshot, next);
   lastSnapshot = next;
@@ -1572,7 +1821,8 @@ function paintTimeline(model: TimelineModel): void {
     selected: selectedKeys,
     phases: scene?.timeline.phases ?? [],
     layerBars: layerPresentation,
-    ...(graphTrack === undefined ? {} : { graphTrack }),
+    ...(graphTrack === undefined ? {} : { graphTrack, graphMode }),
+    ...(graphDrag?.draft === undefined ? {} : { graphDraft: { segment: graphDrag.segment, bezier: graphDrag.draft } }),
   };
   // Every layer gets a backing store in *device* pixels and a transform that
   // keeps the drawing code in CSS pixels (ADR-0002 B.2). Sized here rather
@@ -1617,11 +1867,39 @@ function onTimelineZoom(): void {
 ///
 /// The row comes from the scroll offset and the uniform row height; the key
 /// from the index's binary search within a frame tolerance. Both are O(log n).
+/// The open graph, built the way it is painted (draft included), with the track it shows.
+function openGraph(model: TimelineModel): { graph: SpeedGraphModel; objectId: string; property: string } | undefined {
+  if (graphTrack === undefined) return undefined;
+  const track = model.tracks[graphTrack];
+  if (!track) return undefined;
+  const keys = graphDrag?.draft
+    ? withDraftBezier(track.sourceKeys, graphDrag.segment, graphDrag.draft)
+    : track.sourceKeys;
+  const graph = buildSpeedGraph({ keys }, timelineViewport, timelineViewport.height, model.durationFrames, {
+    mode: graphMode,
+    framesPerSecond: model.frameRate.num / model.frameRate.den,
+  });
+  return { graph, objectId: track.objectId, property: track.property };
+}
+
+/// What is under a point on the open graph: a handle (value graph only) or a key.
+function graphHitAt(model: TimelineModel, x: number, y: number): GraphHit | undefined {
+  const open = openGraph(model);
+  return open ? hitGraph(open.graph, x, y) : undefined;
+}
+
 function keyAtStagePoint(
   model: TimelineModel,
   x: number,
   y: number,
 ): { objectId: string; property: string; frame: number } | undefined {
+  // With a graph open the dope sheet's rows are not on screen: a key is whatever
+  // the graph shows under the point.
+  if (graphTrack !== undefined) {
+    const open = openGraph(model);
+    const hit = open ? hitGraph(open.graph, x, y) : undefined;
+    return open && hit?.kind === "key" ? { objectId: open.objectId, property: open.property, frame: hit.frame } : undefined;
+  }
   const row = Math.floor((y + timelineViewport.scrollTop) / timelineViewport.rowHeight);
   const entry = model.rows[row];
   if (!entry || entry.kind !== "track") return undefined;
@@ -1656,6 +1934,10 @@ function setKeySelection(next: Iterable<string>): void {
  *  and empty stage moves the playhead. */
 function onTimelineClick(event: MouseEvent): void {
   if (!scene || !timelineLayers) return;
+  if (suppressGraphClick) {
+    suppressGraphClick = false;
+    return;
+  }
   const target = event.target;
   if (!(target instanceof Element)) return;
 
@@ -1715,6 +1997,8 @@ function onTimelineClick(event: MouseEvent): void {
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
   const model = currentTimelineModel(scene);
+  // A click that ends a handle drag lands on the handle: it is not a playhead move.
+  if (graphTrack !== undefined && graphHitAt(model, x, y)?.kind === "handle") return;
   const hit = keyAtStagePoint(model, x, y);
 
   if (hit) {
@@ -1745,6 +2029,19 @@ function onTimelinePointerDown(event: PointerEvent): void {
   if (!stage) return;
 
   const bounds = stage.getBoundingClientRect();
+  if (graphTrack !== undefined) {
+    // With a graph open a drag edits a curve, never moves keys. Handles can be
+    // grabbed on the value graph; the speed graph is for reading.
+    const model = currentTimelineModel(scene);
+    const open = openGraph(model);
+    const grabbed = graphMode === "value" ? graphHitAt(model, event.clientX - bounds.left, event.clientY - bounds.top) : undefined;
+    if (open && grabbed?.kind === "handle") {
+      graphDrag = { pointerId: event.pointerId, objectId: open.objectId, property: open.property, segment: grabbed.segment, side: grabbed.side };
+      stage.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    }
+    return;
+  }
   const hit = keyAtStagePoint(
     currentTimelineModel(scene),
     event.clientX - bounds.left,
@@ -1761,12 +2058,64 @@ function onTimelinePointerDown(event: PointerEvent): void {
   stage.setPointerCapture(event.pointerId);
 }
 
+/// A handle under the pointer: the curve follows it live, unsaved.
+function moveGraphHandle(event: PointerEvent): void {
+  if (!scene || !graphDrag || graphDrag.pointerId !== event.pointerId || graphTrack === undefined) return;
+  const stage = ui.timelineMount.querySelector<HTMLElement>(".timeline-stage");
+  const track = currentTimelineModel(scene).tracks[graphTrack];
+  const open = openGraph(currentTimelineModel(scene));
+  if (!stage || !track || !open) return;
+  const position = track.sourceKeys.findIndex((key) => Number(key.frame) === graphDrag!.segment);
+  const from = track.sourceKeys[position];
+  const to = track.sourceKeys[position + 1];
+  if (!from || !to) return;
+  const bounds = stage.getBoundingClientRect();
+  graphDrag.draft = bezierFromHandleDrag(
+    // The segment as it was when the drag began: the other handle is kept.
+    track.sourceKeys[position]!,
+    to,
+    { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+    timelineViewport,
+    open.graph.min,
+    open.graph.max,
+    timelineViewport.height,
+    graphDrag.side,
+  );
+  contentRevision += 1;
+  paintTimeline(currentTimelineModel(scene));
+}
+
 function onTimelinePointerMove(event: PointerEvent): void {
+  if (graphDrag) {
+    moveGraphHandle(event);
+    return;
+  }
   if (!keyDrag || keyDrag.pointerId !== event.pointerId) return;
   if (Math.abs(event.clientX - keyDrag.startClientX) >= 3) keyDrag.moved = true;
 }
 
+/// Release a handle: one undoable gesture, or nothing if cancelled.
+function finishGraphDrag(event: PointerEvent, cancelled: boolean): void {
+  if (!scene || !graphDrag || graphDrag.pointerId !== event.pointerId) return;
+  const drag = graphDrag;
+  graphDrag = undefined;
+  const stage = ui.timelineMount.querySelector<HTMLElement>(".timeline-stage");
+  if (stage?.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+  contentRevision += 1;
+  if (cancelled || drag.draft === undefined) {
+    paintTimeline(currentTimelineModel(scene));
+    return;
+  }
+  suppressGraphClick = true;
+  setTimeout(() => { suppressGraphClick = false; }, 80);
+  void runKeyEdit(planSetSegmentBezier(currentTimelineModel(scene), drag.objectId, drag.property, drag.segment, drag.draft));
+}
+
 function finishKeyDrag(event: PointerEvent, cancelled: boolean): void {
+  if (graphDrag) {
+    finishGraphDrag(event, cancelled);
+    return;
+  }
   if (!scene || !keyDrag || keyDrag.pointerId !== event.pointerId) return;
   const drag = keyDrag;
   keyDrag = undefined;
@@ -1819,6 +2168,13 @@ function onTimelineKeyDown(event: KeyboardEvent): void {
   }
   const model = currentTimelineModel(scene);
 
+  // After Effects' Easy Ease: F9 both sides, Shift+F9 in, Ctrl+Shift+F9 out.
+  if (event.key === "F9") {
+    event.preventDefault();
+    const kind: EasyEaseKind = event.shiftKey && (event.ctrlKey || event.metaKey) ? "out" : event.shiftKey ? "in" : "both";
+    void runKeyEdit(planEasyEase(model, [...selectedKeys], kind));
+    return;
+  }
   if ((event.key === "Delete" || event.key === "Backspace") && selectedKeys.size > 0) {
     event.preventDefault();
     void runKeyEdit(planDelete([...selectedKeys]));
@@ -1856,6 +2212,13 @@ async function loadMotionLibrary(): Promise<void> {
     const option = document.createElement("option");
     option.value = easing;
     option.textContent = propertyLabel(easing);
+    ui.timelineEasing.append(option);
+  }
+  // After Effects' Easy Ease: speed 0 with 33.33% influence on the chosen sides.
+  for (const [value, label] of [["easy:both", "Easy ease (F9)"], ["easy:in", "Easy ease in (Shift+F9)"], ["easy:out", "Easy ease out (Ctrl+Shift+F9)"]]) {
+    const option = document.createElement("option");
+    option.value = value!;
+    option.textContent = label!;
     ui.timelineEasing.append(option);
   }
   try {
@@ -2003,7 +2366,7 @@ function jumpToHold(): void {
   if (!scene) return;
   const frame = holdFrame(scene);
   if (frame === undefined) {
-    log("jump to hold: nothing in this graphic animates, so there is no build-in to finish", "bad");
+    log("jump to hold: nothing in this scene animates, so there is no build-in to finish", "bad");
     return;
   }
   pausePreview("jump to hold");
@@ -2014,7 +2377,7 @@ function jumpToHold(): void {
 /** Why the current key selection cannot be saved as a preset, if it cannot. */
 function presetSaveBlocker(): string | undefined {
   if (projectSceneProject === undefined) {
-    return "save this graphic into a scene first: presets live in the project library";
+    return "save this scene into a project first: presets live in the project library";
   }
   const objects = new Set(
     [...selectedKeys].map((id) => parseKeyId(id)?.objectId).filter((id): id is string => id !== undefined),
@@ -2069,6 +2432,12 @@ function onEasingChosen(): void {
   if (!scene) return;
   const chosen = ui.timelineEasing.value;
   if (chosen === "") return;
+  if (chosen.startsWith("easy:")) {
+    const kind = chosen.slice("easy:".length) as EasyEaseKind;
+    void runKeyEdit(planEasyEase(currentTimelineModel(scene), [...selectedKeys], kind));
+    ui.timelineEasing.value = "";
+    return;
+  }
   // `find` narrows to the contract's easing union: the picker only offers
   // what Rust declared, so an unknown value here is a stale option.
   const easing = animationSurface?.easings.find((candidate) => candidate === chosen);
@@ -2178,7 +2547,7 @@ function saveSelectionAsPreset(suggestedId?: string): void {
   if (!scene || !session) return;
   const blocker = presetSaveBlocker();
   if (blocker !== undefined || projectSceneProject === undefined) {
-    log(`preset save refused: ${blocker ?? "save this graphic into a scene first"}`, "bad");
+    log(`preset save refused: ${blocker ?? "save this scene into a project first"}`, "bad");
     return;
   }
   const refs = [...selectedKeys].flatMap((id) => {
@@ -2322,6 +2691,7 @@ function setCurrentFrame(next: number): void {
   );
   const evaluated = previewSceneAt(resolvedScene ?? scene, currentFrame, animationSurface);
   previewScene = evaluated.document;
+  scheduleEnginePreview();
   const viewportIssues = viewport?.updateDocument(previewScene) ?? [];
   viewport?.render();
   renderOverlayLayer();
@@ -2355,6 +2725,7 @@ function pausePreview(reason: string): void {
   cancelAnimationFrame(active.requestId);
   playback = undefined;
   updatePlaybackControls();
+  scheduleEnginePreview();
 
   const samples = [...active.renderTimes].sort((a, b) => a - b);
   const p95 = samples[Math.max(0, Math.ceil(samples.length * 0.95) - 1)] ?? 0;
@@ -3591,6 +3962,172 @@ async function onTextStyleClick(event: MouseEvent): Promise<void> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Effects & Presets and Effect Controls (11.69)
+// ---------------------------------------------------------------------------
+
+/// The one object effects are applied to and shown for: the single selection.
+function effectTarget(document_: SceneDocument): { object?: SceneDocument["objects"][number]; blocker?: string } {
+  if (selection.length === 0) return { blocker: "select a scene object first" };
+  if (selection.length > 1) return { blocker: "select one object: effects are applied to one object at a time" };
+  const object = document_.objects.find((candidate) => candidate.id === selection[0]);
+  return object ? { object } : { blocker: "the selected object is not in this scene" };
+}
+
+function effectsOf(object: SceneDocument["objects"][number]): EffectStack {
+  return (object as { effects?: EffectInstance[] }).effects ?? [];
+}
+
+function renderEffects(document_: SceneDocument): void {
+  if (!effectSurface) {
+    ui.effectsSummary.textContent = "The effect catalogue is unavailable. See Activity.";
+    ui.effectsMount.replaceChildren();
+    ui.effectControlsMount.replaceChildren();
+    return;
+  }
+  const { object, blocker } = effectTarget(document_);
+  const counts = availability(effectSurface);
+  ui.effectsSummary.textContent = `${counts.available} of ${counts.total} effects render on the GrapiX engine · catalogue from EffectCraft`;
+  ui.effectsMount.replaceChildren(
+    renderNode(
+      document,
+      effectsBrowserPanel({
+        surface: effectSurface,
+        query: ui.effectsSearch.value,
+        showUnported: ui.effectsShowUnported.checked,
+        expanded: effectsOpen,
+        ...(blocker === undefined ? {} : { targetBlocker: blocker }),
+      }),
+    ) as unknown as Node,
+  );
+  // A category header takes the keyboard: Enter or Space flips it, the arrows open and fold it.
+  for (const header of ui.effectsMount.querySelectorAll<HTMLElement>('[role="group"][id^="effects-browser/"]')) header.tabIndex = 0;
+  if (!object) {
+    ui.effectControlsMount.replaceChildren();
+    ui.effectControlsEmpty.hidden = false;
+    ui.effectControlsEmpty.textContent = blocker === "select a scene object first" ? "Select a scene object to see its effects." : (blocker ?? "");
+    return;
+  }
+  const effects = effectsOf(object);
+  ui.effectControlsEmpty.hidden = effects.length > 0;
+  ui.effectControlsEmpty.textContent = `No effects on ${object.name}. Apply one from Effects & Presets.`;
+  const keyed = new Set(
+    document_.timeline.channels.filter((channel) => channel.objectId === object.id && channel.keys.length > 0).map((channel) => channel.property),
+  );
+  ui.effectControlsMount.replaceChildren(
+    renderNode(document, effectControlsPanel({ surface: effectSurface, objectName: object.name, effects, keyedChannels: keyed })) as unknown as Node,
+  );
+}
+
+/// Send the object's next effect stack as one undoable command, or say why not.
+async function commitEffects(objectId: string, next: EffectStack | { refused: string }, label: string): Promise<void> {
+  if (isEffectRefused(next)) {
+    log(`effects: ${next.refused}`, "bad");
+    return;
+  }
+  await runEdits([{ edit: "setEffects", objectId, effects: [...next] }], label, "inspector");
+}
+
+function onEffectsBrowserClick(event: MouseEvent): void {
+  // A click on a category's own header (the bar drawn above its list) opens or folds it.
+  const header = event.target instanceof Element ? event.target.closest<HTMLElement>('[role="group"][id^="effects-browser/"]') : null;
+  if (header && event.target === header) {
+    setEffectsOpen(toggleGroup(effectsOpen, header.id));
+    ui.effectsMount.querySelector<HTMLElement>(`[id="${header.id}"]`)?.focus();
+    return;
+  }
+  if (!scene || !effectSurface) return;
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-action][data-for]") : null;
+  if (!button || button.disabled) return;
+  const { object, blocker } = effectTarget(scene);
+  if (!object) {
+    log(`effects: ${blocker}`, "bad");
+    return;
+  }
+  const nodeId = button.dataset.for ?? "";
+  if (button.dataset.action === "apply") {
+    const listing = effectSurface.effects.find((candidate) => `effect/${candidate.id}` === nodeId);
+    if (listing) void commitEffects(object.id, addEffect(effectsOf(object), listing), `Applied ${listing.name} to ${object.name}`);
+  } else if (button.dataset.action === "applyPreset") {
+    const preset = effectSurface.presets.find((candidate) => `preset/${candidate.id}` === nodeId);
+    if (preset) void commitEffects(object.id, addPreset(effectsOf(object), preset), `Applied preset ${preset.name} to ${object.name}`);
+  }
+}
+
+function onEffectsHeaderKey(event: KeyboardEvent): void {
+  const header = event.target instanceof Element ? event.target.closest<HTMLElement>('[role="group"][id^="effects-browser/"]') : null;
+  if (!header || event.target !== header) return;
+  const open = header.getAttribute("aria-expanded") === "true";
+  const flip =
+    event.key === "Enter" || event.key === " " || (event.key === "ArrowRight" && !open) || (event.key === "ArrowLeft" && open);
+  if (!flip) return;
+  event.preventDefault();
+  setEffectsOpen(toggleGroup(effectsOpen, header.id));
+  ui.effectsMount.querySelector<HTMLElement>(`[id="${header.id}"]`)?.focus();
+}
+
+/// A double-click on an effect or preset row applies it, as in After Effects.
+function onEffectsBrowserDoubleClick(event: MouseEvent): void {
+  const row = event.target instanceof Element ? event.target.closest<HTMLElement>('li[role="listitem"]') : null;
+  row?.querySelector<HTMLButtonElement>("button[data-action]:not([disabled])")?.click();
+}
+
+function onEffectControlsClick(event: MouseEvent): void {
+  if (!scene || !effectSurface) return;
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-action][data-for]") : null;
+  if (!button || button.disabled) return;
+  const { object } = effectTarget(scene);
+  const parsed = parseControlId(button.dataset.for ?? "");
+  if (!object || !parsed) return;
+  const stack = effectsOf(object);
+  const instance = stack.find((candidate) => candidate.effectId === parsed.effectId);
+  if (!instance) return;
+  const name = listingFor(effectSurface, instance)?.name ?? instance.effect;
+  const action = button.dataset.action ?? "";
+  if (parsed.path === undefined) {
+    if (action === "toggle") void commitEffects(object.id, setEnabled(stack, instance.effectId, !instance.enabled), `${instance.enabled ? "Disabled" : "Enabled"} ${name}`);
+    else if (action === "moveUp") void commitEffects(object.id, moveEffect(stack, instance.effectId, -1), `Moved ${name} up`);
+    else if (action === "moveDown") void commitEffects(object.id, moveEffect(stack, instance.effectId, 1), `Moved ${name} down`);
+    else if (action === "duplicate") void commitEffects(object.id, duplicateEffect(stack, instance.effectId), `Duplicated ${name}`);
+    else if (action === "remove") void commitEffects(object.id, removeEffect(stack, instance.effectId), `Removed ${name}`);
+    return;
+  }
+  const parameter = listingFor(effectSurface, instance)?.parameters.find((candidate) => candidate.path === parsed.path);
+  if (!parameter) return;
+  if (action.startsWith("choose:")) {
+    void commitEffects(object.id, setParameter(stack, instance.effectId, parameter, Number(action.slice("choose:".length))), `Set ${name} ${parameterLabel(parameter.path)}`);
+  } else if (action === "key") {
+    const value = parameterValue(instance, parameter);
+    // A switch or a choice holds between keys; a number eases.
+    const easing = parameter.kind === "number" ? DEFAULT_EASING() : animationSurface?.easings.find((candidate) => candidate === "hold");
+    if (value === undefined || !easing) {
+      log("effects: this parameter cannot be keyed here", "bad");
+      return;
+    }
+    void runGesture(
+      [{ edit: "createKeyframe", objectId: object.id, property: effectChannel(instance.effectId, parameter.path), keyframe: keyframeForValue(value, currentFrame, easing) }],
+      `Added ${name} ${parameterLabel(parameter.path)} key at frame ${currentFrame}`,
+    );
+  }
+}
+
+function onEffectControlsChange(event: Event): void {
+  if (!scene || !effectSurface) return;
+  const input = event.target instanceof HTMLInputElement ? event.target : null;
+  const parsed = parseControlId(input?.dataset.for ?? "");
+  const { object } = effectTarget(scene);
+  if (!input || !object || parsed?.path === undefined) return;
+  const stack = effectsOf(object);
+  const instance = stack.find((candidate) => candidate.effectId === parsed.effectId);
+  const parameter = instance && listingFor(effectSurface, instance)?.parameters.find((candidate) => candidate.path === parsed.path);
+  if (!instance || !parameter) return;
+  const name = listingFor(effectSurface, instance)?.name ?? instance.effect;
+  const next = setParameter(stack, instance.effectId, parameter, input.type === "checkbox" ? input.checked : input.value);
+  // A refused value leaves the field showing what the object still has.
+  if (isEffectRefused(next)) renderEffects(scene);
+  void commitEffects(object.id, next, `Set ${name} ${parameterLabel(parameter.path)}`);
+}
+
 function onMaterialManagerClick(event: MouseEvent): void {
   if (!scene) return;
   const target = event.target;
@@ -3932,7 +4469,7 @@ async function importAssetFiles(): Promise<void> {
       return;
     }
     const where = projectSceneProject === undefined
-      ? "held in the import cache until this graphic is saved into a project"
+      ? "held in the import cache until this scene is saved into a project"
       : `kept in project ${projectSceneProject}`;
     const added = `Imported ${batch.assets.length} asset(s), ${where}: ${batch.assets.map((asset) => asset.name).join(", ")}`;
     const outcome = await runEdits([{ edit: "addAssets", assets: batch.assets }], added, "assets");
@@ -4110,7 +4647,7 @@ function renderUnsupported(reasons: readonly string[]): void {
     ui.unsupportedList.append(item);
   }
   if (reasons.length > 0) {
-    log(`${reasons.length} object(s) not drawn by the preview`, "bad");
+    log(`${reasons.length} object(s) not drawn in the Draft view (see the Engine preview)`, "bad");
   }
 }
 
@@ -4145,6 +4682,8 @@ function updateTimeReadouts(): void {
 function focusWorkspacePanel(id: string): void {
   const panel = document.querySelector<HTMLElement>(`[data-panel="${id}"]`);
   if (!panel || panel.hidden) return;
+  // A panel on a tab that is not showing is brought forward first.
+  showTab(id);
   panel.classList.remove("panel-section-collapsed");
   panel.querySelector<HTMLButtonElement>(".panel-disclosure")?.setAttribute("aria-expanded", "true");
   panel.scrollIntoView({ block: "nearest" });
@@ -4205,7 +4744,7 @@ function wireWorkspaceChrome(): void {
   }
   // Animation stays open: it is where the current task lives. The rest are
   // reference panels and start folded.
-  const defaults = new Set(["fonts", "text-styles", "materials", "assets", "bindings", "control-contract", "take-page", "publish"]);
+  const defaults = new Set(["effects", "fonts", "text-styles", "materials", "assets", "bindings", "control-contract", "take-page", "publish"]);
   for (const panel of document.querySelectorAll<HTMLElement>(".panel[data-panel]")) {
     const heading = panel.querySelector<HTMLElement>(":scope > h2, :scope > .panel-title-row h2");
     if (!heading) continue;
@@ -4448,12 +4987,12 @@ function showManagerCreate(kind: "container" | "graphic"): void {
   managerCreateKind = kind;
   ui.managerForm.reset();
   ui.managerError.textContent = "";
-  document.getElementById("manager-create-title")!.textContent = kind === "container" ? "New scene" : "New graphic";
-  document.getElementById("manager-create-name-label")!.textContent = kind === "container" ? "Scene name" : "Graphic name";
+  document.getElementById("manager-create-title")!.textContent = kind === "container" ? "New project" : "New scene";
+  document.getElementById("manager-create-name-label")!.textContent = kind === "container" ? "Project name" : "Scene name";
   document.getElementById("manager-create-description")!.textContent = kind === "container"
-    ? "Keep multiple graphics together. Each graphic has its own layers and timeline."
-    : currentProject === undefined ? "Create an independent graphic. Save it into a scene when ready."
-      : `Add an independent graphic to ${currentProject}.`;
+    ? "Keep many scenes together. Each scene has its own layers and timeline."
+    : currentProject === undefined ? "Create an independent scene. Save it into a project when ready."
+      : `Add an independent scene to ${currentProject}.`;
   ui.managerRateRow.hidden = kind === "container";
   ui.managerRate.value = "50/1";
   ui.managerCustomRate.hidden = true;
@@ -4531,12 +5070,12 @@ async function submitManagerCreate(): Promise<void> {
       await execute({ command: "createProject", project: name });
       ui.graphicSearch.value = "";
       await loadProjects(name);
-      log(`Created scene ${name}`, "good");
+      log(`Created project ${name}`, "good");
     } else {
       const id = freshGraphicId(name);
       if (currentProject === undefined) {
-        const opened = await runCommand({ command: "openScene", source: { source: "new", id, name } }, `Created graphic ${name}`);
-        if (!opened) throw new Error("The graphic could not be opened. See Activity for the refusal.");
+        const opened = await runCommand({ command: "openScene", source: { source: "new", id, name } }, `Created scene ${name}`);
+        if (!opened) throw new Error("The scene could not be opened. See Activity for the refusal.");
         if (chosenRate) await runEdits([{ edit: "setCanvas", frameRate: chosenRate }], `Set frame rate to ${formatRate(chosenRate)}`, "scene");
       } else {
         const project = currentProject;
@@ -4548,8 +5087,8 @@ async function submitManagerCreate(): Promise<void> {
         }
         ui.graphicSearch.value = "";
         await refreshProjectCatalog();
-        const opened = await runCommand({ command: "openScene", source: { source: "project", project, sceneId: id } }, `Created graphic ${name}`);
-        if (!opened) throw new Error("The graphic was saved but could not be opened. See Activity for the refusal.");
+        const opened = await runCommand({ command: "openScene", source: { source: "project", project, sceneId: id } }, `Created scene ${name}`);
+        if (!opened) throw new Error("The scene was saved but could not be opened. See Activity for the refusal.");
       }
     }
     ui.managerDialog.close();
@@ -4623,7 +5162,7 @@ async function openProjectScene(sceneId: string): Promise<void> {
 async function duplicateProjectScene(sceneId: string): Promise<void> {
   const project = currentProject;
   if (project === undefined) return;
-  const proposedId = window.prompt("Duplicate graphic id", `${sceneId}-copy`);
+  const proposedId = window.prompt("Duplicate scene id", `${sceneId}-copy`);
   if (proposedId === null) return;
   const newId = proposedId.trim();
   if (!newId) {
@@ -4633,7 +5172,7 @@ async function duplicateProjectScene(sceneId: string): Promise<void> {
   const listed = projectCatalog?.project === project
     ? projectCatalog.scenes.find((candidate) => candidate.sceneId === sceneId)
     : undefined;
-  const proposedName = window.prompt("Duplicate graphic name", `${listed?.name ?? sceneId} Copy`);
+  const proposedName = window.prompt("Duplicate scene name", `${listed?.name ?? sceneId} Copy`);
   if (proposedName === null) return;
   const name = proposedName.trim();
   if (!name) {
@@ -4730,7 +5269,55 @@ function onSceneManagerClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
-  if (!button) return;
+  if (!button) {
+    // In the list view a click on a row opens that scene, as selecting a scene does in XPression.
+    const row = target.closest<HTMLElement>('[role="listitem"][id^="scene/"]');
+    if (row && sceneView === "list") {
+      sceneDeleteArm.disarm();
+      void openProjectScene(row.id.slice("scene/".length));
+    }
+    return;
+  }
+  runSceneAction(button);
+}
+
+/// The list view's keyboard (11.72): arrows walk the rows, Enter opens, Delete (twice)
+/// deletes, the menu key or Shift+F10 opens the row's commands.
+function onSceneListKey(event: KeyboardEvent): void {
+  if (sceneView !== "list") return;
+  const row = (event.target as Element | null)?.closest<HTMLElement>('[role="listitem"][id^="scene/"]');
+  if (!row || event.target !== row) return;
+  const next = moveRow(sceneRows().map((item) => item.id), row.id, event.key);
+  if (next !== undefined) {
+    event.preventDefault();
+    sceneDeleteArm.disarm();
+    document.getElementById(next)?.focus();
+    return;
+  }
+  const command = rowCommand(event.key, event.shiftKey);
+  if (command === undefined) {
+    sceneDeleteArm.disarm();
+    return;
+  }
+  event.preventDefault();
+  const sceneId = row.id.slice("scene/".length);
+  if (command === "open") {
+    sceneDeleteArm.disarm();
+    void openProjectScene(sceneId);
+  } else if (command === "menu") {
+    const box = row.getBoundingClientRect();
+    openSceneMenu(row, box.left + 24, box.bottom);
+  } else if (sceneDeleteArm.press(row.id, Date.now())) {
+    const button = row.querySelector<HTMLElement>(':scope > button[data-action="delete"]');
+    if (button) runSceneAction(button);
+  } else {
+    log(`press Delete again within 3 seconds to delete ${sceneId}`);
+    row.classList.add("delete-armed");
+  }
+}
+
+function runSceneAction(button: HTMLElement): void {
+  sceneDeleteArm.disarm();
   const unavailable = button.dataset.unavailable;
   if (unavailable) {
     log(unavailable, "bad");
@@ -4932,7 +5519,35 @@ async function start(): Promise<void> {
   ui.timelineRulerTicks.addEventListener("pointercancel", onRulerPointerUp);
   ui.timelinePlayhead.addEventListener("keydown", onPlayheadKeyDown);
   document.getElementById("manager-create-cancel")!.addEventListener("click", () => ui.managerDialog.close());
+  // Help ▸ Export diagnostic bundle (2.14). The Editor has no live telemetry:
+  // it has nothing to do with live broadcast (user, 18 Nov 2026), so Help carries
+  // only the diagnostic export, in the page's own menu beside Window.
+  for (const [id, allModules] of [["export-diagnostics-all", true], ["export-diagnostics-editor", false]] as const) {
+    document.getElementById(id)!.addEventListener("click", () => {
+      void shell().invoke<void>("cmd_export_diagnostics", { allModules }).then(
+        () => log(allModules ? "Exporting a diagnostic bundle for every module" : "Exporting the Editor's diagnostic bundle"),
+        (error: unknown) => log(`Diagnostic export failed: ${describe(error)}`, "bad"),
+      );
+    });
+  }
   ui.sceneManagerMount.addEventListener("click", onSceneManagerClick);
+  ui.sceneViewToggle.addEventListener("click", () => setSceneView(sceneView === "list" ? "thumbnails" : "list"));
+  ui.sceneManagerMount.addEventListener("contextmenu", (event) => {
+    const row = (event.target as Element | null)?.closest<HTMLElement>('[role="listitem"][id^="scene/"]');
+    if (!row) return;
+    event.preventDefault();
+    openSceneMenu(row, event.clientX, event.clientY);
+  });
+  ui.sceneMenu.addEventListener("click", (event) => {
+    const item = (event.target as Element | null)?.closest<HTMLElement>("button[data-action]");
+    if (!item) return;
+    closeSceneMenu();
+    runSceneAction(item);
+  });
+  ui.sceneManagerMount.addEventListener("keydown", onSceneListKey);
+  document.addEventListener("pointerdown", (event) => {
+    if (!ui.sceneMenu.hidden && !ui.sceneMenu.contains(event.target as Node)) closeSceneMenu();
+  });
   ui.sceneName.addEventListener("input", () => {
     // A typed name is unsaved work in any scene, bound to a project or not
     // (11.29). It becomes a `setSceneName` edit when a save or publish uses
@@ -4997,6 +5612,15 @@ async function start(): Promise<void> {
   });
   ui.textStyleMount.addEventListener("click", (event) => void onTextStyleClick(event));
   ui.materialMount.addEventListener("click", onMaterialManagerClick);
+  ui.effectsMount.addEventListener("click", onEffectsBrowserClick);
+  ui.effectsMount.addEventListener("dblclick", onEffectsBrowserDoubleClick);
+  ui.effectsMount.addEventListener("keydown", onEffectsHeaderKey);
+  ui.effectsExpandAll.addEventListener("click", () => setEffectsOpen(new Set([...effectsOpen, ...effectsGroupIds()])));
+  ui.effectsCollapseAll.addEventListener("click", () => setEffectsOpen(new Set()));
+  ui.effectsSearch.addEventListener("input", () => scene && renderEffects(scene));
+  ui.effectsShowUnported.addEventListener("change", () => scene && renderEffects(scene));
+  ui.effectControlsMount.addEventListener("click", onEffectControlsClick);
+  ui.effectControlsMount.addEventListener("change", onEffectControlsChange);
   ui.assetMount.addEventListener("click", onAssetManagerClick);
   ui.bindings.addEventListener("click", onBindingsClick);
   ui.sampleDataApply.addEventListener("click", onSampleDataApply);
@@ -5017,6 +5641,12 @@ async function start(): Promise<void> {
   ui.animationFrame.addEventListener("input", commitFrame);
   ui.animationFrame.addEventListener("change", commitFrame);
   ui.timelineGraphClose.addEventListener("click", closeSpeedGraph);
+  ui.timelineGraphMode.addEventListener("click", () => {
+    graphMode = graphMode === "value" ? "speed" : "value";
+    contentRevision += 1;
+    if (scene) paintTimeline(currentTimelineModel(scene));
+    log(graphMode === "value" ? "timeline: value graph (handles editable)" : "timeline: speed graph (read only)");
+  });
   ui.timelineZoom.addEventListener("input", onTimelineZoom);
   ui.timelineMount.addEventListener("click", onTimelineClick);
   ui.timelineMount.addEventListener("pointerdown", onTimelinePointerDown);
@@ -5101,6 +5731,11 @@ async function start(): Promise<void> {
     }
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !ui.sceneMenu.hidden) {
+      closeSceneMenu();
+      event.stopPropagation();
+      return;
+    }
     if (event.key === "Escape" && !ui.keyframeMenu.hidden) {
       closeKeyframeMenu();
       event.stopPropagation();
@@ -5148,6 +5783,12 @@ async function start(): Promise<void> {
     animationSurface = null;
     log(`animation contract unavailable: ${describe(error)}`, "bad");
   }
+  try {
+    effectSurface = await shell().invoke<EffectSurface>("cmd_effect_surface");
+  } catch (error) {
+    effectSurface = null;
+    log(`effect catalogue unavailable: ${describe(error)}`, "bad");
+  }
   await loadMotionLibrary();
   await loadObjectKinds();
   await loadProjects();
@@ -5165,7 +5806,7 @@ async function start(): Promise<void> {
   ui.sceneName.value = "Untitled";
   // Startup opens an editable blank session; creation dialogs are explicit
   // author actions and must not block the initial workspace.
-  await runCommand({ command: "openScene", source: { source: "new", id: "untitled", name: "Untitled" } }, "Opened blank graphic");
+  await runCommand({ command: "openScene", source: { source: "new", id: "untitled", name: "Untitled" } }, "Opened blank scene");
 }
 
 // ---------------------------------------------------------------------------
@@ -5221,14 +5862,212 @@ function configureDockHandles(): void {
   }
 }
 
+function panelElement(panel: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-panel="${panel}"]`);
+}
+
+/// The words on a panel's tab: its own heading, before the disclosure button added to it.
+function panelLabel(panel: string): string {
+  const heading = panelElement(panel)?.querySelector<HTMLElement>(
+    ":scope > h2, :scope > .panel-title-row h2, :scope > .timeline-head h2, :scope > .pane-head h2",
+  );
+  return (heading?.childNodes[0]?.textContent ?? panel).trim();
+}
+
+const groupElements = new Map<string, HTMLElement>();
+
+/// One tab group as a tab strip over its panels (11.73). The element is made once
+/// and reused, so a panel inside it keeps its state across a re-render.
+function renderGroup(group: TabGroup): HTMLElement {
+  let element = groupElements.get(group.id);
+  if (!element) {
+    element = document.createElement("div");
+    element.className = "dock-group";
+    element.dataset.group = group.id;
+    groupElements.set(group.id, element);
+  }
+  const tabs = document.createElement("div");
+  tabs.className = "dock-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.dataset.group = group.id;
+  for (const panel of group.panels) {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "dock-tab";
+    tab.setAttribute("role", "tab");
+    tab.dataset.tab = panel;
+    tab.draggable = true;
+    tab.textContent = panelLabel(panel);
+    tab.title = `${tab.textContent}: drag to another tab strip to move it, or out to a dock to tear it off`;
+    const selected = panel === group.active;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    tabs.append(tab);
+  }
+  const members: HTMLElement[] = [];
+  for (const panel of group.panels) {
+    const member = panelElement(panel);
+    if (!member) continue;
+    member.classList.toggle("tab-inactive", panel !== group.active);
+    // A folded panel would show an empty tab: in a group the tab is the fold.
+    member.classList.remove("panel-section-collapsed");
+    member.setAttribute("role", "tabpanel");
+    members.push(member);
+  }
+  element.replaceChildren(tabs, ...members);
+  return element;
+}
+
+function splitterElement(region: RegionId, index: number): HTMLElement {
+  const splitter = document.createElement("div");
+  splitter.className = "dock-splitter";
+  splitter.setAttribute("role", "separator");
+  splitter.setAttribute("aria-orientation", "horizontal");
+  splitter.setAttribute("aria-label", `Resize the panels of the ${region} dock`);
+  splitter.title = "Drag to resize the panels beside this bar; double-click to reset their sizes";
+  splitter.tabIndex = 0;
+  splitter.dataset.region = region;
+  splitter.dataset.index = String(index);
+  return splitter;
+}
+
+/// The stacked entries of a dock as they are on screen now, as fractions of their total
+/// height: what a splitter drag starts from. None is taken below the smallest share.
+function measureDock(region: RegionId): { nodes: HTMLElement[]; start: number[]; total: number } | undefined {
+  const host = regionElement(region);
+  if (!host) return undefined;
+  const nodes = Array.from(host.querySelectorAll<HTMLElement>(":scope > [data-dock-index]"));
+  const heights = nodes.map((node) => node.getBoundingClientRect().height);
+  const total = heights.reduce((sum, height) => sum + height, 0);
+  if (nodes.length < 2 || total <= 0) return undefined;
+  // A hidden panel measures nothing: every entry is brought up to the smallest share.
+  return { nodes, start: floorFractions(heights), total };
+}
+
+/// Store a dock's new sizes, or say why not, and draw the dock again.
+function commitSplit(region: RegionId, fractions: readonly number[]): void {
+  const next = splitRegion(layout, region, entryIds(layout.regions[region]), fractions);
+  if (isLayoutRefused(next)) {
+    log(next.refused, "bad");
+  } else {
+    layout = next;
+    persistLayout(window.localStorage, layout);
+    log(`resized the panels of the ${region} dock`, "good");
+  }
+  renderLayout();
+}
+
+let splitterDrag:
+  | { region: RegionId; index: number; startY: number; total: number; start: number[]; nodes: HTMLElement[]; current: number[]; handle: HTMLElement }
+  | undefined;
+
+function wireSplitters(): void {
+  document.addEventListener("pointerdown", (event) => {
+    const handle = eventElement(event)?.closest<HTMLElement>(".dock-splitter");
+    const region = handle?.dataset.region as RegionId | undefined;
+    if (!handle || !region || event.button !== 0) return;
+    const measured = measureDock(region);
+    if (!measured) return;
+    splitterDrag = {
+      region,
+      index: Number(handle.dataset.index),
+      startY: event.clientY,
+      total: measured.total,
+      start: measured.start,
+      nodes: measured.nodes,
+      current: measured.start,
+      handle,
+    };
+    handle.classList.add("resizing");
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  document.addEventListener("pointermove", (event) => {
+    if (!splitterDrag) return;
+    const drag = splitterDrag;
+    drag.current = dragSplitter(drag.start, drag.index, (event.clientY - drag.startY) / drag.total);
+    // The entries move with the pointer; the layout is stored once, when it is let go.
+    drag.nodes.forEach((node, index) => {
+      node.style.flex = `${(drag.current[index] ?? 0) * 100} 1 0`;
+      node.classList.add("sized");
+    });
+  });
+  const finish = (): void => {
+    if (!splitterDrag) return;
+    const drag = splitterDrag;
+    splitterDrag = undefined;
+    drag.handle.classList.remove("resizing");
+    commitSplit(drag.region, drag.current);
+  };
+  document.addEventListener("pointerup", finish);
+  document.addEventListener("pointercancel", finish);
+  document.addEventListener("keydown", (event) => {
+    const handle = eventElement(event)?.closest<HTMLElement>(".dock-splitter");
+    const region = handle?.dataset.region as RegionId | undefined;
+    if (!handle || !region) return;
+    const step = event.key === "ArrowDown" ? 0.02 : event.key === "ArrowUp" ? -0.02 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const measured = measureDock(region);
+    if (!measured) return;
+    const index = Number(handle.dataset.index);
+    commitSplit(region, dragSplitter(measured.start, index, step));
+    document.querySelector<HTMLElement>(`.dock-splitter[data-region="${region}"][data-index="${index}"]`)?.focus();
+  });
+  document.addEventListener("dblclick", (event) => {
+    const handle = eventElement(event)?.closest<HTMLElement>(".dock-splitter");
+    const region = handle?.dataset.region as RegionId | undefined;
+    if (!handle || !region) return;
+    const next = clearSplit(layout, region);
+    if (isLayoutRefused(next)) return;
+    layout = next;
+    persistLayout(window.localStorage, layout);
+    renderLayout();
+    log(`the panels of the ${region} dock are sized by their content again`, "good");
+  });
+}
+
 function renderLayout(): void {
   for (const region of REGIONS) {
     const host = regionElement(region);
     if (!host) continue;
-    for (const panel of layout.regions[region].panels) {
-      const element = document.querySelector<HTMLElement>(`[data-panel="${panel}"]`);
-      if (element && element !== host && element.parentElement !== host) host.append(element);
+    const nodes: HTMLElement[] = [];
+    for (const entry of regionEntries(layout.regions[region])) {
+      if (entry.kind === "group") {
+        const group = renderGroup(entry.group);
+        group.dataset.dockIndex = String(entry.index);
+        nodes.push(group);
+      } else {
+        const element = panelElement(entry.panel);
+        if (!element) continue;
+        element.classList.remove("tab-inactive");
+        element.removeAttribute("role");
+        element.dataset.dockIndex = String(entry.index);
+        nodes.push(element);
+      }
     }
+    // Stacked docks (left, right) lay their entries out by the author's sizes when they
+    // have any, with a splitter between each pair (11.80); otherwise by content.
+    const stacked = region === "left" || region === "right";
+    const split = layout.regions[region].split;
+    nodes.forEach((node, index) => {
+      if (stacked && split) {
+        // Scaled: flex-grow values that add up to less than one would leave part of the dock empty.
+        node.style.flex = `${(split.fractions[index] ?? 0) * 100} 1 0`;
+        node.classList.add("sized");
+      } else {
+        node.style.removeProperty("flex");
+        node.classList.remove("sized");
+      }
+    });
+    host.querySelectorAll(":scope > .dock-splitter").forEach((node) => node.remove());
+    const stack: HTMLElement[] = [];
+    nodes.forEach((node, index) => {
+      if (stacked && index > 0) stack.push(splitterElement(region, index - 1));
+      stack.push(node);
+    });
+    // Appended in order after anything else the region holds (the bottom dock's resizer).
+    host.append(...stack);
     host.hidden = layout.regions[region].panels.length === 0;
     host.classList.toggle("collapsed", layout.regions[region].collapsed);
     const resizer = document.querySelector<HTMLElement>(
@@ -5244,6 +6083,9 @@ function applyStoredLayout(): void {
   const restored = restoreLayout(window.localStorage, panelsInMarkup());
   layout = restored.layout;
   for (const note of restored.notes) log(`workspace layout: ${note}`);
+  // What was reconciled is said once: the layout the author now has is stored, so the
+  // next launch does not repeat a version reset or a dropped panel.
+  if (restored.notes.length > 0) persistLayout(window.localStorage, layout);
   renderLayout();
 }
 
@@ -5259,15 +6101,115 @@ function dockPanel(panel: string, region: RegionId, index?: number): void {
   log(`moved ${panel} to ${region}`, "good");
 }
 
+/// Where in the region's panel list a drop at `clientY` lands: before the first
+/// entry (a panel or a whole tab group) whose middle is below the pointer.
 function dropIndex(host: HTMLElement, clientY: number): number {
-  const panels = Array.from(host.querySelectorAll<HTMLElement>(":scope > [data-panel]")).filter(
-    (panel) => panel.dataset.panel !== draggedPanel,
+  const region = host.dataset.region as RegionId;
+  const entries = Array.from(host.querySelectorAll<HTMLElement>(":scope > [data-dock-index]")).filter(
+    (entry) => entry.dataset.panel !== draggedPanel,
   );
-  const before = panels.findIndex((panel) => clientY < panel.getBoundingClientRect().top + panel.getBoundingClientRect().height / 2);
-  return before < 0 ? panels.length : before;
+  const before = entries.find((entry) => {
+    const box = entry.getBoundingClientRect();
+    return clientY < box.top + box.height / 2;
+  });
+  let index = before ? Number(before.dataset.dockIndex) : layout.regions[region].panels.length;
+  // The list the move works on has the dragged panel taken out first.
+  const dragged = draggedPanel === null ? -1 : layout.regions[region].panels.indexOf(draggedPanel);
+  if (dragged >= 0 && dragged < index) index -= 1;
+  return index;
+}
+
+function joinGroup(panel: string, groupId: string, index?: number): void {
+  const next = moveToGroup(layout, panel, groupId, index);
+  if (isLayoutRefused(next)) {
+    log(next.refused, "bad");
+    return;
+  }
+  layout = next;
+  persistLayout(window.localStorage, layout);
+  renderLayout();
+  log(`moved ${panel} to tab group ${groupId}`, "good");
+}
+
+/// Show a tab, from a click, the keyboard or the Window menu.
+function showTab(panel: string, focusTab = false): void {
+  const next = activateTab(layout, panel);
+  if (isLayoutRefused(next)) return;
+  layout = next;
+  persistLayout(window.localStorage, layout);
+  renderLayout();
+  if (focusTab) document.querySelector<HTMLElement>(`.dock-tab[data-tab="${panel}"]`)?.focus();
+}
+
+function wireTabs(): void {
+  document.addEventListener("click", (event) => {
+    const tab = eventElement(event)?.closest<HTMLElement>(".dock-tab");
+    if (tab?.dataset.tab) showTab(tab.dataset.tab);
+  });
+  document.addEventListener("keydown", (event) => {
+    const tab = eventElement(event)?.closest<HTMLElement>(".dock-tab");
+    if (!tab?.dataset.tab) return;
+    const found = groupOf(layout, tab.dataset.tab);
+    if (!found) return;
+    const members = found.group.panels;
+    const at = members.indexOf(tab.dataset.tab);
+    const target =
+      event.key === "ArrowRight" ? members[(at + 1) % members.length]
+      : event.key === "ArrowLeft" ? members[(at - 1 + members.length) % members.length]
+      : event.key === "Home" ? members[0]
+      : event.key === "End" ? members[members.length - 1]
+      : undefined;
+    if (!target) return;
+    event.preventDefault();
+    showTab(target, true);
+  });
+  document.addEventListener("dragstart", (event) => {
+    const tab = eventElement(event)?.closest<HTMLElement>(".dock-tab");
+    if (!tab?.dataset.tab || !event.dataTransfer) return;
+    draggedPanel = tab.dataset.tab;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggedPanel);
+  });
+  document.addEventListener("dragover", (event) => {
+    const strip = eventElement(event)?.closest<HTMLElement>(".dock-tabs");
+    document.querySelectorAll(".tab-drop-target").forEach((node) => node.classList.remove("tab-drop-target"));
+    if (!draggedPanel || !strip) return;
+    event.preventDefault();
+    strip.classList.add("tab-drop-target");
+  });
+  document.addEventListener("drop", (event) => {
+    const strip = eventElement(event)?.closest<HTMLElement>(".dock-tabs");
+    if (!draggedPanel || !strip?.dataset.group) return;
+    // A drop on a tab strip joins that group; the dock's own drop must not also run.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const over = eventElement(event)?.closest<HTMLElement>(".dock-tab");
+    const tabs = Array.from(strip.querySelectorAll<HTMLElement>(".dock-tab"));
+    const index = over ? tabs.indexOf(over) : undefined;
+    const panel = draggedPanel;
+    clearDockGesture();
+    joinGroup(panel, strip.dataset.group, index);
+  }, true);
+}
+
+/// Draw where a dragged panel would land: a line above the entry it goes before, or
+/// below the last one.
+function showDropLine(host: HTMLElement, clientY: number): void {
+  document.querySelectorAll(".drop-before, .drop-after").forEach((node) => node.classList.remove("drop-before", "drop-after"));
+  const entries = Array.from(host.querySelectorAll<HTMLElement>(":scope > [data-dock-index]")).filter(
+    (entry) => entry.dataset.panel !== draggedPanel,
+  );
+  const before = entries.find((entry) => {
+    const box = entry.getBoundingClientRect();
+    return clientY < box.top + box.height / 2;
+  });
+  if (before) before.classList.add("drop-before");
+  else entries[entries.length - 1]?.classList.add("drop-after");
 }
 
 function clearDockGesture(): void {
+  document.querySelectorAll(".drop-before, .drop-after").forEach((node) => node.classList.remove("drop-before", "drop-after"));
+  document.querySelectorAll(".tab-drop-target").forEach((node) => node.classList.remove("tab-drop-target"));
   document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target"));
   document.querySelectorAll(".dock-dragging").forEach((node) => node.classList.remove("dock-dragging"));
   draggedPanel = null;
@@ -5295,6 +6237,8 @@ function eventElement(event: Event): Element | null {
 }
 
 function wireDocking(): void {
+  wireTabs();
+  wireSplitters();
   document.addEventListener("dragstart", (event) => {
     const handle = eventElement(event)?.closest<HTMLElement>("[data-dock-handle]");
     const panel = handle?.closest<HTMLElement>("[data-panel]");
@@ -5311,6 +6255,7 @@ function wireDocking(): void {
     event.preventDefault();
     document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target"));
     host.classList.add("drop-target");
+    showDropLine(host, event.clientY);
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   });
   document.addEventListener("drop", (event) => {

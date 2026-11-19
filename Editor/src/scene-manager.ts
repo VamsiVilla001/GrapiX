@@ -14,10 +14,29 @@ export interface ManagedScene {
   readonly preview?: { readonly src?: string; readonly note: string };
 }
 
+/** How the Scene Manager draws its scenes: a dense list (XPression's working view) or thumbnail cards. */
+export type SceneListView = "list" | "thumbnails";
+
 export interface SceneManagerInput {
   readonly project: string;
   readonly scenes: readonly ManagedScene[];
   readonly query?: string;
+  /** Defaults to thumbnails, the view the panel always had; the page asks for the list (11.72). */
+  readonly view?: SceneListView;
+}
+
+/**
+ * The short status a list row shows: only what differs from the ordinary, so a saved,
+ * closed, unpublished scene says nothing. The full sentence stays on the row's
+ * description and in `graphicStatus`.
+ */
+export function rowStatus(scene: ManagedScene): string {
+  if (scene.unavailableReason) return "Unavailable";
+  return [
+    scene.active ? "Editing" : scene.open ? "Open" : undefined,
+    scene.unsavedChanges ? "Unsaved" : undefined,
+    scene.publishedRevision === undefined ? undefined : `r${scene.publishedRevision}`,
+  ].filter((part) => part !== undefined).join(" · ");
 }
 
 export function graphicStatus(scene: ManagedScene): string {
@@ -42,19 +61,23 @@ function sceneActions(scene: ManagedScene): UiAction[] {
 
 export function sceneManagerPanel(input: SceneManagerInput): UiNode {
   const query = input.query?.trim().toLocaleLowerCase() ?? "";
+  const list = input.view === "list";
   const matching = input.scenes.filter((scene) =>
     `${scene.name}\n${scene.sceneId}`.toLocaleLowerCase().includes(query));
   return {
     id: "scene-manager",
     role: "region",
     label: `Scene: ${input.project}`,
-    description: `${input.scenes.length} graphic(s) · independent layers and timelines`,
+    description: `${input.scenes.length} scene(s) · independent layers and timelines${list ? " · list view" : ""}`,
     children: [{
-      id: "scene-manager/list", role: "list", label: "Graphics",
+      id: "scene-manager/list", role: "list", label: "Scenes",
       children: matching.map((scene) => ({
         id: `scene/${scene.sceneId}`, role: "listitem", label: scene.name,
         description: graphicStatus(scene), actions: sceneActions(scene),
-        children: [
+        ...(list ? { selected: scene.active === true } : {}),
+        children: list ? [
+          { id: `scene/${scene.sceneId}/status`, role: "status", label: `${scene.name} status`, value: rowStatus(scene) },
+        ] : [
           { id: `scene/${scene.sceneId}/preview`, role: "group", label: `${scene.name} preview`,
             description: scene.preview?.note ?? "Loading authoring preview…",
             ...(scene.preview?.src === undefined ? {} : { image: { src: scene.preview.src, alt: `${scene.name}: ${scene.preview.note}` } }),

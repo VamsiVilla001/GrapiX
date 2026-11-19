@@ -198,6 +198,40 @@ pub(crate) fn cases() -> Vec<(String, Effect)> {
             gamma_correction: 0.7,
         }),
     );
+    push(
+        "invert",
+        Effect::Invert(Invert {
+            channel: InvertChannel::Rgb,
+            blend_with_original: 0.0,
+        }),
+    );
+    push(
+        "invert-green-blended",
+        Effect::Invert(Invert {
+            channel: InvertChannel::Green,
+            blend_with_original: 0.3,
+        }),
+    );
+    push("posterize", Effect::Posterize(Posterize { level: 5.0 }));
+    push(
+        "posterize-fine",
+        Effect::Posterize(Posterize { level: 64.0 }),
+    );
+    push("threshold", Effect::Threshold(Threshold { level: 0.45 }));
+    push(
+        "vibrance",
+        Effect::Vibrance(Vibrance {
+            vibrance: 0.7,
+            saturation: -0.1,
+        }),
+    );
+    push(
+        "vibrance-down",
+        Effect::Vibrance(Vibrance {
+            vibrance: -0.5,
+            saturation: 0.3,
+        }),
+    );
     out
 }
 

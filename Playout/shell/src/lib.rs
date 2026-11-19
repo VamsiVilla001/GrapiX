@@ -33,7 +33,7 @@ use gx_control_plane::intent::{
 };
 use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
 use gx_control_plane::peer::EnginePeer;
-use gx_control_plane::status::{clock_summary, ClockSummary, EngineStatus};
+use gx_control_plane::status::{clock_summary, ClockSummary, EngineStatus, PerformanceSummary};
 use gx_control_transport::{Client, Token};
 use serde::{Deserialize, Serialize};
 
@@ -259,6 +259,24 @@ pub fn status(state: &Connection) -> Result<OperatorView, PlayoutError> {
     result
 }
 
+/// 2.27: the engine's live telemetry: the frame series and, per component, its
+/// state and series, with the findings the engine decided (`telemetry::assess`).
+/// A read, polled by the Help telemetry panel; it is debug-logged like status so
+/// a panel left open does not fill the log.
+pub fn performance(state: &Connection) -> Result<PerformanceSummary, PlayoutError> {
+    let result = with_client(state, |client| {
+        match client.handle(ClientRequest::Performance) {
+            EngineReply::Performance(summary) => Ok(summary),
+            EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),
+            other => Err(PlayoutError::UnexpectedReply {
+                detail: format!("expected performance, got {other:?}"),
+            }),
+        }
+    });
+    tracing::debug!(event = "operator.performance", ok = result.is_ok());
+    result
+}
+
 fn committed(reply: EngineReply, expected: &'static str) -> Result<TakeCommitted, PlayoutError> {
     match reply {
         EngineReply::Cued(c) | EngineReply::Taken(c) | EngineReply::Cleared(c) => Ok(c),
@@ -471,6 +489,13 @@ fn cmd_status(state: tauri::State<'_, Connection>) -> Result<OperatorView, Playo
 }
 
 #[tauri::command]
+fn cmd_performance(
+    state: tauri::State<'_, Connection>,
+) -> Result<PerformanceSummary, PlayoutError> {
+    performance(&state)
+}
+
+#[tauri::command]
 fn cmd_cue(
     state: tauri::State<'_, Connection>,
     take_id: String,
@@ -567,6 +592,7 @@ pub fn run() {
             cmd_log,
             cmd_connect,
             cmd_status,
+            cmd_performance,
             cmd_cue,
             cmd_take,
             cmd_clear,

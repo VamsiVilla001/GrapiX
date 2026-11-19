@@ -26,11 +26,11 @@
     <header class="bar">
       <nav class="app-menubar" aria-label="Editor menu">
         <details class="app-menu"><summary>File</summary><div class="menu-items">
-          <button data-invoke="project-create" type="button">New scene…</button>
-          <button data-invoke="new-scene" type="button">New graphic…</button>
-          <button data-invoke="open-scene" type="button">Open graphic file…</button>
+          <button data-invoke="project-create" type="button">New project…</button>
+          <button data-invoke="new-scene" type="button">New scene…</button>
+          <button data-invoke="open-scene" type="button">Open scene file…</button>
           <button data-invoke="import-svg" type="button">Import SVG…</button>
-          <button data-invoke="save-scene" type="button">Save graphic file…</button>
+          <button data-invoke="save-scene" type="button">Save scene file…</button>
         </div></details>
         <details class="app-menu"><summary>Edit</summary><div class="menu-items">
           <button data-invoke="undo" type="button">Undo <kbd>Ctrl Z</kbd></button>
@@ -43,6 +43,10 @@
           <button data-invoke="object-duplicate" type="button">Duplicate selected</button>
         </div></details>
         <details class="app-menu"><summary>Window</summary><div id="window-panel-menu" class="menu-items"></div></details>
+        <details class="app-menu"><summary>Help</summary><div class="menu-items">
+          <button id="export-diagnostics-all" type="button">Export diagnostic bundle (all modules)</button>
+          <button id="export-diagnostics-editor" type="button">Export diagnostic bundle (editor only)</button>
+        </div></details>
         <span class="workspace-title">GrapiX · Authoring workspace</span>
       </nav>
       <div class="brand">
@@ -52,7 +56,7 @@
 
       <div class="scene-identity">
         <label class="field">
-          <span class="label">Graphic id</span>
+          <span class="label">Scene id</span>
           <input id="scene-id" type="text" spellcheck="false" autocomplete="off" />
         </label>
         <label class="field">
@@ -64,7 +68,7 @@
       <div class="actions">
         <button id="new-scene" type="button">New</button>
         <button id="open-scene" type="button">Open…</button>
-        <button id="import-svg" type="button" title="Import an SVG as a new graphic, with a report of every substitution">Import SVG…</button>
+        <button id="import-svg" type="button" title="Import an SVG as a new scene, with a report of every substitution">Import SVG…</button>
         <button id="save-scene" type="button">Save…</button>
         <button id="undo" type="button" disabled>Undo</button>
         <button id="redo" type="button" disabled>Redo</button>
@@ -81,7 +85,7 @@
       <!-- The scene switcher (11.29). A broadcast carries many graphics; each
            open scene is its own session, and the panels below render whichever
            one is active. -->
-      <nav id="scene-tabs" class="scene-tabs" aria-label="Open graphics"></nav>
+      <nav id="scene-tabs" class="scene-tabs" aria-label="Open scenes"></nav>
     </header>
 
     <!-- Dockable workspace (11.5). Panels are addressed by `data-panel` and
@@ -102,12 +106,13 @@
       <section class="viewport-pane" data-panel="viewport">
         <div class="pane-head">
           <h2>Composition <span id="composition-name">Untitled</span></h2>
+          <span class="chip-draft" title="The fast editing view. Effects, shaped text and masks are drawn only in the Engine preview.">Draft</span>
           <span id="canvas-size" class="meta"></span>
           <!-- The graphic's rational frame rate (11.43). A change is one
                setCanvas edit; frames are canonical, so keys keep their frame. -->
           <label class="frame-control canvas-rate-control">
             <span>Rate</span>
-            <select id="canvas-rate" aria-label="Frame rate of this graphic"></select>
+            <select id="canvas-rate" aria-label="Frame rate of this scene"></select>
           </label>
         </div>
         <div class="viewport-stage">
@@ -155,28 +160,40 @@
             <dl class="preview-settings"><dt>Shortcut</dt><dd>Spacebar</dd><dt>Play from</dt><dd>Current time</dd><dt>Frame rate</dt><dd id="preview-rate"></dd></dl>
           </details>
           <span id="preview-status" class="meta" aria-live="polite">Paused at frame 0</span>
+          <!-- The engine's own picture of the scene at the playhead (11.65): the truth
+               for effects, shaped text and masks, which the Draft viewport cannot draw. -->
+          <div id="engine-frame" class="engine-frame" data-status="idle">
+            <div class="engine-frame-head">
+              <span class="chip-engine">Engine</span>
+              <span id="engine-status" class="engine-status" role="status" aria-live="polite">No frame yet</span>
+              <span id="engine-time" class="meta"></span>
+            </div>
+            <img id="engine-image" class="engine-image" alt="The engine's render of the scene at the playhead" hidden />
+            <p id="engine-detail" class="engine-detail"></p>
+          </div>
         </section>
         <section data-panel="scene-manager" class="panel">
           <div class="panel-title-row">
             <h2>Scene Manager</h2>
+            <button id="scene-view-toggle" type="button" aria-pressed="true" title="List view: one row per scene. Turn off for thumbnail cards.">List</button>
             <button id="project-refresh" type="button">Refresh</button>
           </div>
           <div class="project-tools">
             <label class="frame-control">
-              <span>Scene</span>
-              <select id="project-select" aria-label="Current scene container"></select>
+              <span>Project</span>
+              <select id="project-select" aria-label="Current project"></select>
             </label>
-            <button id="project-create" type="button">New scene</button>
-            <button id="graphic-create" type="button">Add graphic</button>
-            <button id="project-save-scene" type="button">Save graphic</button>
+            <button id="project-create" type="button">New project</button>
+            <button id="graphic-create" type="button">New scene</button>
+            <button id="project-save-scene" type="button">Save to project</button>
           </div>
-          <p class="scene-manager-summary">One scene · multiple graphics</p>
-          <input id="graphic-search" class="graphic-search" type="search" placeholder="Search graphics…" aria-label="Search graphics by name or id" />
+          <p class="scene-manager-summary">One project · many scenes</p>
+          <input id="graphic-search" class="graphic-search" type="search" placeholder="Search scenes…" aria-label="Search scenes by name or id" />
           <!-- Scene/template CRUD (11.18), projected from scene-manager.ts so
                the human controls and agent snapshot have one description. -->
           <div id="scene-manager-mount" class="scene-manager-mount"></div>
           <p id="scene-manager-empty" class="empty">
-            Create a scene to keep your graphics together.
+            Create a project to keep your scenes together.
           </p>
         </section>
 
@@ -233,6 +250,26 @@
           <h2>Text styles</h2>
           <div id="text-style-mount" class="asset-manager-mount"></div>
           <p id="text-style-empty" class="empty">No text styles in this scene.</p>
+        </section>
+
+        <section data-panel="effect-controls" class="panel">
+          <h2>Effect Controls</h2>
+          <div id="effect-controls-mount" class="effect-controls-mount"></div>
+          <p id="effect-controls-empty" class="empty">Select a scene object to see its effects.</p>
+        </section>
+
+        <section data-panel="effects" class="panel">
+          <h2>Effects &amp; Presets</h2>
+          <div class="font-filter-row">
+            <input id="effects-search" class="graphic-search" type="search" placeholder="Search effects and presets" aria-label="Search effects and presets by name, category or id" />
+            <label class="effects-all"><input id="effects-show-unported" type="checkbox" checked /> All 306</label>
+          </div>
+          <p id="effects-summary" class="scene-manager-summary"></p>
+          <div class="effects-tools">
+            <button id="effects-expand-all" type="button" title="Open every category shown">Expand all</button>
+            <button id="effects-collapse-all" type="button" title="Fold every category">Collapse all</button>
+          </div>
+          <div id="effects-mount" class="effects-mount"></div>
         </section>
 
         <section data-panel="materials" class="panel">
@@ -374,6 +411,7 @@
         <span id="timeline-meta" class="meta"></span>
         <button id="timeline-jump-hold" type="button"
                 title="Jump to the end of the build-in: the hold phase if one is set, else the end of the in phase, else the end of each track's first move">Jump to hold</button>
+        <button id="timeline-graph-mode" type="button" hidden title="Switch between the value graph (editable) and the speed graph (read only)">Speed graph</button>
         <button id="timeline-graph-close" type="button" hidden>Back to dope sheet</button>
         <label class="frame-control">
           <span>Zoom</span>
@@ -463,6 +501,14 @@
       hidden
     ></div>
 
+    <div
+      id="scene-context-menu"
+      class="context-menu"
+      role="menu"
+      aria-label="Scene actions"
+      hidden
+    ></div>
+
     <footer class="log-bar">
       <h2 class="log-title">Activity</h2>
       <ul id="log" class="log"></ul>
@@ -470,11 +516,11 @@
 
     <dialog id="manager-create-dialog" aria-labelledby="manager-create-title" aria-describedby="manager-create-description">
       <form id="manager-create-form">
-        <h2 id="manager-create-title">New scene</h2>
+        <h2 id="manager-create-title">New project</h2>
         <p id="manager-create-description"></p>
-        <label class="field"><span id="manager-create-name-label">Scene name</span><input id="manager-create-name" type="text" required maxlength="120" autocomplete="off" /></label>
+        <label class="field"><span id="manager-create-name-label">Project name</span><input id="manager-create-name" type="text" required maxlength="120" autocomplete="off" /></label>
         <div id="manager-create-rate-row" class="field">
-          <label class="field"><span>Frame rate</span><select id="manager-create-rate" aria-label="Frame rate of the new graphic"></select></label>
+          <label class="field"><span>Frame rate</span><select id="manager-create-rate" aria-label="Frame rate of the new scene"></select></label>
           <div id="manager-create-custom-rate" class="rate-custom" hidden>
             <input id="manager-create-rate-num" type="text" inputmode="numeric" placeholder="numerator" aria-label="Frame rate numerator" />
             <span>/</span>

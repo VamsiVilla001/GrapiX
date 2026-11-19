@@ -95,6 +95,54 @@ pub enum PublishRefusal {
     PackageRefused { cause: gx_contracts::Refusal },
 }
 
+/// One engine-rendered preview frame: the PNG of a draft scene at a frame (11.65).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewImage {
+    pub width: u32,
+    pub height: u32,
+    pub png: Vec<u8>,
+}
+
+/// The render of one preview, to be run **outside** the peer's lock: a draft is
+/// prepared and drawn without holding the engine, so a preview can never delay a
+/// Program frame (invariant 14). The peer builds it under the lock from what it
+/// must read there (its assets) and nothing else.
+pub type PreviewJob = Box<dyn FnOnce() -> Result<PreviewImage, Refusal> + Send>;
+
+/// A closed request to render a draft scene (11.65). It creates no revision and
+/// touches nothing on air: the engine draws the document as it is sent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreviewRequest {
+    pub scene: SceneDocument,
+    /// The authored frame to draw.
+    pub frame: u64,
+}
+
+/// The asset-plane reply to a preview. `Image` is followed on the stream by
+/// exactly `byteLen` PNG bytes, whose SHA-256 is `hash`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "reply",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum PreviewReply {
+    Image {
+        width: u32,
+        height: u32,
+        hash: ContentHash,
+        byte_len: u64,
+    },
+    Refused {
+        cause: Refusal,
+    },
+    /// The request was not a well-formed preview request.
+    InvalidRequest {
+        detail: String,
+    },
+}
+
 /// A peer that can atomically turn a strictly parsed scene into a revision,
 /// and serve the bytes of images it rendered.
 ///
@@ -113,6 +161,20 @@ pub trait AssetPublishPeer: Send + 'static {
     /// renders produced (11.41). A peer that renders nothing serves nothing.
     fn fetch(&self, _hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
         None
+    }
+
+    /// Get ready to render a draft scene at a frame (11.65): validate it and
+    /// gather what the render needs from this peer, and return the render as a
+    /// job the listener runs without holding the peer. A peer that renders
+    /// nothing refuses by name.
+    fn prepare_preview(
+        &mut self,
+        _scene: SceneDocument,
+        _frame: u64,
+    ) -> Result<PreviewJob, Refusal> {
+        Err(Refusal::NotImplemented {
+            what: "this asset-plane peer renders no previews".into(),
+        })
     }
 
     /// Whether this peer already holds verified bytes for `hash` (5.9): the
@@ -385,6 +447,75 @@ pub(crate) fn publish_package_path(
     serde_json::from_slice(&header).map_err(PublishClientError::Malformed)
 }
 
+/// Why a preview returned no image.
+#[derive(Debug)]
+pub enum PreviewError {
+    /// No reply was obtained at all (the engine is unreachable, or the
+    /// connection failed): never reported as a refusal it did not send.
+    Client(PublishClientError),
+    /// The engine declined by name, or the bytes that arrived are not the bytes
+    /// the reply's hash names.
+    Refused(Refusal),
+}
+
+impl std::fmt::Display for PreviewError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Client(error) => write!(f, "{error}"),
+            Self::Refused(refusal) => write!(f, "preview refused: {refusal}"),
+        }
+    }
+}
+
+impl std::error::Error for PreviewError {}
+
+/// Ask an engine to render a draft scene at a frame (11.65). The image is
+/// re-hashed on arrival: bytes that do not hash to what the reply named are
+/// refused, never returned (invariant 28).
+pub fn preview_scene(
+    engine: SocketAddr,
+    scene: SceneDocument,
+    frame: u64,
+) -> Result<PreviewImage, PreviewError> {
+    let request =
+        serde_json::to_vec(&serde_json::json!({ "preview": PreviewRequest { scene, frame } }))
+            .map_err(|error| PreviewError::Client(PublishClientError::Malformed(error)))?;
+    let (mut stream, header) = exchange(engine, &request).map_err(PreviewError::Client)?;
+    let (width, height, hash, byte_len) = match serde_json::from_slice(&header)
+        .map_err(|error| PreviewError::Client(PublishClientError::Malformed(error)))?
+    {
+        PreviewReply::Image {
+            width,
+            height,
+            hash,
+            byte_len,
+        } => (width, height, hash, byte_len as usize),
+        PreviewReply::Refused { cause } => return Err(PreviewError::Refused(cause)),
+        PreviewReply::InvalidRequest { detail } => {
+            return Err(PreviewError::Client(PublishClientError::Transport(
+                io::Error::new(io::ErrorKind::InvalidInput, detail),
+            )))
+        }
+    };
+    if byte_len > MAX_PUBLISH_FRAME_BYTES {
+        return Err(PreviewError::Client(PublishClientError::ReplyTooLarge {
+            bytes: byte_len,
+        }));
+    }
+    let mut png = vec![0; byte_len];
+    stream
+        .read_exact(&mut png)
+        .map_err(|error| PreviewError::Client(PublishClientError::Transport(error)))?;
+    let actual = content_hash(&png);
+    if actual != hash {
+        return Err(PreviewError::Refused(Refusal::AssetHashMismatch {
+            expected: hash,
+            actual,
+        }));
+    }
+    Ok(PreviewImage { width, height, png })
+}
+
 /// Why a fetch returned no bytes.
 #[derive(Debug)]
 pub enum FetchError {
@@ -559,6 +690,8 @@ enum AssetRequest {
     Package(String),
     /// The closed read of the engine's declared locality (5.10).
     Locality,
+    /// Render a draft scene at a frame (11.65).
+    Preview(Result<PreviewRequest, PublishRefusal>),
 }
 
 fn handle_publish<P: AssetPublishPeer>(
@@ -656,6 +789,39 @@ fn handle_publish<P: AssetPublishPeer>(
                 Err(refusal) => PublishReply::Refused(refusal),
             };
             write_header(&mut stream, &reply)
+        }
+        AssetRequest::Preview(request) => {
+            let reply = match request {
+                Ok(PreviewRequest { scene, frame }) => {
+                    // The peer is held only to build the job; the render runs
+                    // without it.
+                    let job = locked()?.prepare_preview(scene, frame);
+                    job.and_then(|job| job())
+                        .map_err(|cause| PreviewReply::Refused { cause })
+                }
+                Err(PublishRefusal::InvalidPublishRequest { detail }) => {
+                    Err(PreviewReply::InvalidRequest { detail })
+                }
+                Err(_) => Err(PreviewReply::InvalidRequest {
+                    detail: "the preview request was refused".into(),
+                }),
+            };
+            match reply {
+                Ok(image) => {
+                    write_header(
+                        &mut stream,
+                        &PreviewReply::Image {
+                            width: image.width,
+                            height: image.height,
+                            hash: content_hash(&image.png),
+                            byte_len: image.png.len() as u64,
+                        },
+                    )?;
+                    stream.write_all(&image.png)?;
+                    stream.flush()
+                }
+                Err(refusal) => write_header(&mut stream, &refusal),
+            }
         }
         AssetRequest::Fetch(hash) => {
             // The peer is held only long enough to share the bytes.
@@ -783,9 +949,17 @@ fn parse_members(mut request: serde_json::Map<String, serde_json::Value>) -> Ass
     }
     if request.len() != 1 {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package` or `locality`"
+            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package`, `preview` or `locality`"
                 .to_string(),
         );
+    }
+    if let Some(preview) = request.remove("preview") {
+        return match serde_json::from_value::<PreviewRequest>(preview) {
+            Ok(preview) => AssetRequest::Preview(Ok(preview)),
+            Err(error) => AssetRequest::Preview(Err(PublishRefusal::InvalidPublishRequest {
+                detail: format!("preview request: {error}"),
+            })),
+        };
     }
     if let Some(locality) = request.remove("locality") {
         // Closed: the read takes no argument, so there is nothing to guess.
@@ -821,7 +995,7 @@ fn parse_members(mut request: serde_json::Map<String, serde_json::Value>) -> Ass
     }
     let Some(scene) = request.remove("scene") else {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package` or `locality`"
+            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package`, `preview` or `locality`"
                 .to_string(),
         );
     };

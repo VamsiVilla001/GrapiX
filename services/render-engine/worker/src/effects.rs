@@ -8,7 +8,8 @@
 //!
 //! Formulas ported from EffectCraft at 9a7d3e76991d5372448033b473dc12c2480a6a04
 //! (`crates/effects/src/color_fx.rs`: tint, brightness/contrast, hue/
-//! saturation, levels, exposure, fill, the Fritsch–Carlson curve; `crates/
+//! saturation, levels, exposure, fill, the Fritsch–Carlson curve, and from
+//! 3.25 invert, posterize, threshold, vibrance; `crates/
 //! color/src/lib.rs`: HSL), Copyright (c) 2026 ArtCraft Team and the
 //! EffectCraft contributors, MIT OR Apache-2.0, see EFFECTCRAFT-LICENSE.
 //! GrapiX's own: typed parameters instead of string keys, the packed block,
@@ -17,7 +18,7 @@
 //! either working space, and colour alpha as an effect-strength factor.
 
 use gx_contracts::color::WorkingColorSpace;
-use gx_contracts::effect::{Curves, Effect, EffectInstance, LevelsChannel};
+use gx_contracts::effect::{Curves, Effect, EffectInstance, InvertChannel, LevelsChannel};
 
 use crate::blend::{bound, covers};
 use crate::colour_pipeline::WorkingRgba;
@@ -31,6 +32,11 @@ pub const CURVES: u32 = 4;
 pub const HUE_SATURATION: u32 = 5;
 pub const BRIGHTNESS_CONTRAST: u32 = 6;
 pub const EXPOSURE: u32 = 7;
+// 8 to 18 are the coordinate and spatial passes in `effect_chain`.
+pub const INVERT: u32 = 19;
+pub const POSTERIZE: u32 = 20;
+pub const THRESHOLD: u32 = 21;
+pub const VIBRANCE: u32 = 22;
 
 /// Parameters per effect: eight vec4s.
 pub const PARAMS: usize = 32;
@@ -153,6 +159,33 @@ impl PackedEffect {
                     f32::from(u8::from(space == WorkingColorSpace::Srgb)),
                 ]);
                 EXPOSURE
+            }
+            Effect::Invert(e) => {
+                let on = |channel: InvertChannel| {
+                    f32::from(u8::from(
+                        e.channel == InvertChannel::Rgb || e.channel == channel,
+                    ))
+                };
+                p[..4].copy_from_slice(&[
+                    on(InvertChannel::Red),
+                    on(InvertChannel::Green),
+                    on(InvertChannel::Blue),
+                    e.blend_with_original as f32,
+                ]);
+                INVERT
+            }
+            Effect::Posterize(e) => {
+                // Steps are `level - 1`; the rounding happens once, here.
+                p[0] = (e.level.round().clamp(2.0, 255.0) - 1.0) as f32;
+                POSTERIZE
+            }
+            Effect::Threshold(e) => {
+                p[0] = e.level as f32;
+                THRESHOLD
+            }
+            Effect::Vibrance(e) => {
+                p[..2].copy_from_slice(&[e.vibrance as f32, e.saturation as f32]);
+                VIBRANCE
             }
             _ => IDENTITY,
         };
@@ -467,6 +500,40 @@ pub fn apply_pixel(e: &PackedEffect, px: WorkingRgba) -> WorkingRgba {
             });
             (out, a)
         }
+        INVERT => {
+            let mut out = c;
+            for (i, v) in out.iter_mut().enumerate() {
+                if p[i] > 0.5 {
+                    let inverted = 1.0 - *v;
+                    *v = inverted + (*v - inverted) * p[3];
+                }
+            }
+            (out, a)
+        }
+        POSTERIZE => {
+            // Round half up on both sides: WGSL's `round` goes to even.
+            let steps = p[0];
+            (
+                c.map(|v| (v.clamp(0.0, 1.0) * steps + 0.5).floor() / steps),
+                a,
+            )
+        }
+        THRESHOLD => {
+            let v = if rec709_luminance(c) >= p[0] {
+                1.0
+            } else {
+                0.0
+            };
+            ([v; 3], a)
+        }
+        // No vibrance and no saturation is an identity: the HSL round trip
+        // would move a value by its rounding.
+        VIBRANCE if p[0] == 0.0 && p[1] == 0.0 => (c, a),
+        VIBRANCE => {
+            let [h, s, l] = rgb_to_hsl(c);
+            let s2 = (s * (1.0 + p[1]) + p[0] * (1.0 - s) * s.min(0.5)).clamp(0.0, 1.0);
+            (hsl_to_rgb([h, s2, l]), a)
+        }
         _ => (c, a),
     };
     let out = WorkingRgba {
@@ -529,6 +596,11 @@ mod tests {
             Effect::HueSaturation(HueSaturation::default()),
             Effect::BrightnessContrast(BrightnessContrast::default()),
             Effect::Exposure(Exposure::default()),
+            Effect::Invert(Invert {
+                blend_with_original: 1.0,
+                ..Default::default()
+            }),
+            Effect::Vibrance(Vibrance::default()),
         ] {
             for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
                 let o = apply_pixel(&packed(effect.clone(), space), px);
@@ -627,6 +699,159 @@ mod tests {
         };
         let o = apply_pixel(&packed(Effect::Curves(cv), s), grey(0.5, 1.0));
         assert!((o.r - 0.75).abs() < 1e-4, "{o:?}");
+    }
+
+    #[test]
+    fn batch_one_matches_effectcraft_on_known_pixels() {
+        let s = WorkingColorSpace::LinearSrgb;
+        let rgb = |r, g, b| WorkingRgba::opaque(r, g, b);
+        let near = |o: WorkingRgba, want: [f32; 3], note: &str| {
+            for (got, want) in [(o.r, want[0]), (o.g, want[1]), (o.b, want[2])] {
+                assert!((got - want).abs() < 1e-6, "{note}: {o:?} vs {want:?}");
+            }
+        };
+        // Invert: all channels, one channel, and the blend back to the original.
+        let inv = |channel, blend| {
+            packed(
+                Effect::Invert(Invert {
+                    channel,
+                    blend_with_original: blend,
+                }),
+                s,
+            )
+        };
+        near(
+            apply_pixel(&inv(InvertChannel::Rgb, 0.0), rgb(0.2, 0.5, 1.0)),
+            [0.8, 0.5, 0.0],
+            "rgb",
+        );
+        near(
+            apply_pixel(&inv(InvertChannel::Green, 0.0), rgb(0.2, 0.25, 1.0)),
+            [0.2, 0.75, 1.0],
+            "green only",
+        );
+        near(
+            apply_pixel(&inv(InvertChannel::Red, 0.0), rgb(0.2, 0.25, 1.0)),
+            [0.8, 0.25, 1.0],
+            "red only",
+        );
+        near(
+            apply_pixel(&inv(InvertChannel::Blue, 0.0), rgb(0.2, 0.25, 1.0)),
+            [0.2, 0.25, 0.0],
+            "blue only",
+        );
+        near(
+            apply_pixel(&inv(InvertChannel::Rgb, 0.25), rgb(0.0, 0.0, 1.0)),
+            [0.75, 0.75, 0.25],
+            "blend 25%",
+        );
+        // Premultiplied input comes back premultiplied, with the same coverage.
+        let o = apply_pixel(&inv(InvertChannel::Rgb, 0.0), grey(0.25, 0.5));
+        assert!(
+            (o.r - 0.375).abs() < 1e-6 && (o.a - 0.5).abs() < 1e-7,
+            "{o:?}"
+        );
+        // Posterize: level 2 is black or white, level 5 has steps of a quarter.
+        let post = |level| packed(Effect::Posterize(Posterize { level }), s);
+        near(
+            apply_pixel(&post(2.0), rgb(0.49, 0.5, 0.9)),
+            [0.0, 1.0, 1.0],
+            "level 2",
+        );
+        near(
+            apply_pixel(&post(5.0), rgb(0.1, 0.4, 0.99)),
+            [0.0, 0.5, 1.0],
+            "level 5",
+        );
+        near(
+            apply_pixel(&post(5.0), rgb(1.5, -0.5, 0.375)),
+            [1.0, 0.0, 0.5],
+            "out of range clamps",
+        );
+        // Posterize rounds its level, and below 2 it is 2.
+        near(
+            apply_pixel(&post(1.0), rgb(0.7, 0.2, 0.5)),
+            [1.0, 0.0, 1.0],
+            "level floor",
+        );
+        // Threshold: Rec. 709 luminance at or above the level is white.
+        let thr = |level| packed(Effect::Threshold(Threshold { level }), s);
+        near(
+            apply_pixel(&thr(0.5), grey(0.5, 1.0)),
+            [1.0; 3],
+            "equal passes",
+        );
+        near(
+            apply_pixel(&thr(0.5), grey(0.49, 1.0)),
+            [0.0; 3],
+            "below fails",
+        );
+        near(
+            apply_pixel(&thr(0.2), rgb(1.0, 0.0, 0.0)),
+            [1.0; 3],
+            "red luma 0.2126 passes 0.2",
+        );
+        near(
+            apply_pixel(&thr(0.22), rgb(1.0, 0.0, 0.0)),
+            [0.0; 3],
+            "red luma 0.2126 fails 0.22",
+        );
+        // Vibrance: the weight is (1 - s) * min(s, 0.5), so a grey and a fully
+        // saturated colour are untouched and a half-saturated one gains s * 0.5.
+        let vib = |vibrance, saturation| {
+            packed(
+                Effect::Vibrance(Vibrance {
+                    vibrance,
+                    saturation,
+                }),
+                s,
+            )
+        };
+        near(
+            apply_pixel(&vib(1.0, 0.0), grey(0.4, 1.0)),
+            [0.4; 3],
+            "grey stays grey",
+        );
+        near(
+            apply_pixel(&vib(1.0, 0.0), rgb(1.0, 0.0, 0.0)),
+            [1.0, 0.0, 0.0],
+            "full saturation stays",
+        );
+        let sat_of = |p: WorkingRgba| rgb_to_hsl([p.r, p.g, p.b])[1];
+        let mid = rgb(0.75, 0.25, 0.25);
+        let gain = sat_of(apply_pixel(&vib(1.0, 0.0), mid)) - sat_of(mid);
+        assert!((gain - 0.25).abs() < 1e-5, "{gain}");
+        // Above half saturation the weight stops growing: s = 0.8 gains 0.2 * 0.5.
+        let vivid = rgb(0.9, 0.1, 0.1);
+        let gain = sat_of(apply_pixel(&vib(1.0, 0.0), vivid)) - sat_of(vivid);
+        assert!((gain - 0.1).abs() < 1e-5, "{gain}");
+        // Saturation alone scales by (1 + sat); -1 is grey at the same lightness.
+        let half = apply_pixel(&vib(0.0, -1.0), rgb(1.0, 0.0, 0.0));
+        near(half, [0.5, 0.5, 0.5], "saturation -1");
+        // Hue and lightness survive.
+        let before = rgb_to_hsl([0.6, 0.3, 0.2]);
+        let after = apply_pixel(&vib(0.5, 0.2), rgb(0.6, 0.3, 0.2));
+        let after = rgb_to_hsl([after.r, after.g, after.b]);
+        assert!((before[0] - after[0]).abs() < 1e-5 && (before[2] - after[2]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn batch_one_leaves_transparent_pixels_transparent() {
+        for effect in [
+            Effect::Invert(Invert::default()),
+            Effect::Posterize(Posterize::default()),
+            Effect::Threshold(Threshold { level: 0.0 }),
+            Effect::Vibrance(Vibrance {
+                vibrance: 1.0,
+                saturation: 1.0,
+            }),
+        ] {
+            let o = apply_pixel(
+                &packed(effect.clone(), WorkingColorSpace::Srgb),
+                WorkingRgba::transparent(),
+            );
+            assert_eq!(o, WorkingRgba::transparent(), "{}", effect.name());
+        }
     }
 
     #[test]

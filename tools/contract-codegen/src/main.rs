@@ -188,6 +188,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // gx-contracts: editable scene animation (11.20)
         SceneEasing,
         AnimationSurface,
+        // the effect and preset surface (11.69)
+        gx_contracts::effect_catalog::EffectSurface,
+        gx_contracts::effect_catalog::EffectListing,
+        gx_contracts::effect_catalog::EffectParameter,
+        gx_contracts::effect_catalog::ParameterKind,
+        gx_contracts::effect_catalog::PresetListing,
+        gx_contracts::effect_catalog::PresetSource,
         CubicBezier,
         SceneKeyframe,
         KeyframeChannel,

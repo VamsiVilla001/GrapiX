@@ -19,7 +19,9 @@
 pub mod diagnostics;
 
 pub use diagnostics::{
-    handle_menu_event, with_diagnostics_menu, EXPORT_ITEM_ID, EXPORT_ITEM_TEXT, MENU_TEXT,
+    export_diagnostics, handle_menu_event, handle_telemetry_item, with_diagnostics_menu,
+    EXPORT_ITEM_ID, EXPORT_ITEM_TEXT, MENU_TEXT, TELEMETRY_EVENT, TELEMETRY_ITEM_ID,
+    TELEMETRY_ITEM_TEXT,
 };
 
 use tauri::ipc::Invoke;

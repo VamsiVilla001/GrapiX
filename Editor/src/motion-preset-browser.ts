@@ -122,7 +122,7 @@ export function presetCard(preset: MotionPreset, rate: RationalRate, state: Pres
       outMs === undefined
         ? "not resolvable here — token reference"
         : outMs === 0
-          ? "none — the graphic cannot leave"
+          ? "none — the scene cannot leave"
           : `${outMs} ms · ${framesForDisplay(outMs, rate)} frames`,
   });
 

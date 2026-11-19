@@ -77,6 +77,10 @@ pub enum Effect {
     LinearWipe(LinearWipe),
     RadialWipe(RadialWipe),
     IrisWipe(IrisWipe),
+    Invert(Invert),
+    Posterize(Posterize),
+    Threshold(Threshold),
+    Vibrance(Vibrance),
 }
 
 /// Paints the layer's pixels with a colour, keeping their coverage.
@@ -188,6 +192,55 @@ pub struct Exposure {
     pub offset: f64,
     /// 0.01–10.
     pub gamma_correction: f64,
+}
+
+/// Which channels Invert flips.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum InvertChannel {
+    #[default]
+    Rgb,
+    Red,
+    Green,
+    Blue,
+}
+
+/// Invert: `1 - v` on the chosen channels, blended back toward the original.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Invert {
+    pub channel: InvertChannel,
+    /// 0–1: how much of the original comes back; 0 is a full inversion.
+    pub blend_with_original: f64,
+}
+
+/// Posterize: each colour channel snaps to `level` evenly spaced values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Posterize {
+    /// 2–255, rounded.
+    pub level: f64,
+}
+
+/// Threshold: pixels at or above `level` luminance become white, the rest black.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Threshold {
+    /// 0–1, on Rec. 709 luminance.
+    pub level: f64,
+}
+
+/// Vibrance: saturation weighted `(1 - s) * min(s, 0.5)`: a grey and a fully
+/// saturated colour are left alone, and a half-saturated one gains most.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Vibrance {
+    /// -1–1, weighted toward low-saturation pixels.
+    pub vibrance: f64,
+    /// -1–1, applied evenly.
+    pub saturation: f64,
 }
 
 /// Which axes a blur or glow spreads along.
@@ -434,6 +487,32 @@ impl Default for Exposure {
         }
     }
 }
+impl Default for Invert {
+    fn default() -> Self {
+        Self {
+            channel: InvertChannel::default(),
+            blend_with_original: 0.0,
+        }
+    }
+}
+impl Default for Posterize {
+    fn default() -> Self {
+        Self { level: 6.0 }
+    }
+}
+impl Default for Threshold {
+    fn default() -> Self {
+        Self { level: 0.5 }
+    }
+}
+impl Default for Vibrance {
+    fn default() -> Self {
+        Self {
+            vibrance: 0.0,
+            saturation: 0.0,
+        }
+    }
+}
 impl Default for GaussianBlur {
     fn default() -> Self {
         Self {
@@ -589,6 +668,9 @@ impl ChoiceParam for BlurDimensions {
 impl ChoiceParam for RampShape {
     const OPTIONS: &'static [Self] = &[Self::Linear, Self::Radial];
 }
+impl ChoiceParam for InvertChannel {
+    const OPTIONS: &'static [Self] = &[Self::Rgb, Self::Red, Self::Green, Self::Blue];
+}
 impl ChoiceParam for WipeDirection {
     const OPTIONS: &'static [Self] = &[Self::Clockwise, Self::Counterclockwise, Self::Both];
 }
@@ -738,6 +820,10 @@ impl Effect {
             Effect::LinearWipe(_) => "linear-wipe",
             Effect::RadialWipe(_) => "radial-wipe",
             Effect::IrisWipe(_) => "iris-wipe",
+            Effect::Invert(_) => "invert",
+            Effect::Posterize(_) => "posterize",
+            Effect::Threshold(_) => "threshold",
+            Effect::Vibrance(_) => "vibrance",
         }
     }
 
@@ -753,6 +839,10 @@ impl Effect {
                 | Effect::HueSaturation(_)
                 | Effect::BrightnessContrast(_)
                 | Effect::Exposure(_)
+                | Effect::Invert(_)
+                | Effect::Posterize(_)
+                | Effect::Threshold(_)
+                | Effect::Vibrance(_)
         )
     }
 
@@ -839,6 +929,32 @@ impl Effect {
                     "gammaCorrection",
                     Slot::Number(&mut e.gamma_correction, GAMMA),
                 );
+            }
+            Effect::Invert(e) => {
+                f("channel", Slot::Choice(&mut e.channel));
+                f(
+                    "blendWithOriginal",
+                    Slot::Number(&mut e.blend_with_original, UNIT),
+                );
+            }
+            Effect::Posterize(e) => {
+                f(
+                    "level",
+                    Slot::Number(
+                        &mut e.level,
+                        Domain::Range {
+                            min: 2.0,
+                            max: 255.0,
+                        },
+                    ),
+                );
+            }
+            Effect::Threshold(e) => {
+                f("level", Slot::Number(&mut e.level, UNIT));
+            }
+            Effect::Vibrance(e) => {
+                f("vibrance", Slot::Number(&mut e.vibrance, SIGNED_UNIT));
+                f("saturation", Slot::Number(&mut e.saturation, SIGNED_UNIT));
             }
             Effect::GaussianBlur(e) => {
                 f("blurriness", Slot::Number(&mut e.blurriness, PIXELS));
@@ -1071,6 +1187,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn batch_one_parameters_are_bounded_and_the_channel_is_a_wire_word() {
+        let out_of_range = [
+            Effect::Posterize(Posterize { level: 1.0 }),
+            Effect::Posterize(Posterize { level: 256.0 }),
+            Effect::Threshold(Threshold { level: 1.01 }),
+            Effect::Vibrance(Vibrance {
+                vibrance: 1.5,
+                saturation: 0.0,
+            }),
+            Effect::Vibrance(Vibrance {
+                vibrance: 0.0,
+                saturation: -1.5,
+            }),
+            Effect::Invert(Invert {
+                channel: InvertChannel::Rgb,
+                blend_with_original: 1.5,
+            }),
+        ];
+        for effect in out_of_range {
+            let instance = EffectInstance::new("e", effect.clone());
+            assert!(validate_effects("o", &[instance]).is_err(), "{effect:?}");
+        }
+        let wire = serde_json::to_value(EffectInstance::new(
+            "e",
+            Effect::Invert(Invert {
+                channel: InvertChannel::Green,
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+        assert_eq!(wire["effect"], "invert");
+        assert_eq!(wire["channel"], "green");
+        assert_eq!(wire["blendWithOriginal"], 0.0);
+        let mut invert = Effect::Invert(Invert::default());
+        let mut options = 0;
+        invert.visit(&mut |path, slot| {
+            if path == "channel" {
+                options = slot.domain().describe().len();
+                assert_eq!(slot.domain(), Domain::Choice { count: 4 });
+            }
+        });
+        assert!(options > 0);
+    }
+
+    #[test]
     fn every_effect_round_trips_under_its_tag_with_typed_parameters() {
         let all = [
             Effect::Fill(Fill::default()),
@@ -1089,8 +1250,12 @@ mod tests {
             Effect::LinearWipe(LinearWipe::default()),
             Effect::RadialWipe(RadialWipe::default()),
             Effect::IrisWipe(IrisWipe::default()),
+            Effect::Invert(Invert::default()),
+            Effect::Posterize(Posterize::default()),
+            Effect::Threshold(Threshold::default()),
+            Effect::Vibrance(Vibrance::default()),
         ];
-        assert_eq!(all.len(), 16, "the first broadcast set");
+        assert_eq!(all.len(), 20, "the first broadcast set and batch 1 of 3.25");
         for effect in all {
             let instance = EffectInstance::new("e", effect.clone());
             let wire = serde_json::to_value(&instance).unwrap();

@@ -180,8 +180,8 @@ describe("asset previews and project ownership", () => {
 
   it("states where each asset's bytes live", () => {
     const independent = assetManagerPanel(sceneWith([ready]));
-    expect(findNode(independent, "asset/logo/storage")!.value).toMatch(/^import cache only: save this graphic into a project/);
-    expect(independent.description).toContain("independent graphic, not in a project");
+    expect(findNode(independent, "asset/logo/storage")!.value).toMatch(/^import cache only: save this scene into a project/);
+    expect(independent.description).toContain("independent scene, not in a project");
 
     const stored = assetManagerPanel(sceneWith([ready]), { project: "news", projectStored: new Set([hash]) });
     expect(findNode(stored, "asset/logo/storage")!.value).toBe("in project news");
@@ -202,14 +202,14 @@ describe("asset previews and project ownership", () => {
     expect(library.label).toBe("Project library · news");
     expect(library.children!.map((node) => node.id)).toEqual(["project-asset/backdrop"]);
     const action = findNode(panel, "project-asset/backdrop")!.actions![0]!;
-    expect(action).toEqual({ name: "addToScene", label: "Add to graphic" });
+    expect(action).toEqual({ name: "addToScene", label: "Add to scene" });
   });
 
   it("refuses to add a project asset whose id the graphic already has", () => {
     const clash = { ...ready, checksum: "c".repeat(64) };
     const panel = assetManagerPanel(sceneWith([ready]), { project: "news", projectLibrary: [clash as never] });
     expect(findNode(panel, "project-asset/logo")!.actions![0]!.unavailable).toBe(
-      "this graphic already has an asset with id logo",
+      "this scene already has an asset with id logo",
     );
   });
 

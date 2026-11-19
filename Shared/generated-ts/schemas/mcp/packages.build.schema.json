@@ -1449,6 +1449,58 @@
             "effect"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Invert",
+          "properties": {
+            "effect": {
+              "const": "invert",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Posterize",
+          "properties": {
+            "effect": {
+              "const": "posterize",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Threshold",
+          "properties": {
+            "effect": {
+              "const": "threshold",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Vibrance",
+          "properties": {
+            "effect": {
+              "const": "vibrance",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -2740,6 +2792,32 @@
         "bottom"
       ],
       "type": "object"
+    },
+    "Invert": {
+      "description": "Invert: `1 - v` on the chosen channels, blended back toward the original.",
+      "properties": {
+        "blendWithOriginal": {
+          "default": 0.0,
+          "description": "0–1: how much of the original comes back; 0 is a full inversion.",
+          "format": "double",
+          "type": "number"
+        },
+        "channel": {
+          "$ref": "#/$defs/InvertChannel",
+          "default": "rgb"
+        }
+      },
+      "type": "object"
+    },
+    "InvertChannel": {
+      "description": "Which channels Invert flips.",
+      "enum": [
+        "rgb",
+        "red",
+        "green",
+        "blue"
+      ],
+      "type": "string"
     },
     "IrisWipe": {
       "properties": {
@@ -4776,6 +4854,18 @@
         }
       ]
     },
+    "Posterize": {
+      "description": "Posterize: each colour channel snaps to `level` evenly spaced values.",
+      "properties": {
+        "level": {
+          "default": 6.0,
+          "description": "2–255, rounded.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "ProvenanceTool": {
       "description": "The tool, or for model origin the model, that made or imported the bytes.",
       "properties": {
@@ -6376,6 +6466,18 @@
       ],
       "type": "string"
     },
+    "Threshold": {
+      "description": "Threshold: pixels at or above `level` luminance become white, the rest black.",
+      "properties": {
+        "level": {
+          "default": 0.5,
+          "description": "0–1, on Rec. 709 luminance.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "TimelinePhase": {
       "description": "One named span of the scene timeline.",
       "properties": {
@@ -6534,6 +6636,24 @@
         "bottom"
       ],
       "type": "string"
+    },
+    "Vibrance": {
+      "description": "Vibrance: saturation weighted `(1 - s) * min(s, 0.5)`: a grey and a fully\nsaturated colour are left alone, and a half-saturated one gains most.",
+      "properties": {
+        "saturation": {
+          "default": 0.0,
+          "description": "-1–1, applied evenly.",
+          "format": "double",
+          "type": "number"
+        },
+        "vibrance": {
+          "default": 0.0,
+          "description": "-1–1, weighted toward low-saturation pixels.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
     },
     "WipeDirection": {
       "enum": [

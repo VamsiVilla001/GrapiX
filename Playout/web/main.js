@@ -30,13 +30,14 @@
 // ---------------------------------------------------------------------------
 
 import { createBridge, corrOf, installCapture } from "./shell-bridge.js";
+import { createTelemetryPanel } from "./telemetry-panel.js";
 
 const rawBridge = globalThis.__TAURI__ && globalThis.__TAURI__.core;
 const inShell = typeof rawBridge?.invoke === "function";
 // 2.13: every call to the shell has a correlation id sent as a header, and its end
 // is reported to the shell's log (never its arguments: connect carries a token).
 // The status poll is written at debug when it succeeds.
-const bridge = inShell ? createBridge(rawBridge, { prefix: "po", quiet: new Set(["cmd_status"]) }) : undefined;
+const bridge = inShell ? createBridge(rawBridge, { prefix: "po", quiet: new Set(["cmd_status", "cmd_performance"]) }) : undefined;
 
 /** Every engine call goes through here so the no-bridge case is one branch. */
 function invoke(command, args) {
@@ -228,6 +229,7 @@ const ui = {
   tokenInput: id("tokenInput"),
   connectButton: id("connectButton"),
   refreshButton: id("refreshButton"),
+  telemetryButton: id("telemetryButton"),
   connectionState: id("connectionState"),
   connectionDetail: id("connectionDetail"),
 
@@ -1112,6 +1114,19 @@ function updateFrameMode() {
 
 ui.connectButton.addEventListener("click", () => run(doConnect));
 ui.refreshButton.addEventListener("click", () => run(doStatus));
+
+// 2.27: live telemetry, from the Help menu (the shell emits the event) or the
+// header. The panel is the shared one (Shared/web-panels); the engine decides
+// every finding, this page only supplies the read and says why a read failed.
+const telemetry = createTelemetryPanel({
+  load: () =>
+    invoke("cmd_performance").catch((err) => {
+      const { name, detail } = describeError(err);
+      throw new Error(detail ? `${name} (${detail})` : name);
+    }),
+});
+ui.telemetryButton.addEventListener("click", () => telemetry.open());
+globalThis.__TAURI__?.event?.listen?.("gx-open-telemetry", () => telemetry.open());
 ui.cueButton.addEventListener("click", () => run(doCue));
 ui.takeButton.addEventListener("click", () => run(doTake));
 ui.clearButton.addEventListener("click", () => run(doClear));

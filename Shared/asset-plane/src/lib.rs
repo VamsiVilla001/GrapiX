@@ -26,8 +26,9 @@ pub use preflight::{
     ASSET_TRANSFER_CHUNK_BYTES, MAX_ASSET_FRAME_BYTES,
 };
 pub use publish::{
-    declared_locality, fetch_bytes, publish_scene, AssetPublishPeer, AssetPublishServer,
-    FetchError, FetchReply, LocalityReply, PublishClientError, PublishRefusal, PublishReply,
+    declared_locality, fetch_bytes, preview_scene, publish_scene, AssetPublishPeer,
+    AssetPublishServer, FetchError, FetchReply, LocalityReply, PreviewError, PreviewImage,
+    PreviewJob, PreviewReply, PreviewRequest, PublishClientError, PublishRefusal, PublishReply,
     PublishRequest, MAX_PUBLISH_FRAME_BYTES,
 };
 pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};

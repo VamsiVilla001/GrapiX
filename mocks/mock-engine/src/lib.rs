@@ -584,6 +584,8 @@ impl EnginePeer for MockEngine {
                     total_dropped: 0,
                     total_missed: 0,
                     mean_budget_ratio: None,
+                    components: Vec::new(),
+                    findings: Vec::new(),
                 })
             }
             ClientRequest::Render(request) => self.render(request),

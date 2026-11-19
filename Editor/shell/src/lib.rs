@@ -315,6 +315,13 @@ impl ShellState {
         result
     }
 
+    /// 11.65: the engine's picture of the document a target names, at a frame. The
+    /// document is read under the workspace lock and the request made after it is
+    /// released, so a slow render never holds the Editor's state.
+    pub fn document_for_preview(&self, target: &SceneTarget) -> Result<SceneDocument, EditorError> {
+        Ok(self.document_and_edits(target)?.0)
+    }
+
     fn package_directory(&self) -> Result<PathBuf, EditorError> {
         self.package_directory.clone().map_err(refused)
     }
@@ -572,6 +579,19 @@ pub struct PublishResult {
 /// `directory` is this Editor's package folder when it is known, so a refusal
 /// that is about the folder (an engine started without `--package-dir`, or
 /// with a different one) says where this Editor writes.
+fn preview_error(failure: gx_editor::preview::PreviewFailure) -> EditorError {
+    use gx_editor::preview::PreviewFailure;
+    match failure {
+        PreviewFailure::InvalidEndpoint { endpoint } => EditorError::InvalidEndpoint { endpoint },
+        PreviewFailure::Unreachable { endpoint, detail } => {
+            EditorError::Unreachable { endpoint, detail }
+        }
+        // The engine's own refusal, by name, so the Preview can say why.
+        PreviewFailure::EngineRefused(cause) => refused(cause),
+        PreviewFailure::Protocol { detail } => EditorError::Protocol { detail },
+    }
+}
+
 fn publish_error(failure: PublishFailure, directory: Option<&Path>) -> EditorError {
     match failure {
         PublishFailure::InvalidEndpoint { endpoint } => EditorError::InvalidEndpoint { endpoint },
@@ -890,6 +910,28 @@ fn cmd_publish(
     state.publish_target(&endpoint, target)
 }
 
+/// 11.65: ask the engine to draw the document a target names at a frame, and
+/// return the PNG. Asynchronous so the window is never held while the engine
+/// renders; it takes a target, never a document (R4), and creates no revision.
+#[tauri::command]
+async fn cmd_engine_preview(
+    state: tauri::State<'_, ShellState>,
+    endpoint: String,
+    target: SceneTarget,
+    frame: u64,
+) -> Result<tauri::ipc::Response, EditorError> {
+    let scene = state.document_for_preview(&target)?;
+    let image = tauri::async_runtime::spawn_blocking(move || {
+        gx_editor::preview::preview_document(&endpoint, scene, frame)
+    })
+    .await
+    .map_err(|error| EditorError::Protocol {
+        detail: format!("the preview task failed: {error}"),
+    })?
+    .map_err(preview_error)?;
+    Ok(tauri::ipc::Response::new(image.png))
+}
+
 #[tauri::command]
 fn cmd_take_page_preview(
     state: tauri::State<'_, ShellState>,
@@ -909,6 +951,13 @@ fn cmd_object_kinds() -> Vec<&'static str> {
 #[tauri::command]
 fn cmd_animation_surface() -> AnimationSurface {
     animation_surface()
+}
+
+/// The effect and preset catalogue (11.69), read from Rust so the panel cannot
+/// offer an effect the contract does not have.
+#[tauri::command]
+fn cmd_effect_surface() -> gx_contracts::effect_catalog::EffectSurface {
+    gx_contracts::effect_catalog::effect_surface()
 }
 
 #[tauri::command]
@@ -1255,25 +1304,37 @@ fn cmd_log(entry: gx_telemetry::ui::UiEntry) -> Result<(), String> {
     gx_telemetry::ui::record(entry).map_err(|refusal| refusal.to_string())
 }
 
+/// Help ▸ Export diagnostic bundle, from the page's own Help menu (the Editor has
+/// no native menu and no live telemetry: it has nothing to do with live
+/// broadcast). Takes no document; it starts the same export the Playout menu
+/// does, on its own thread, and the outcome is on the Editor's record.
+#[tauri::command]
+fn cmd_export_diagnostics(all_modules: bool) {
+    drop(gx_shell_log::export_diagnostics(all_modules, "editor"));
+}
+
 /// Build and run the Editor window.
 pub fn run() {
     // 2.12: the Editor's log, from here until the window closes.
     let mut log = gx_telemetry::sink::init_process_logging("editor", "shell");
     tracing::info!(event = "editor.start", version = env!("CARGO_PKG_VERSION"));
     let workspace = Workspace::new(projects().ok());
-    let built = gx_shell_log::with_diagnostics_menu(tauri::Builder::default(), "editor")
+    let built = tauri::Builder::default()
         .manage(ShellState::new(workspace))
         .plugin(tauri_plugin_dialog::init())
         // 2.13: each command runs inside the scope of its call's correlation id.
         .invoke_handler(gx_shell_log::scoped(tauri::generate_handler![
             cmd_log,
+            cmd_export_diagnostics,
             cmd_execute,
             cmd_import_file,
             cmd_session_view,
             cmd_publish,
+            cmd_engine_preview,
             cmd_take_page_preview,
             cmd_object_kinds,
             cmd_animation_surface,
+            cmd_effect_surface,
             cmd_control_properties,
             cmd_starter_presets,
             cmd_motion_presets,

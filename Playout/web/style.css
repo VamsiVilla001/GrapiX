@@ -160,19 +160,25 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
+/* The name is GrapiX, never all capitals (brand sheet). The wordmark is Anybody 800;
+   the product name beside it is the interface face. */
 .bar__mark {
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  padding-bottom: 5px;
+  font-family: var(--sk-font-display);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--ink);
+  padding-bottom: 2px;
   white-space: nowrap;
 }
 
 .bar__mark strong {
-  color: var(--ink);
+  font-family: var(--sans);
+  color: var(--ink-dim);
+  font-size: 13px;
   font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .bar__state {
@@ -255,7 +261,7 @@ code {
 
 .field__input:disabled {
   color: var(--ink-faint);
-  background: #0f1215;
+  background: var(--bg-inset);
   border-color: var(--line);
 }
 
@@ -281,27 +287,27 @@ code {
 }
 
 .btn:hover:not(:disabled) {
-  background: #222a31;
+  background: var(--sk-surface-2);
 }
 
 .btn:active:not(:disabled) {
-  background: #2b343c;
+  background: var(--sk-border);
 }
 
 .btn:disabled {
   color: var(--ink-faint);
-  background: #101317;
+  background: var(--bg-inset);
   border-color: var(--line);
   cursor: not-allowed;
 }
 
 .btn--primary {
   border-color: var(--line-strong);
-  background: #253039;
+  background: var(--sk-surface-2);
 }
 
 .btn--primary:hover:not(:disabled) {
-  background: #2e3c47;
+  background: var(--sk-border);
 }
 
 .btn--cue,
@@ -318,7 +324,7 @@ code {
 }
 
 .btn--cue:hover:not(:disabled) {
-  background: #142029;
+  background: color-mix(in srgb, var(--info) 14%, var(--bg));
 }
 
 /* TAKE puts pixels on air. It is the only filled, full-width control. */
@@ -326,24 +332,24 @@ code {
   grid-column: 1 / -1;
   padding: 13px var(--s2);
   background: var(--live);
-  border-color: #ff7a72;
-  color: #fff5f4;
+  border-color: color-mix(in srgb, var(--live) 70%, white);
+  color: var(--sk-brand-cream);
   font-size: 20px;
   letter-spacing: 0.24em;
 }
 
 .btn--take:hover:not(:disabled) {
-  background: #f04a49;
+  background: color-mix(in srgb, var(--live) 88%, white);
 }
 
 .btn--take:active:not(:disabled) {
-  background: #c73130;
+  background: color-mix(in srgb, var(--live) 78%, black);
 }
 
 .btn--take:disabled {
-  background: #3a2020;
-  border-color: #4d2a2a;
-  color: #8a6a6a;
+  background: color-mix(in srgb, var(--live) 16%, var(--bg));
+  border-color: color-mix(in srgb, var(--live) 26%, var(--bg));
+  color: color-mix(in srgb, var(--live) 40%, var(--sk-ink-4));
 }
 
 .btn--clear {
@@ -369,7 +375,7 @@ code {
 }
 
 .btn--clear:hover:not(:disabled) {
-  background: #241b0a;
+  background: var(--warning-bg);
 }
 
 .btn--ack {
@@ -381,7 +387,7 @@ code {
 }
 
 .btn--ack:hover:not(:disabled) {
-  background: #3d1719;
+  background: var(--critical-bg);
 }
 
 /* ----------------------------------------------------------------- chips */
@@ -425,7 +431,7 @@ code {
 .chip--live {
   border-color: var(--live);
   background: var(--live);
-  color: #fff5f4;
+  color: var(--sk-brand-cream);
 }
 
 .chip--ok {
@@ -1054,4 +1060,52 @@ code {
   .btn {
     transition: none;
   }
+}
+
+/* --- 11.67 compact pass (18 Nov 2026) -------------------------------------
+ * Read in one place, as the Editor's UX-review block is. Jev 0.49, Laya
+ * disagreed (docs/evidence/11.67): capitals only for states and the transport
+ * (CUE, CLEAR, TAKE, HOLD, CONTINUE, UPDATE, TAKE OUT); every other label is
+ * sentence case at 12 px, because 10 px wide-spaced capitals are the hardest
+ * thing on the page to read (the brand sheet sets 11 px as the floor).
+ * Setup controls are 28 px; the transport keeps its large hit targets. */
+.field__label,
+.panel__sub,
+.readout__key,
+.clock__prominence,
+.commit__head,
+.notice__title {
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.panel__title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.readout__key {
+  font-weight: 500;
+  flex-basis: 128px;
+}
+
+.log__seq,
+.log__kind {
+  font-size: 11px;
+}
+
+/* Every button that is not part of the transport. The transport keeps its own rules above. */
+.btn:not(.btn--cue):not(.btn--clear):not(.btn--take):not(.btn--phase):not(.btn--out):not(.btn--ack) {
+  padding: 5px var(--s3);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.field__input {
+  padding: 4px var(--s2);
+  font-size: 12px;
 }

@@ -1,17 +1,16 @@
-# GrapiX CI — build plan 0.3 (Windows from the first commit; macOS dropped by
-# user decision on 8 Nov 2026) and 0.4 (SBOM on every build).
+# GrapiX CI — build plan 0.3 (Windows from the first commit; Windows only, user
+# decisions of 8 and 19 Nov 2026) and 0.4 (SBOM on every build).
 #
 # The gate is `npm run check`: boundaries, codegen-staleness, typecheck, TS
 # tests, Rust tests, and the conformance suite. A change is not mergeable
-# unless it is green on both platforms — cross-platform drift is caught here,
-# not by a client.
+# unless it is green on Windows, the only platform GrapiX builds for.
 
 name: check
 
 on:
   push:
     # agent/shared is the branch every agent commits to (user decision,
-    # 8 Nov 2026): it is checked on both platforms on every push.
+    # 8 Nov 2026): it is checked on Windows on every push.
     branches: [GrapiX-2.0, main, agent/shared]
   pull_request:
 
@@ -26,8 +25,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows only (user decision, 8 Nov 2026): macOS is out of the current
-        # scope. Re-add macos-latest here when it returns.
+        # Windows only (user decisions, 8 and 19 Nov 2026). Another OS is added
+        # here only when the user re-adds it.
         os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:

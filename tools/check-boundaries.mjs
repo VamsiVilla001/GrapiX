@@ -53,8 +53,8 @@ const SKIPPED_DIRECTORIES = ["node_modules", "target", "dist", ".git", ".claude"
  *  one `OpenScene` through the executor; it carries no document. */
 const SHELL_MUTATE = ["cmd_execute", "cmd_import_file"];
 const SHELL_READ = [
-  "cmd_session_view", "cmd_publish", "cmd_take_page_preview",
-  "cmd_object_kinds", "cmd_animation_surface", "cmd_control_properties",
+  "cmd_session_view", "cmd_publish", "cmd_engine_preview", "cmd_take_page_preview",
+  "cmd_object_kinds", "cmd_animation_surface", "cmd_effect_surface", "cmd_control_properties",
   "cmd_starter_presets", "cmd_motion_presets", "cmd_default_endpoint", "cmd_project_list",
   "cmd_scene_list", "cmd_scene_read", "cmd_take_page_list", "cmd_take_page_read",
   "cmd_font_bytes", "cmd_project_assets", "cmd_asset_bytes",
@@ -65,9 +65,10 @@ const SHELL_READ = [
  *  document or command parameter. */
 const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link", "cmd_asset_prepare_files", "cmd_project_assets_adopt"];
 /** The front end's own log (2.13): one command that writes a bounded, sanitised
- *  entry of one of four kinds to the shell's log (`gx_telemetry::ui`). It takes
- *  no document, and held to the read rule. */
-const SHELL_LOG = ["cmd_log"];
+ *  entry of one of four kinds to the shell's log (`gx_telemetry::ui`), and the
+ *  page's Help ▸ Export diagnostic bundle (2.14; the Editor has no native menu).
+ *  Neither takes a document, and both are held to the read rule. */
+const SHELL_LOG = ["cmd_log", "cmd_export_diagnostics"];
 const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG]);
 const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG]);
 /** The one TypeScript file that calls the shell with a command name it was

@@ -18,6 +18,7 @@
 //! | [`render`] | Headless render of a pinned revision at a frame |
 //! | [`sequence`] | Ordering, deduplication and reply identity |
 //! | [`status`] | Reported engine state, reference lock, operator summary |
+//! | [`telemetry`] | Live telemetry: per-component health and findings (2.27) |
 
 #![forbid(unsafe_code)]
 
@@ -30,6 +31,7 @@ pub mod peer;
 pub mod render;
 pub mod sequence;
 pub mod status;
+pub mod telemetry;
 
 pub use bind::{check_bind, BindRefusal, ENGINE_CONTROL_PORT};
 pub use capability::{check_clock_domain, check_protocol, live_allowed, EngineCapability};

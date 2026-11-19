@@ -138,6 +138,14 @@ pub struct PerformanceSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub mean_budget_ratio: Option<f64>,
+    /// 2.27: each part of the engine, its state and its series. Additive: an
+    /// engine that predates it sends none.
+    #[serde(default)]
+    pub components: Vec<crate::telemetry::ComponentHealth>,
+    /// 2.27: what is wrong, in plain words, worst first. Decided once, in
+    /// `telemetry::assess`.
+    #[serde(default)]
+    pub findings: Vec<crate::telemetry::Finding>,
 }
 
 /// How urgently the operator must be told. Drives presentation, so that

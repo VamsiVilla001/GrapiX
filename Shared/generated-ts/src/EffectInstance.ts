@@ -10,11 +10,15 @@ import type { GaussianBlur } from "./GaussianBlur";
 import type { Glow } from "./Glow";
 import type { GradientRamp } from "./GradientRamp";
 import type { HueSaturation } from "./HueSaturation";
+import type { Invert } from "./Invert";
 import type { IrisWipe } from "./IrisWipe";
 import type { Levels } from "./Levels";
 import type { LinearWipe } from "./LinearWipe";
+import type { Posterize } from "./Posterize";
 import type { RadialWipe } from "./RadialWipe";
+import type { Threshold } from "./Threshold";
 import type { Tint } from "./Tint";
+import type { Vibrance } from "./Vibrance";
 
 /**
  * One entry in an object's effect stack.
@@ -28,4 +32,4 @@ effectId: string,
 /**
  * A disabled effect is skipped entirely. Keyframable with hold keys.
  */
-enabled: boolean, } & ({ "effect": "fill" } & Fill | { "effect": "tint" } & Tint | { "effect": "levels" } & Levels | { "effect": "curves" } & Curves | { "effect": "hue-saturation" } & HueSaturation | { "effect": "brightness-contrast" } & BrightnessContrast | { "effect": "exposure" } & Exposure | { "effect": "gaussian-blur" } & GaussianBlur | { "effect": "box-blur" } & BoxBlur | { "effect": "directional-blur" } & DirectionalBlur | { "effect": "glow" } & Glow | { "effect": "drop-shadow" } & DropShadow | { "effect": "gradient-ramp" } & GradientRamp | { "effect": "linear-wipe" } & LinearWipe | { "effect": "radial-wipe" } & RadialWipe | { "effect": "iris-wipe" } & IrisWipe);
+enabled: boolean, } & ({ "effect": "fill" } & Fill | { "effect": "tint" } & Tint | { "effect": "levels" } & Levels | { "effect": "curves" } & Curves | { "effect": "hue-saturation" } & HueSaturation | { "effect": "brightness-contrast" } & BrightnessContrast | { "effect": "exposure" } & Exposure | { "effect": "gaussian-blur" } & GaussianBlur | { "effect": "box-blur" } & BoxBlur | { "effect": "directional-blur" } & DirectionalBlur | { "effect": "glow" } & Glow | { "effect": "drop-shadow" } & DropShadow | { "effect": "gradient-ramp" } & GradientRamp | { "effect": "linear-wipe" } & LinearWipe | { "effect": "radial-wipe" } & RadialWipe | { "effect": "iris-wipe" } & IrisWipe | { "effect": "invert" } & Invert | { "effect": "posterize" } & Posterize | { "effect": "threshold" } & Threshold | { "effect": "vibrance" } & Vibrance);

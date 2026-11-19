@@ -22,7 +22,8 @@ import type { TimelinePhase } from "@grapix/contracts";
 import type { DrawingContext } from "./drawing";
 import { visibleRange, type KeyIndex } from "./key-index";
 import type { LayerSwitch, TimelineLayer } from "./layers";
-import { buildSpeedGraph, paintSpeedGraph } from "./speed-graph";
+import { buildSpeedGraph, paintSpeedGraph, withDraftBezier, type GraphMode } from "./speed-graph";
+import type { CubicBezier } from "@grapix/contracts";
 import { keyId, type TimelineModel } from "./model";
 import { TIMELINE_LAYERS, type DirtyRect, type TimelineLayerId } from "./repaint-plan";
 import { phaseBands, phaseColour, PHASE_BAND_HEIGHT } from "./phases";
@@ -291,6 +292,10 @@ export interface PaintState {
   /// When set, the content layer draws that track's speed graph instead of
   /// the dope sheet. "Advanced curves appear on demand" (11.23) is this flag.
   readonly graphTrack?: number;
+  /// Which view the open graph shows: value over time (editable) or speed (read-only).
+  readonly graphMode?: GraphMode;
+  /// A handle drag in progress: one segment's curve, shown before it is saved.
+  readonly graphDraft?: { readonly segment: number; readonly bezier: CubicBezier };
   /// Named phase spans, drawn with the ruler on the static layer (11.25).
   readonly phases?: readonly TimelinePhase[];
   /// Layer bar colour per object id (11.63). An object row with a colour gets
@@ -372,10 +377,18 @@ export function paintLayer(
       paintSpeedGraph(
         context,
         buildSpeedGraph(
-        { keys: track.sourceKeys },
+          {
+            keys: state.graphDraft
+              ? withDraftBezier(track.sourceKeys, state.graphDraft.segment, state.graphDraft.bezier)
+              : track.sourceKeys,
+          },
           viewport,
           viewport.height,
           model.durationFrames,
+          {
+            mode: state.graphMode ?? "value",
+            framesPerSecond: model.frameRate.num / model.frameRate.den,
+          },
         ),
       );
       context.restore();

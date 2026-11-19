@@ -24,6 +24,10 @@ const E_GLOW_BRIGHT: u32 = 15u;
 const E_GLOW_COMBINE: u32 = 16u;
 const E_SHADOW_MAKE: u32 = 17u;
 const E_SHADOW_COMBINE: u32 = 18u;
+const E_INVERT: u32 = 19u;
+const E_POSTERIZE: u32 = 20u;
+const E_THRESHOLD: u32 = 21u;
+const E_VIBRANCE: u32 = 22u;
 const ORIGIN_SLOT: u32 = 28u;
 const PI: f32 = 3.14159265358979;
 const LUT_N: u32 = 1024u;
@@ -204,6 +208,20 @@ fn apply_effect(px: vec4<f32>) -> vec4<f32> {
         }
     } else if (kind == E_EXPOSURE) {
         o = vec3<f32>(exposure_channel(c.x), exposure_channel(c.y), exposure_channel(c.z));
+    } else if (kind == E_INVERT) {
+        let inverted = vec3<f32>(1.0) - c;
+        let mask = vec3<f32>(P(0u), P(1u), P(2u)) > vec3<f32>(0.5);
+        o = select(c, inverted + (c - inverted) * P(3u), mask);
+    } else if (kind == E_POSTERIZE) {
+        // Round half up, as the CPU: WGSL's round goes to even.
+        let steps = P(0u);
+        o = floor(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)) * steps + vec3<f32>(0.5)) / steps;
+    } else if (kind == E_THRESHOLD) {
+        o = vec3<f32>(select(0.0, 1.0, effect_luma(c) >= P(0u)));
+    } else if (kind == E_VIBRANCE && !(P(0u) == 0.0 && P(1u) == 0.0)) {
+        let hsl = rgb_to_hsl(c);
+        let s2 = clamp(hsl.y * (1.0 + P(1u)) + P(0u) * (1.0 - hsl.y) * min(hsl.y, 0.5), 0.0, 1.0);
+        o = hsl_to_rgb(vec3<f32>(hsl.x, s2, hsl.z));
     }
     let r = vec4<f32>(bound(o.x * a), bound(o.y * a), bound(o.z * a), bound(a));
     if (!covers(r.w)) {

@@ -149,7 +149,7 @@ export function storageStatement(
   state: Pick<AssetManagerState, "project" | "projectStored">,
 ): string {
   if (state.project === undefined) {
-    return "import cache only: save this graphic into a project to keep its assets with it";
+    return "import cache only: save this scene into a project to keep its assets with it";
   }
   if (asset.checksum !== undefined && state.projectStored?.has(asset.checksum) === true) {
     return `in project ${state.project}`;
@@ -317,8 +317,8 @@ export function assetManagerPanel(
       label: `Project library · ${state.project}`,
       description:
         reusable.length === 0
-          ? "every asset in this project is already in this graphic"
-          : `${reusable.length} asset(s) in the project not used by this graphic`,
+          ? "every asset in this project is already in this scene"
+          : `${reusable.length} asset(s) in the project not used by this scene`,
       children: reusable.map((asset): UiNode => {
         const preview = previewNodes(asset, state);
         const clash = document.assets.find((candidate) => candidate.assetId === asset.assetId);
@@ -331,8 +331,8 @@ export function assetManagerPanel(
           actions: [
             {
               name: "addToScene",
-              label: "Add to graphic",
-              ...(clash === undefined ? {} : { unavailable: `this graphic already has an asset with id ${asset.assetId}` }),
+              label: "Add to scene",
+              ...(clash === undefined ? {} : { unavailable: `this scene already has an asset with id ${asset.assetId}` }),
             },
           ],
           children: preview.cells,
@@ -346,7 +346,7 @@ export function assetManagerPanel(
     label: "Assets",
     description:
       state.project === undefined
-        ? `${document.assets.length} asset(s) in ${document.name} · independent graphic, not in a project`
+        ? `${document.assets.length} asset(s) in ${document.name} · independent scene, not in a project`
         : `${document.assets.length} asset(s) in ${document.name} · kept in project ${state.project}`,
     actions: [
       {

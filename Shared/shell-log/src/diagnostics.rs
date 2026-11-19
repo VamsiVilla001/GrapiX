@@ -1,6 +1,9 @@
-//! The menu both shells carry: Help, then two ways to export a diagnostic bundle
-//! (build plan 2.14, ADR-0004 §8).
+//! The menu both shells carry: Help, with the live telemetry panel (build plan
+//! 2.27) and two ways to export a diagnostic bundle (2.14, ADR-0004 §8).
 //!
+//! - **Live telemetry**: asks the page to open its telemetry panel, by emitting
+//!   [`TELEMETRY_EVENT`] to the window. The page owns the panel and the read;
+//!   the menu owns only the way in, so both apps have it in the same place.
 //! - **Export diagnostic bundle (all modules)**: every module that wrote a log.
 //! - **Export diagnostic bundle (this module only)**: the shell's own module
 //!   (`editor` or `playout`), for a report about this product alone.
@@ -14,7 +17,16 @@
 //! of their own to say more, and Playout carries no dialog dependency.
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::Runtime;
+use tauri::{AppHandle, Emitter, Runtime};
+
+/// The identifier of the item that opens the live telemetry panel.
+pub const TELEMETRY_ITEM_ID: &str = "gx-telemetry-open";
+
+/// What the telemetry item says.
+pub const TELEMETRY_ITEM_TEXT: &str = "Live telemetry…";
+
+/// The event the page listens for to open its telemetry panel.
+pub const TELEMETRY_EVENT: &str = "gx-open-telemetry";
 
 /// The identifier of the item that exports every module.
 pub const EXPORT_ITEM_ID: &str = "gx-diag-export";
@@ -45,19 +57,50 @@ pub fn with_diagnostics_menu<R: Runtime>(
 ) -> tauri::Builder<R> {
     builder
         .menu(move |handle| {
+            let telemetry =
+                MenuItemBuilder::with_id(TELEMETRY_ITEM_ID, TELEMETRY_ITEM_TEXT).build(handle)?;
             let all = MenuItemBuilder::with_id(EXPORT_ITEM_ID, EXPORT_ITEM_TEXT).build(handle)?;
             let own = MenuItemBuilder::with_id(EXPORT_MODULE_ITEM_ID, module_item_text(module))
                 .build(handle)?;
             let help = SubmenuBuilder::new(handle, MENU_TEXT)
+                .item(&telemetry)
+                .separator()
                 .item(&all)
                 .item(&own)
                 .build()?;
             MenuBuilder::new(handle).item(&help).build()
         })
-        .on_menu_event(move |_app, event| {
+        .on_menu_event(move |app, event| {
+            if handle_telemetry_item(app, event.id().as_ref()) {
+                return;
+            }
             // The thread ends by itself; nothing waits for it.
             let _ = handle_menu_event(event.id().as_ref(), module);
         })
+}
+
+/// Export a diagnostic bundle from a page's own Help menu (the Editor has no
+/// native menu): every module when `all_modules`, else `module` only. The same
+/// export the native items start; the outcome is on the shell's record.
+pub fn export_diagnostics(all_modules: bool, module: &str) -> std::thread::JoinHandle<()> {
+    let id = if all_modules {
+        EXPORT_ITEM_ID
+    } else {
+        EXPORT_MODULE_ITEM_ID
+    };
+    handle_menu_event(id, module).expect("an export item id always starts an export")
+}
+
+/// The telemetry item asks the page to open its panel. Returns whether `id` was
+/// that item; any other item is left to [`handle_menu_event`].
+pub fn handle_telemetry_item<R: Runtime>(app: &AppHandle<R>, id: &str) -> bool {
+    if id != TELEMETRY_ITEM_ID {
+        return false;
+    }
+    if let Err(error) = app.emit(TELEMETRY_EVENT, ()) {
+        tracing::warn!(event = "telemetry.open_failed", detail = %error);
+    }
+    true
 }
 
 /// What a menu event does: an export item starts an export and returns its

@@ -355,7 +355,7 @@ impl JsonLayer {
         let seq = self.shared.issued.fetch_add(1, Ordering::SeqCst) + 1;
         line.insert("seq".into(), Value::from(seq));
         #[cfg(test)]
-        tests::between_number_and_queue(seq);
+        tests::between_number_and_queue(Arc::as_ptr(&self.shared) as usize, seq);
         let json = Value::Object(line).to_string();
         match self.sender.try_send(Msg::Line(Line { seq, json })) {
             Ok(()) | Err(TrySendError::Disconnected(_)) => {}
@@ -1147,16 +1147,22 @@ mod tests {
 
     /// A pause a test can put between a record taking its number and being
     /// queued: the window in which the 2.25 race happened.
-    static PAUSE_AT: std::sync::Mutex<Option<(u64, std::sync::mpsc::Receiver<()>)>> =
-        std::sync::Mutex::new(None);
+    /// The pauses, one per sink: the sink's identity maps to the number to hold
+    /// and the release. Keyed by sink, not held in one slot: tests run in parallel
+    /// and every sink numbers its records from 1, so one slot (or a hook keyed by
+    /// number alone) was taken, overwritten or dropped by whichever test reached it
+    /// first, and the order test failed about one run in four.
+    type Pauses = std::collections::HashMap<usize, (u64, std::sync::mpsc::Receiver<()>)>;
+    static PAUSE_AT: std::sync::LazyLock<std::sync::Mutex<Pauses>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(Pauses::new()));
 
-    pub(super) fn between_number_and_queue(seq: u64) {
+    pub(super) fn between_number_and_queue(sink: usize, seq: u64) {
         let waiting = {
-            let mut slot = PAUSE_AT
+            let mut pauses = PAUSE_AT
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match slot.as_ref() {
-                Some((at, _)) if *at == seq => slot.take().map(|(_, release)| release),
+            match pauses.get(&sink) {
+                Some((at, _)) if *at == seq => pauses.remove(&sink).map(|(_, release)| release),
                 _ => None,
             }
         };
@@ -1176,7 +1182,14 @@ mod tests {
         let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(guard.layer()));
         // log.start took 1; the held record is 2.
         let (release, held) = std::sync::mpsc::channel();
-        *PAUSE_AT.lock().unwrap() = Some((2, held));
+        let sink = Arc::as_ptr(
+            &guard
+                .layer
+                .as_ref()
+                .expect("the layer lives as long as the guard")
+                .shared,
+        ) as usize;
+        PAUSE_AT.lock().unwrap().insert(sink, (2, held));
         let first = {
             let dispatch = dispatch.clone();
             std::thread::spawn(move || {
@@ -1186,7 +1199,7 @@ mod tests {
             })
         };
         // Let the first thread reach the pause holding number 2.
-        while PAUSE_AT.lock().unwrap().is_some() {
+        while PAUSE_AT.lock().unwrap().contains_key(&sink) {
             std::thread::sleep(Duration::from_millis(5));
         }
         let second = {
@@ -1219,6 +1232,43 @@ mod tests {
             "{records:#?}"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A pause set for one sink is never taken by another: every sink numbers its
+    /// records from 1, and tests run in parallel, so a hook keyed by number alone
+    /// was consumed by whichever sink reached it first (the order test failed about
+    /// one run in four). Here the pause belongs to sink A and sink B logs through
+    /// its number: B is not held and the pause is still waiting for A.
+    #[test]
+    fn a_pause_set_for_one_sink_is_not_taken_by_another() {
+        let dir_a = scratch("pause-a");
+        let dir_b = scratch("pause-b");
+        let a = start(LogConfig::new("engine", "worker", &dir_a)).unwrap();
+        let b = start(LogConfig::new("engine", "worker", &dir_b)).unwrap();
+        let sink_a = Arc::as_ptr(&a.layer.as_ref().unwrap().shared) as usize;
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        PAUSE_AT.lock().unwrap().insert(sink_a, (2, held));
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(b.layer()));
+        let began = std::time::Instant::now();
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(event = "other.first");
+            tracing::info!(event = "other.second");
+        });
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "sink B was held by sink A's pause"
+        );
+        assert!(
+            PAUSE_AT.lock().unwrap().contains_key(&sink_a),
+            "sink B consumed sink A's pause"
+        );
+        PAUSE_AT.lock().unwrap().remove(&sink_a);
+        drop(release);
+        drop(dispatch);
+        a.finish().unwrap();
+        b.finish().unwrap();
+        let _ = std::fs::remove_dir_all(dir_a);
+        let _ = std::fs::remove_dir_all(dir_b);
     }
 
     /// 2.25: many threads logging at once leave every number written once, in

@@ -25,7 +25,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use gx_asset_plane::package::MAX_PACKAGE_BYTES;
-use gx_asset_plane::{AssetPublishPeer, AssetStore, PublishRefusal, PublishReply};
+use gx_asset_plane::{
+    AssetPublishPeer, AssetStore, PreviewImage, PreviewJob, PublishRefusal, PublishReply,
+};
 #[cfg(test)]
 use gx_contracts::color::OutputTransform;
 use gx_contracts::material::MaterialSupport;
@@ -46,6 +48,7 @@ use crate::clock::ProgramClock;
 use crate::compositor::output::{Delivered, Submitted};
 use crate::compositor::scene::{GpuScene, SourceTrace};
 use crate::emission::{FrameEmitter, ProgramEmission};
+use crate::governor::{Level, LoadGovernor, NonLiveGate, Observation};
 use crate::gpu::{self, Gpu};
 use crate::headless::{answer_render, RenderedImages};
 use crate::mesh::AssetBytes;
@@ -146,7 +149,30 @@ pub struct Engine {
     recovery: Option<RecoveryJournal>,
     output_inhibited: bool,
     events: Vec<EngineEvent>,
+    /// 3.24: watches what Program's frames cost and sheds non-live work.
+    governor: LoadGovernor,
+    /// The gate detached renders wait at; the governor sets its level.
+    gate: Arc<NonLiveGate>,
+    /// Governor moves since start, and the latest in words.
+    shifts: u64,
+    last_shift: Option<String>,
+    /// Ring-full count at the last observation, to see it rise.
+    seen_ring_full: u64,
+    /// 11.65: the draft scenes the preview prepared lately, newest last, so
+    /// moving the playhead through the same document does not prepare it again.
+    preview_cache: Arc<Mutex<PreviewCache>>,
 }
+
+/// How many prepared drafts the preview keeps.
+const PREVIEW_CACHE_ENTRIES: usize = 4;
+
+/// Prepared draft scenes by content hash, oldest first.
+type PreviewCache = Vec<(ContentHash, Arc<PreparedScene>)>;
+
+/// The highest load level anything is wired to shed at (3.24): detached renders
+/// run one at a time. Higher levels are raised here as each is built, never
+/// before, so the engine never reports shedding it does not do.
+const WIRED_LEVEL: Level = Level::DetachedThrottled;
 
 /// What attaching a recovery journal dropped (5.11).
 #[derive(Debug, Default)]
@@ -218,6 +244,12 @@ impl Engine {
             recovery: None,
             output_inhibited: false,
             events: Vec::new(),
+            governor: LoadGovernor::new(WIRED_LEVEL),
+            gate: Arc::new(NonLiveGate::default()),
+            shifts: 0,
+            last_shift: None,
+            seen_ring_full: 0,
+            preview_cache: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -850,6 +882,7 @@ impl Engine {
             missed_before,
         };
         self.metrics.record(sample);
+        self.govern(&sample);
         // 2.12: a late frame and frames the clock passed are on record, and a
         // heartbeat each second says the engine is running and how.
         let epoch = self.clock.epoch().0;
@@ -880,6 +913,48 @@ impl Engine {
             frame: program,
             sample,
         })
+    }
+
+    /// 3.24: feed the frame to the load governor and apply what it decides. An
+    /// empty Program sheds nothing (an idle engine has nothing at risk).
+    fn govern(&mut self, sample: &FrameSample) {
+        let transition = if self.program.is_none() {
+            self.governor.program_empty()
+        } else {
+            let on_ring = self.gpu.has_hardware() && self.readback.delivered > 0;
+            let ring_full = self.readback.ring_full;
+            let observation = Observation {
+                render_nanos: sample.render_nanos,
+                interval_nanos: sample.interval_nanos,
+                late: sample.late,
+                missed: sample.missed_before,
+                frames_behind: on_ring
+                    .then(|| self.readback.frames_behind.last().copied())
+                    .flatten(),
+                ring_full: ring_full.saturating_sub(self.seen_ring_full),
+            };
+            self.seen_ring_full = ring_full;
+            self.governor.observe(observation)
+        };
+        if let Some(transition) = transition {
+            self.gate.set_level(transition.to);
+            self.shifts += 1;
+            self.last_shift = Some(format!(
+                "{} to {}: {}",
+                transition.from, transition.to, transition.reason
+            ));
+            crate::log::load_shift(&transition, sample.frame, self.clock.epoch().0);
+        }
+    }
+
+    /// The level non-live work is shed at now.
+    pub fn load_level(&self) -> Level {
+        self.governor.level()
+    }
+
+    /// The gate detached renders wait at (shared with the closures it hands out).
+    pub fn non_live_gate(&self) -> Arc<NonLiveGate> {
+        Arc::clone(&self.gate)
     }
 
     /// Render Program for synchronous callers and tests.
@@ -929,26 +1004,64 @@ impl Engine {
     /// wire format does not depend on the worker crate.
     fn performance_summary(&self) -> gx_control_plane::status::PerformanceSummary {
         let perf = self.performance();
+        let frames: Vec<_> = perf
+            .frames
+            .iter()
+            .map(|f| gx_control_plane::status::FrameSampleSummary {
+                frame: f.frame,
+                render_nanos: f.render_nanos,
+                interval_nanos: f.interval_nanos,
+                late: f.late,
+                drops_so_far: f.drops_so_far,
+                missed_before: f.missed_before,
+            })
+            .collect();
+        // 2.27: what the engine measured, assessed once for every surface.
+        let gpu = self.gpu.diagnostic_description();
+        let readback = self.gpu.has_hardware().then(|| {
+            let report = &self.readback;
+            gx_control_plane::telemetry::ReadbackFacts {
+                delivered: report.delivered,
+                ring_full: report.ring_full,
+                superseded: report.superseded,
+                awaiting_first: report.awaiting_first,
+                frames_behind: report.frames_behind.clone(),
+                latency_nanos: report.latency_nanos.clone(),
+            }
+        });
+        let load = gx_control_plane::telemetry::LoadFacts {
+            level: self.governor.level() as u8,
+            max_level: self.governor.max_level() as u8,
+            name: self.governor.level().to_string(),
+            shed: self.governor.level().describes().into(),
+            shifts: self.shifts,
+            last_shift: self.last_shift.clone(),
+            detached_running: u32::try_from(self.gate.running()).unwrap_or(u32::MAX),
+        };
+        let telemetry =
+            gx_control_plane::telemetry::assess(&gx_control_plane::telemetry::TelemetryInputs {
+                rate: perf.rate,
+                tier: perf.device_tier,
+                gpu: gpu.as_deref(),
+                frames: &frames,
+                readback: readback.as_ref(),
+                output: &self.selected_output,
+                output_inhibited: self.output_inhibited,
+                reference: self.clock.reference(),
+                degradations: &self.degradations(),
+                load: Some(&load),
+            });
         gx_control_plane::status::PerformanceSummary {
             rate: perf.rate,
             device_tier: perf.device_tier,
-            frames: perf
-                .frames
-                .iter()
-                .map(|f| gx_control_plane::status::FrameSampleSummary {
-                    frame: f.frame,
-                    render_nanos: f.render_nanos,
-                    interval_nanos: f.interval_nanos,
-                    late: f.late,
-                    drops_so_far: f.drops_so_far,
-                    missed_before: f.missed_before,
-                })
-                .collect(),
+            frames,
             total_rendered: perf.total_rendered,
             total_late: perf.total_late,
             total_dropped: perf.total_dropped,
             total_missed: perf.total_missed,
             mean_budget_ratio: perf.mean_budget_ratio,
+            components: telemetry.components,
+            findings: telemetry.findings,
         }
     }
 
@@ -1079,6 +1192,80 @@ impl AssetPublishPeer for Engine {
         let reply = self.publish(scene);
         crate::log::publish(&take_id, &reply);
         reply
+    }
+
+    /// 11.65: draw a draft scene at a frame. Built under the engine's lock from
+    /// what must be read there (the assets the draft names); prepared and drawn by
+    /// the returned job outside it, behind the detached gate, on the CPU reference
+    /// (which draws effects, masks and clips). No revision is created and nothing
+    /// on Program changes.
+    fn prepare_preview(&mut self, scene: SceneDocument, frame: u64) -> Result<PreviewJob, Refusal> {
+        let duration_frames = scene.timeline.duration_frames;
+        if frame > duration_frames {
+            return Err(Refusal::RenderFrameOutOfRange {
+                take_id: TakeId(scene.id.clone()),
+                revision: scene.revision.unwrap_or(Revision(0)),
+                frame,
+                duration_frames,
+            });
+        }
+        let key = scene.content_hash();
+        let wanted: HashSet<ContentHash> = scene
+            .assets
+            .iter()
+            .filter_map(|asset| asset.checksum.clone())
+            .collect();
+        let available: HashSet<ContentHash> = self
+            .assets
+            .iter()
+            .filter(|hash| wanted.contains(*hash))
+            .cloned()
+            .collect();
+        let bytes: AssetBytes = self
+            .asset_bytes
+            .iter()
+            .filter(|(hash, _)| wanted.contains(*hash))
+            .map(|(hash, bytes)| (hash.clone(), bytes.clone()))
+            .collect();
+        let support = self.material_support();
+        let gate = Arc::clone(&self.gate);
+        let cache = Arc::clone(&self.preview_cache);
+        Ok(Box::new(move || {
+            // A preview is non-live work: it waits its turn like a headless render.
+            let _slot = gate.acquire();
+            let cached = {
+                let mut held = cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                held.iter().position(|(hash, _)| *hash == key).map(|at| {
+                    let entry = held.remove(at);
+                    let prepared = Arc::clone(&entry.1);
+                    held.push(entry);
+                    prepared
+                })
+            };
+            let prepared = match cached {
+                Some(prepared) => prepared,
+                None => {
+                    let prepared =
+                        Arc::new(PreparedScene::prepare(scene, &available, &bytes, &support)?);
+                    let mut held = cache
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if held.len() >= PREVIEW_CACHE_ENTRIES {
+                        held.remove(0);
+                    }
+                    held.push((key, Arc::clone(&prepared)));
+                    prepared
+                }
+            };
+            let image = crate::headless::render_png(&prepared, frame)?;
+            Ok(PreviewImage {
+                width: image.width,
+                height: image.height,
+                png: image.png.as_ref().clone(),
+            })
+        }))
     }
 
     // 5.9: the asset plane re-hashed these bytes before handing them over.
@@ -1231,7 +1418,10 @@ impl EnginePeer for Engine {
             unreachable!("check_render refuses a render with no held revision or scene");
         };
         let images = Arc::clone(&self.rendered);
+        let gate = Arc::clone(&self.gate);
         Handled::Detached(Box::new(move || {
+            // 3.24: a headless render waits for a slot; under load there is one.
+            let _slot = gate.acquire();
             let reply = answer_render(req, held.content_hash, &scene, &images);
             crate::log::request(&note, &reply, epoch);
             reply
@@ -1546,6 +1736,343 @@ mod tests {
         // A clock that does not advance on its own: the test drives the frame
         // source, so timing is deterministic.
         Engine::new(Arc::new(AtomicU64::new(0)), Locality::CoLocated)
+    }
+
+    // --- 2.27: live telemetry ---------------------------------------------------------
+
+    fn performance_reply(e: &mut Engine) -> gx_control_plane::status::PerformanceSummary {
+        match e.handle(ClientRequest::Performance) {
+            EngineReply::Performance(summary) => summary,
+            other => panic!("expected performance, got {other:?}"),
+        }
+    }
+
+    /// The `performance` reply carries the components and findings the engine
+    /// assessed, not just the frame series: an engine with no hardware GPU says
+    /// so, by name, and reports the readback it does not have as not measured.
+    #[test]
+    fn the_performance_reply_names_a_missing_gpu_and_does_not_invent_a_readback() {
+        let mut e = Engine::with_gpu(
+            Arc::new(AtomicU64::new(0)),
+            Locality::CoLocated,
+            Gpu::without_hardware(DeviceTier::T2),
+        );
+        let summary = performance_reply(&mut e);
+        let finding = summary
+            .findings
+            .iter()
+            .find(|f| f.id == "gpu.no_hardware")
+            .expect("a software engine reports that it has no GPU");
+        assert_eq!(
+            finding.severity,
+            gx_control_plane::status::Severity::Critical
+        );
+        let readback = summary
+            .components
+            .iter()
+            .find(|c| c.id == "readback")
+            .expect("the readback component is always present");
+        assert_eq!(
+            readback.state,
+            gx_control_plane::telemetry::ComponentState::NotMeasured
+        );
+        assert!(readback.series.is_empty());
+        let ids: Vec<_> = summary.components.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "frame-loop",
+                "gpu-adapter",
+                "readback",
+                "output",
+                "reference",
+                "load-balancer"
+            ]
+        );
+    }
+
+    fn on_program() -> ProgramState {
+        ProgramState {
+            take_id: TakeId("take/1".into()),
+            revision: Revision(1),
+            committed_frame: 0,
+            scene_frame: 0,
+            playing: true,
+            phase: None,
+            stop_frame: None,
+        }
+    }
+
+    fn sample(frame: u64, render_ms: u64, late: bool) -> FrameSample {
+        FrameSample {
+            frame,
+            render_nanos: render_ms * 1_000_000,
+            interval_nanos: 20_000_000,
+            late,
+            drops_so_far: 0,
+            missed_before: 0,
+        }
+    }
+
+    /// 3.24: a late Program frame makes the engine shed, in the gate detached
+    /// renders wait at, in what it reports and in its log; Program emptying
+    /// releases it again. The same gate object the closures hold is the one set.
+    #[test]
+    fn a_late_program_frame_sheds_detached_work_and_says_so_everywhere() {
+        let mut e = engine();
+        let gate = e.non_live_gate();
+        assert_eq!(gate.cap(), crate::governor::DETACHED_CAP_NORMAL);
+        e.program = Some(on_program());
+
+        let records = logged("load-shift", || {
+            e.govern(&sample(1, 30, true));
+        });
+        assert_eq!(e.load_level(), Level::DetachedThrottled);
+        assert_eq!(gate.cap(), 1, "the shared gate is throttled");
+        let shift = records
+            .iter()
+            .find(|r| r["event"] == "load.shift")
+            .expect("a shift is on record");
+        assert_eq!(shift["level"], "warn");
+        assert_eq!(shift["fields"]["from"], "normal");
+        assert_eq!(shift["fields"]["to"], "detached-throttled");
+        assert_eq!(shift["fields"]["reason"], "a Program frame was late");
+
+        let summary = performance_reply(&mut e);
+        let finding = summary
+            .findings
+            .iter()
+            .find(|f| f.id == "load.shedding")
+            .expect("telemetry reports the shedding");
+        assert!(finding.what.contains("headless renders run one at a time"));
+        let component = summary
+            .components
+            .iter()
+            .find(|c| c.id == "load-balancer")
+            .unwrap();
+        assert_eq!(
+            component.state,
+            gx_control_plane::telemetry::ComponentState::Degraded
+        );
+
+        // Nothing on Program: nothing is at risk, so nothing is shed.
+        e.program = None;
+        let records = logged("load-release", || e.govern(&sample(2, 30, true)));
+        assert_eq!(e.load_level(), Level::Normal);
+        assert_eq!(gate.cap(), crate::governor::DETACHED_CAP_NORMAL);
+        let released = records.iter().find(|r| r["event"] == "load.shift").unwrap();
+        assert_eq!(released["level"], "info");
+        assert_eq!(released["fields"]["reason"], "nothing is on Program");
+    }
+
+    /// An idle engine (no scene on Program) never sheds, however slow its frames:
+    /// a debug build on a loaded machine must not throttle anyone's work.
+    #[test]
+    fn an_idle_engine_never_sheds_however_slow_its_frames() {
+        let mut e = engine();
+        for frame in 0..500 {
+            e.govern(&sample(frame, 40, true));
+        }
+        assert_eq!(e.load_level(), Level::Normal);
+        assert_eq!(
+            e.non_live_gate().cap(),
+            crate::governor::DETACHED_CAP_NORMAL
+        );
+    }
+
+    /// 3.24: a headless render the transport runs after the engine is released
+    /// waits at the gate while the throttle is on and another render holds the
+    /// only slot, and is let in when that one ends: late, never lost.
+    #[test]
+    fn a_headless_render_waits_at_the_throttled_gate_and_is_not_lost() {
+        use gx_control_plane::render::RenderRequest;
+        let mut e = engine();
+        let PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        } = e.publish(animated_scene())
+        else {
+            panic!("the animated scene publishes");
+        };
+        let gate = e.non_live_gate();
+        gate.set_level(Level::DetachedThrottled);
+        let held = gate.acquire();
+        let Handled::Detached(work) = e.handle_detached(ClientRequest::Render(RenderRequest {
+            take_id,
+            revision,
+            content_hash: Some(content_hash),
+            frame: 10,
+        })) else {
+            panic!("a render is handed back to run detached");
+        };
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let runner = {
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                let reply = work();
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                reply
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !done.load(std::sync::atomic::Ordering::SeqCst),
+            "the render must wait while the only slot is held"
+        );
+        drop(held);
+        assert!(matches!(runner.join().unwrap(), EngineReply::Rendered(_)));
+    }
+
+    // --- 11.65: the engine preview -----------------------------------------------------
+
+    /// The number of pixels in a PNG that are not fully transparent.
+    fn covered_pixels(png_bytes: &[u8]) -> (usize, u32, u32) {
+        let mut reader = png::Decoder::new(png_bytes).read_info().unwrap();
+        let mut buffer = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buffer).unwrap();
+        let channels = info.color_type.samples();
+        let covered = buffer[..info.buffer_size()]
+            .chunks(channels)
+            .filter(|pixel| pixel.last().copied().unwrap_or(0) != 0)
+            .count();
+        (covered, info.width, info.height)
+    }
+
+    /// A draft scene is drawn by the engine over the asset plane, the way the Editor
+    /// asks: the same scene with a blur covers more pixels than without it, which
+    /// is what the draft viewport cannot show. No revision is created, a second
+    /// preview of the same document is served from the cache, and an out-of-range
+    /// frame is refused by name.
+    #[test]
+    fn a_draft_with_a_blur_is_drawn_by_the_engine_over_the_asset_plane() {
+        use gx_asset_plane::{preview_scene, PreviewError};
+        use gx_contracts::effect::{Effect, EffectInstance, GaussianBlur};
+
+        let engine = Arc::new(Mutex::new(engine()));
+        let server = gx_asset_plane::AssetPublishServer::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            Arc::clone(&engine),
+        )
+        .unwrap();
+        let address = server.local_addr().unwrap();
+        let _ = server.serve_in_background();
+
+        let plain = animated_scene();
+        let mut blurred = animated_scene();
+        blurred.objects[0].base_mut().effects = Some(vec![EffectInstance::new(
+            "blur",
+            Effect::GaussianBlur(GaussianBlur {
+                blurriness: 6.0,
+                ..GaussianBlur::default()
+            }),
+        )]);
+
+        let plain_image = preview_scene(address, plain.clone(), 0).expect("a plain draft is drawn");
+        let blurred_image =
+            preview_scene(address, blurred.clone(), 0).expect("a blurred draft is drawn");
+        let (plain_covered, width, height) = covered_pixels(&plain_image.png);
+        let (blurred_covered, ..) = covered_pixels(&blurred_image.png);
+        assert_eq!((plain_image.width, plain_image.height), (64, 32));
+        assert_eq!((width, height), (64, 32));
+        assert_ne!(
+            plain_image.png, blurred_image.png,
+            "the effect changed the picture"
+        );
+        assert!(
+            blurred_covered > plain_covered,
+            "a blur spreads the rectangle: {blurred_covered} covered, plain {plain_covered}"
+        );
+
+        {
+            let held = engine.lock().unwrap();
+            assert!(held.published.is_empty(), "a preview creates no revision");
+            assert!(held.program.is_none(), "a preview touches nothing on air");
+            assert_eq!(held.preview_cache.lock().unwrap().len(), 2);
+        }
+        // The same document again is served from the cache, not prepared twice.
+        let again = preview_scene(address, blurred, 0).unwrap();
+        assert_eq!(again.png, blurred_image.png);
+        assert_eq!(
+            engine.lock().unwrap().preview_cache.lock().unwrap().len(),
+            2
+        );
+
+        match preview_scene(address, plain, 9_999) {
+            Err(PreviewError::Refused(Refusal::RenderFrameOutOfRange {
+                frame: 9_999,
+                duration_frames: 100,
+                ..
+            })) => {}
+            other => panic!("expected a named out-of-range refusal, got {other:?}"),
+        }
+    }
+
+    /// 11.65: a preview is non-live work. Under load, with the throttle on and the
+    /// only slot held, it waits at the same gate headless renders do and is drawn
+    /// when the slot frees: late, never lost, and never competing with Program.
+    #[test]
+    fn a_preview_waits_at_the_throttled_gate_and_is_drawn_when_it_frees() {
+        let mut e = engine();
+        let gate = e.non_live_gate();
+        gate.set_level(Level::DetachedThrottled);
+        let held = gate.acquire();
+        let job = AssetPublishPeer::prepare_preview(&mut e, animated_scene(), 0)
+            .expect("the draft is accepted");
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let runner = {
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                let image = job();
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                image
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !done.load(std::sync::atomic::Ordering::SeqCst),
+            "the preview must wait while the only slot is held"
+        );
+        drop(held);
+        assert!(runner.join().unwrap().is_ok());
+    }
+
+    /// The preview cache keeps only a few prepared drafts.
+    #[test]
+    fn the_preview_cache_is_bounded() {
+        use gx_asset_plane::preview_scene;
+        let engine = Arc::new(Mutex::new(engine()));
+        let server = gx_asset_plane::AssetPublishServer::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            Arc::clone(&engine),
+        )
+        .unwrap();
+        let address = server.local_addr().unwrap();
+        let _ = server.serve_in_background();
+        for n in 0..(PREVIEW_CACHE_ENTRIES + 3) {
+            let mut scene = animated_scene();
+            scene.name = format!("draft {n}");
+            preview_scene(address, scene, 0).unwrap();
+        }
+        assert_eq!(
+            engine.lock().unwrap().preview_cache.lock().unwrap().len(),
+            PREVIEW_CACHE_ENTRIES
+        );
+    }
+
+    /// The engine only claims a level something sheds at.
+    #[test]
+    fn the_engine_never_goes_above_the_level_it_has_wired() {
+        let mut e = engine();
+        e.program = Some(on_program());
+        for frame in 0..500 {
+            e.govern(&sample(frame, 30, true));
+        }
+        assert_eq!(
+            e.load_level(),
+            Level::DetachedThrottled,
+            "only detached renders are throttled today; raise this with the next level built"
+        );
     }
 
     // --- 2.20: the protocol a client states ------------------------------------------

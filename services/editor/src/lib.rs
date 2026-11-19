@@ -22,6 +22,7 @@ pub mod command;
 pub mod design_system;
 pub mod fidelity;
 pub mod import;
+pub mod preview;
 pub mod project;
 pub mod publish;
 

@@ -1,6 +1,6 @@
 # Editor
 
-One of the three applications. Tauri 2 shell, Windows and macOS.
+One of the three applications. Tauri 2 shell, Windows only.
 
 Owns mutable authoring content: scene, material, font, script and timeline
 tools, project state, and durable Publish to Playout. **It cannot change

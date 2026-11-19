@@ -18,6 +18,7 @@ import type { CubicBezier, SceneEasing, SceneEdit } from "@grapix/contracts";
 import { wireFrame } from "../command-client";
 import { keyId, parseKeyId, type TimelineModel } from "./model";
 import { countInSpan } from "./key-index";
+import { EASY_EASE_INFLUENCE, segmentControlPoints, type EasyEaseKind } from "./easing";
 
 /** A gesture's ordered edits are one Rust history entry. */
 export interface Gesture {
@@ -234,6 +235,116 @@ export function planSetEasing(
       selected.length === 1
         ? `Set easing to ${easing}`
         : `Set easing to ${easing} on ${selected.length} keys`,
+  };
+}
+
+/// Easy Ease the selected keys, the way After Effects does (F9).
+///
+/// A key has two sides: the segment arriving at it and the segment leaving it.
+/// "Both" eases each side (speed 0, 33.33% influence), "in" only the arriving
+/// side, "out" only the leaving side. In this contract a segment's curve is one
+/// bezier stored on the key it starts at, `(x1, y1)` the leaving handle and
+/// `(x2, y2)` the arriving one, so easing a key's leaving side rewrites its own
+/// bezier and easing its arriving side rewrites the **previous** key's. The
+/// other handle of either segment is kept, so a key's two sides are independent
+/// and two selected neighbours share one segment without overwriting each other.
+/// A hold has no curve and the last key has no leaving segment: those sides are
+/// skipped, and a selection with nothing to ease is refused by name.
+export function planEasyEase(
+  model: TimelineModel,
+  selected: readonly string[],
+  kind: EasyEaseKind,
+): EditPlan {
+  if (selected.length === 0) return { refused: "no keys are selected" };
+  // Segment start key -> the bezier it will get, built up so a segment touched
+  // from both ends keeps both changes.
+  const segments = new Map<string, { objectId: string; property: string; frame: number; value: number; bezier: CubicBezier }>();
+  const touch = (
+    track: TimelineModel["tracks"][number],
+    start: TimelineModel["tracks"][number]["sourceKeys"][number],
+    change: (bezier: CubicBezier) => CubicBezier,
+  ): void => {
+    if (start.easing === "hold") return;
+    const id = keyId(track.objectId, track.property, Number(start.frame));
+    const held = segments.get(id);
+    const base = held?.bezier ?? segmentControlPoints(start);
+    segments.set(id, {
+      objectId: track.objectId,
+      property: track.property,
+      frame: Number(start.frame),
+      value: start.value,
+      bezier: change(base),
+    });
+  };
+
+  for (const id of selected) {
+    const key = parseKeyId(id);
+    if (!key) return { refused: "a selected key is unreadable" };
+    const track = model.tracks.find(
+      (candidate) => candidate.objectId === key.objectId && candidate.property === key.property,
+    );
+    const position = track?.sourceKeys.findIndex((candidate) => Number(candidate.frame) === key.frame) ?? -1;
+    if (!track || position < 0) {
+      return { refused: `no key on ${key.objectId}.${key.property} at frame ${key.frame}` };
+    }
+    const here = track.sourceKeys[position]!;
+    const previous = position > 0 ? track.sourceKeys[position - 1] : undefined;
+    const next = track.sourceKeys[position + 1];
+    if (kind !== "in" && next) {
+      touch(track, here, (b) => ({ ...b, x1: EASY_EASE_INFLUENCE, y1: 0 }));
+    }
+    if (kind !== "out" && previous) {
+      touch(track, previous, (b) => ({ ...b, x2: 1 - EASY_EASE_INFLUENCE, y2: 1 }));
+    }
+  }
+
+  if (segments.size === 0) {
+    return { refused: "nothing to ease: the last key has no leaving segment, the first no arriving one, and a hold has no curve" };
+  }
+  const label =
+    kind === "both" ? "Easy ease" : kind === "in" ? "Easy ease in" : "Easy ease out";
+  return {
+    edits: [...segments.values()].map((segment) => ({
+      edit: "updateKeyframe",
+      objectId: segment.objectId,
+      property: segment.property,
+      keyframe: {
+        frame: wireFrame(segment.frame),
+        value: segment.value,
+        easing: "custom-bezier",
+        bezier: segment.bezier,
+      },
+    })),
+    label: selected.length === 1 ? label : `${label} on ${selected.length} keys`,
+  };
+}
+
+/// Set one segment's bezier from a handle drag (one gesture, one undo step).
+///
+/// `segment` is the key the segment starts at; the key keeps its frame and
+/// value, and only its outgoing curve is rewritten.
+export function planSetSegmentBezier(
+  model: TimelineModel,
+  objectId: string,
+  property: string,
+  segment: number,
+  bezier: CubicBezier,
+): EditPlan {
+  const track = model.tracks.find(
+    (candidate) => candidate.objectId === objectId && candidate.property === property,
+  );
+  const source = track?.sourceKeys.find((candidate) => Number(candidate.frame) === segment);
+  if (!source) return { refused: `no key on ${objectId}.${property} at frame ${segment}` };
+  return {
+    edits: [
+      {
+        edit: "updateKeyframe",
+        objectId,
+        property,
+        keyframe: { frame: wireFrame(segment), value: source.value, easing: "custom-bezier", bezier },
+      },
+    ],
+    label: "Edit curve",
   };
 }
 

@@ -26,6 +26,22 @@ export type ChannelKeys = { readonly keys: readonly SceneKeyframe[] };
 
 const LINEAR: CubicBezier = { x1: 0, y1: 0, x2: 1, y2: 1 };
 
+/// After Effects' Easy Ease: speed 0 at the key with 33.33% influence, which is
+/// the control point `(1/3, 0)` leaving a key and `(2/3, 1)` arriving at one.
+export const EASY_EASE_INFLUENCE = 1 / 3;
+
+/// Which side of a key Easy Ease acts on: both (F9), the incoming side only, or
+/// the outgoing side only.
+export type EasyEaseKind = "both" | "in" | "out";
+
+/// The control points a segment starting at `key` is drawn with, named easing or
+/// custom bezier alike.
+export function segmentControlPoints(key: SceneKeyframe): CubicBezier {
+  return key.easing === "custom-bezier"
+    ? (key.bezier ?? LINEAR)
+    : easingControlPoints(key.easing);
+}
+
 /// The control points a named easing stands for, read from the generated
 /// table rather than restated — the table comes from Rust, so there is no
 /// second list of numbers to drift.

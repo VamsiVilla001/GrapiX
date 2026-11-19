@@ -1444,6 +1444,10 @@ mod tests {
             Effect::LinearWipe(LinearWipe::default()),
             Effect::RadialWipe(RadialWipe::default()),
             Effect::IrisWipe(IrisWipe::default()),
+            Effect::Invert(Invert::default()),
+            Effect::Posterize(Posterize::default()),
+            Effect::Threshold(Threshold::default()),
+            Effect::Vibrance(Vibrance::default()),
         ];
         let mut checked = 0;
         for effect in all {
@@ -1586,6 +1590,40 @@ mod tests {
         ] {
             set_keyframe(&mut scene, "card", property, key(0, value)).unwrap();
         }
+    }
+
+    /// 11.68: After Effects' Easy Ease (speed 0, 33.33% influence) is the bezier
+    /// `(1/3, 0, 2/3, 1)`, which on this contract's evaluator is exactly
+    /// smoothstep, `3t^2 - 2t^3`. The Editor draws the same numbers
+    /// (`Editor/tests/easy-ease.test.ts` pins them), so the curve an author sees
+    /// is the curve the engine renders.
+    #[test]
+    fn easy_ease_is_smoothstep_on_the_engine_evaluator() {
+        let easy = CubicBezier {
+            x1: 1.0 / 3.0,
+            y1: 0.0,
+            x2: 2.0 / 3.0,
+            y2: 1.0,
+        };
+        for (t, expected) in [
+            (0.1, 0.028),
+            (0.25, 0.15625),
+            (0.5, 0.5),
+            (0.75, 0.84375),
+            (0.9, 0.972),
+        ] {
+            let got = ease_at(SceneEasing::CustomBezier, Some(easy), t).unwrap();
+            assert!((got - expected).abs() < 1e-9, "t={t}: {got} vs {expected}");
+            let smooth = t * t * (3.0 - 2.0 * t);
+            assert!(
+                (got - smooth).abs() < 1e-9,
+                "t={t}: {got} vs smoothstep {smooth}"
+            );
+        }
+        // Speed zero at both ends: the curve leaves and arrives flat.
+        let start = ease_at(SceneEasing::CustomBezier, Some(easy), 0.001).unwrap();
+        let end = 1.0 - ease_at(SceneEasing::CustomBezier, Some(easy), 0.999).unwrap();
+        assert!(start < 1e-5 && end < 1e-5, "start {start}, end {end}");
     }
 
     #[test]
