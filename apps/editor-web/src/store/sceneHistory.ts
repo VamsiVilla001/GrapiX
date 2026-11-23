@@ -81,13 +81,13 @@ export class SceneHistory {
   }
 
   begin(scene: SceneDocument, selectedObjectId: string | null, label: string): void {
-    if (this.transaction) return;
+    if (this.transaction) this.end(scene, selectedObjectId);
     this.transaction = { scene: copyScene(scene), selectedObjectId, label };
   }
 
-  end(scene: SceneDocument, selectedObjectId: string | null): boolean {
+  end(scene: SceneDocument, selectedObjectId: string | null, expectedLabel?: string): boolean {
     const tx = this.transaction;
-    if (!tx) return false;
+    if (!tx || (expectedLabel && tx.label !== expectedLabel)) return false;
     this.transaction = null;
     return this.record(tx.scene, scene, tx.selectedObjectId, selectedObjectId, tx.label);
   }
