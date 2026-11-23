@@ -16,6 +16,10 @@ import { useUiStore } from "../store/uiStore";
 
 export function ReferenceTopBar() {
   const scene = useEditorStore((state) => state.scene);
+  const history = useEditorStore((state) => state.history);
+  const undo = useEditorStore((state) => state.undo);
+  const redo = useEditorStore((state) => state.redo);
+  const goToHistoryPoint = useEditorStore((state) => state.goToHistoryPoint);
   const setSaveStatus = useEditorStore((state) => state.setSaveStatus);
   const zoom = useUiStore((state) => state.zoom);
   const setZoom = useUiStore((state) => state.setZoom);
@@ -60,8 +64,25 @@ export function ReferenceTopBar() {
       </div>
 
       <div className="topbar-center">
-        <button className="topbar-icon" disabled title="Undo history coming later"><Undo2 size={17} /></button>
-        <button className="topbar-icon muted" disabled title="Redo history coming later"><Redo2 size={17} /></button>
+        <button className="topbar-icon" disabled={!history.canUndo}
+          onClick={undo} title={history.undoLabel ? `Undo: ${history.undoLabel} (Ctrl/Cmd+Z)` : "Nothing to undo"}>
+          <Undo2 size={17} />
+        </button>
+        <button className="topbar-icon muted" disabled={!history.canRedo}
+          onClick={redo} title={history.redoLabel ? `Redo: ${history.redoLabel} (Ctrl/Cmd+Shift+Z)` : "Nothing to redo"}>
+          <Redo2 size={17} />
+        </button>
+        <select
+          className="zoom-control"
+          aria-label="Scene history"
+          title="Jump to a recorded scene state"
+          value={history.entries.find((entry) => entry.current)?.id ?? ""}
+          onChange={(event) => goToHistoryPoint(Number(event.target.value))}
+        >
+          {history.entries.map((entry, index) => (
+            <option key={entry.id} value={entry.id}>{index}: {entry.label}</option>
+          ))}
+        </select>
         <span className="topbar-divider" />
         <select className="zoom-control" value={zoom} onChange={(event) => setZoom(Number(event.target.value))}>
           <option value={50}>50%</option>
