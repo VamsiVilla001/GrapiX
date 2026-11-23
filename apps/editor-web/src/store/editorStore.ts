@@ -53,7 +53,7 @@ interface EditorState {
   redo: () => void;
   goToHistoryPoint: (id: number) => void;
   beginHistoryTransaction: (label: string) => void;
-  endHistoryTransaction: () => void;
+  endHistoryTransaction: (expectedLabel?: string) => void;
   dataJson: string;
   dataError: string | null;
   saveStatus: "local" | "saving" | "saved" | "error";
@@ -185,8 +185,9 @@ export const useEditorStore = create<EditorState>((rawSet, get) => {
     beginHistoryTransaction: (label) => {
       history.begin(get().scene, get().selectedObjectId, label);
     },
-    endHistoryTransaction: () => {
-      finalizeGesture();
+    endHistoryTransaction: (expectedLabel) => {
+      const state = get();
+      history.end(state.scene, state.selectedObjectId, expectedLabel);
       rawSet({ history: history.info() });
     },
     dataJson: JSON.stringify(initialScene.dataContext, null, 2),
