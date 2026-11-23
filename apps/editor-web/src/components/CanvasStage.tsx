@@ -19,6 +19,8 @@ export function CanvasStage() {
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const selectObject = useEditorStore((state) => state.selectObject);
   const updateObject = useEditorStore((state) => state.updateObject);
+  const beginHistoryTransaction = useEditorStore((state) => state.beginHistoryTransaction);
+  const endHistoryTransaction = useEditorStore((state) => state.endHistoryTransaction);
   const zoom = useUiStore((state) => state.zoom);
   const snapping = useUiStore((state) => state.snapping);
   const toggleSnapping = useUiStore((state) => state.toggleSnapping);
@@ -39,6 +41,7 @@ export function CanvasStage() {
       return;
     }
 
+    beginHistoryTransaction(`Move ${object.name}`);
     setDrag({
       objectId: object.id,
       startClientX: event.clientX,
@@ -91,8 +94,8 @@ export function CanvasStage() {
             aria-label={scene.name}
             onPointerDown={() => selectObject(null)}
             onPointerMove={moveDrag}
-            onPointerUp={() => setDrag(null)}
-            onPointerCancel={() => setDrag(null)}
+            onPointerUp={() => { endHistoryTransaction(); setDrag(null); }}
+            onPointerCancel={() => { endHistoryTransaction(); setDrag(null); }}
           >
             <rect width={scene.canvas.width} height={scene.canvas.height} fill="transparent" />
             {displayObjects.map((object) => (
