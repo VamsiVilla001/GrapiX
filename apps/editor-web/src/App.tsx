@@ -52,7 +52,7 @@ export function App() {
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
       target instanceof HTMLSelectElement) {
-      endHistoryTransaction();
+      endHistoryTransaction("Edit Field");
     }
   }
 
