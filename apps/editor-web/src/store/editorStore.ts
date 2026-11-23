@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { SceneHistory, type SceneHistoryInfo, type SceneHistoryPoint } from "./sceneHistory";
 import {
   type AssetKind,
   type AssetLibraryItem,
@@ -47,6 +48,12 @@ export type LibraryObjectKind =
 interface EditorState {
   scene: SceneDocument;
   selectedObjectId: string | null;
+  history: SceneHistoryInfo;
+  undo: () => void;
+  redo: () => void;
+  goToHistoryPoint: (id: number) => void;
+  beginHistoryTransaction: (label: string) => void;
+  endHistoryTransaction: (expectedLabel?: string) => void;
   dataJson: string;
   dataError: string | null;
   saveStatus: "local" | "saving" | "saved" | "error";
@@ -122,12 +129,67 @@ const teamSoulLogoAsset: AssetLibraryItem = {
   importedAt: new Date(0).toISOString()
 };
 
-export const useEditorStore = create<EditorState>((set, get) => {
+export const useEditorStore = create<EditorState>((rawSet, get) => {
   const initialScene = createDefaultScene();
+  const history = new SceneHistory(initialScene, initialScene.objects[1]?.id ?? null);
+
+  // All scene mutations pass through this wrapper, so panel, timeline, API and
+  // canvas changes share one history recorder without modifying each command.
+  const set = (partial: Partial<EditorState> | ((state: EditorState) => Partial<EditorState>)) => {
+    const before = get();
+    rawSet(partial);
+    const after = get();
+    if (before.scene !== after.scene) {
+      history.record(before.scene, after.scene, before.selectedObjectId, after.selectedObjectId);
+      rawSet({ history: history.info() });
+    }
+  };
+
+  function restoreHistoryPoint(point: SceneHistoryPoint | null): void {
+    if (!point) return;
+    const scene = structuredClone(point.scene);
+    const selectedObjectId = scene.objects.some((object) => object.id === point.selectedObjectId)
+      ? point.selectedObjectId
+      : null;
+    // Bypass history recording: replay must not become another edit.
+    rawSet({
+      scene,
+      selectedObjectId,
+      dataJson: JSON.stringify(scene.dataContext, null, 2),
+      dataError: null,
+      history: history.info()
+    });
+  }
+
+  function finalizeGesture(): void {
+    const state = get();
+    history.end(state.scene, state.selectedObjectId);
+  }
 
   return {
     scene: initialScene,
     selectedObjectId: initialScene.objects[1]?.id ?? null,
+    history: history.info(),
+    undo: () => {
+      finalizeGesture();
+      restoreHistoryPoint(history.undo());
+    },
+    redo: () => {
+      finalizeGesture();
+      restoreHistoryPoint(history.redo());
+    },
+    goToHistoryPoint: (id) => {
+      finalizeGesture();
+      restoreHistoryPoint(history.goTo(id));
+    },
+    beginHistoryTransaction: (label) => {
+      history.begin(get().scene, get().selectedObjectId, label);
+    },
+    endHistoryTransaction: (expectedLabel) => {
+      const state = get();
+      history.end(state.scene, state.selectedObjectId, expectedLabel);
+      rawSet({ history: history.info() });
+    },
     dataJson: JSON.stringify(initialScene.dataContext, null, 2),
     dataError: null,
     saveStatus: "local",
@@ -306,20 +368,26 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     loadScene: (scene) => {
       const normalized = normalizeScene(scene);
-      set({
-        scene: touchScene(normalized),
-        selectedObjectId: normalized.objects[0]?.id ?? null,
+      const selectedObjectId = normalized.objects[0]?.id ?? null;
+      history.reset(normalized, selectedObjectId);
+      rawSet({
+        scene: normalized,
+        selectedObjectId,
         dataJson: JSON.stringify(normalized.dataContext, null, 2),
-        dataError: null
+        dataError: null,
+        history: history.info()
       });
     },
     resetScene: () => {
       const scene = createDefaultScene();
-      set({
+      const selectedObjectId = scene.objects[1]?.id ?? null;
+      history.reset(scene, selectedObjectId);
+      rawSet({
         scene,
-        selectedObjectId: scene.objects[1]?.id ?? null,
+        selectedObjectId,
         dataJson: JSON.stringify(scene.dataContext, null, 2),
-        dataError: null
+        dataError: null,
+        history: history.info()
       });
     }
   };
