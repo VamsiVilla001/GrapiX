@@ -1,3 +1,4 @@
+import { useEffect, type FocusEvent } from "react";
 import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import { CanvasStage } from "./components/CanvasStage";
 import { DockArea } from "./components/DockWorkspace";
@@ -10,12 +11,53 @@ import { TemplatesPanel } from "./components/TemplatesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
 import { useSceneAutosave } from "./hooks/useSceneAutosave";
 import type { DockPanelId } from "./store/dockStore";
+import { useEditorStore } from "./store/editorStore";
 
 export function App() {
   useSceneAutosave();
+  const beginHistoryTransaction = useEditorStore((state) => state.beginHistoryTransaction);
+  const endHistoryTransaction = useEditorStore((state) => state.endHistoryTransaction);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.altKey || !(event.ctrlKey || event.metaKey)) return;
+      const target = event.target;
+      if (target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']"))) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) useEditorStore.getState().redo();
+        else useEditorStore.getState().undo();
+      } else if (key === "y" && !event.shiftKey) {
+        event.preventDefault();
+        useEditorStore.getState().redo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  function fieldFocus(event: FocusEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement) {
+      beginHistoryTransaction("Edit Field");
+    }
+  }
+
+  function fieldBlur(event: FocusEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement) {
+      endHistoryTransaction();
+    }
+  }
 
   return (
-    <div className="app-shell reference-editor-shell">
+    <div className="app-shell reference-editor-shell" onFocusCapture={fieldFocus} onBlurCapture={fieldBlur}>
       <ReferenceTopBar />
       <Group
         className="reference-main-layout"
