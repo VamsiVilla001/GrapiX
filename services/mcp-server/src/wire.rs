@@ -10,7 +10,12 @@
 //!   client that names any other revision in `initialize`, 2026-07-28
 //!   included, is answered 2025-06-18.
 //! - **Transports.** Newline-delimited stdio, and stateless streamable HTTP
-//!   bound to 127.0.0.1 and nothing else.
+//!   bound to 127.0.0.1 and nothing else. Stdio is a process its parent started and
+//!   carries the scopes the server was built with. HTTP is a port any local process
+//!   can reach, so every request must carry a gx1 credential (`Authorization: Bearer`)
+//!   the server verifies against its secret (2.23): a request without one is refused by
+//!   name before the protocol sees it, and a call is gated by the scopes the credential
+//!   grants, not by the ones the server was built with.
 //! - **Results.** A tool's value is `structuredContent`, with one text block
 //!   holding the same JSON for clients that read only `content`. A handler
 //!   that builds its own `CallToolResult` (`render.preview`'s image block)
@@ -38,6 +43,7 @@ use std::time::Duration;
 
 use gx_contracts::mcp::{ToolEffect, TOOL_SCHEMA_VERSION};
 use gx_contracts::{Refusal, StructuredRefusal};
+use gx_credential::Token;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation,
     ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
@@ -49,7 +55,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use tokio_util::sync::CancellationToken;
 
-use crate::{ListedTool, Server, ToolOutput, REFUSED};
+use crate::{Caller, ListedTool, Server, ToolOutput, REFUSED};
 
 /// The revisions this server speaks, oldest first. Nothing between them is
 /// claimed: a 2025-11-25 client is answered 2025-06-18 at `initialize`.
@@ -81,6 +87,8 @@ enum JobKind {
     Call {
         name: String,
         args: serde_json::Value,
+        /// Who a transport that authenticates says is calling (2.23); `None` on stdio.
+        caller: Option<Caller>,
     },
 }
 
@@ -126,7 +134,9 @@ impl Server {
         for job in jobs.0 {
             let answer = match job.kind {
                 JobKind::List => self.listed_tools().map(Answer::Listed),
-                JobKind::Call { name, args } => self.call_tool(&name, args).map(Answer::Called),
+                JobKind::Call { name, args, caller } => self
+                    .call_tool_for(&name, args, caller.as_ref())
+                    .map(Answer::Called),
             };
             // A client that went away mid-call is not an error here.
             let _ = job.reply.send(answer);
@@ -192,7 +202,7 @@ impl ServerHandler for McpService {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let name = request.name.into_owned();
         // An absent `arguments` reaches the handler as null, as it always has,
@@ -201,9 +211,17 @@ impl ServerHandler for McpService {
             .arguments
             .map(serde_json::Value::Object)
             .unwrap_or(serde_json::Value::Null);
+        // The transport authenticated this request and left the caller on it (2.23). A request that
+        // reached here over HTTP without one cannot have: the transport refuses it first.
+        let caller = context
+            .extensions
+            .get::<http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<Caller>())
+            .cloned();
         let job = JobKind::Call {
             name: name.clone(),
             args,
+            caller,
         };
         let Answer::Called(output) = self.ask(job).await? else {
             unreachable!("a call job is answered with the tool's output")
@@ -251,9 +269,16 @@ impl Server {
 
     /// Serve stateless streamable HTTP on `127.0.0.1:port` until the process
     /// ends. The address is fixed: there is no way to ask this for any
-    /// interface but loopback. `on_bound` learns the bound address (port 0
-    /// picks a free one) before the first request is accepted.
-    pub fn serve_http(self, port: u16, on_bound: impl FnOnce(SocketAddr)) -> std::io::Result<()> {
+    /// interface but loopback. `auth` is the secret every request's credential is
+    /// verified against (2.23): there is no way to serve HTTP without one. `on_bound`
+    /// learns the bound address (port 0 picks a free one) before the first request
+    /// is accepted.
+    pub fn serve_http(
+        self,
+        port: u16,
+        auth: HttpAuth,
+        on_bound: impl FnOnce(SocketAddr),
+    ) -> std::io::Result<()> {
         check_http_listen(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))?;
         let runtime = runtime()?;
         let listener =
@@ -264,15 +289,18 @@ impl Server {
             service,
             listener,
             CancellationToken::new(),
+            auth,
         ));
         self.drive(jobs);
         runtime.block_on(transport).map_err(std::io::Error::other)?
     }
 }
 
-/// The MCP HTTP transport's case of the one bind policy (2.21): it verifies no
-/// credential, so it listens on loopback only and on no reserved port. A
-/// refusal is `PermissionDenied`, naming the transport and the reason.
+/// The MCP HTTP transport's case of the one bind policy (2.21): it is not given
+/// the policy's token, so it listens on loopback only and on no reserved port
+/// (since 2.23 it does verify a credential per request, which keeps a local process
+/// that is not Playout's or the Editor's out, but it still never listens off loopback).
+/// A refusal is `PermissionDenied`, naming the transport and the reason.
 fn check_http_listen(addr: SocketAddr) -> std::io::Result<()> {
     gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::McpHttp, addr, None)
 }
@@ -287,8 +315,72 @@ pub async fn serve_http_listener(
     service: McpService,
     listener: tokio::net::TcpListener,
     shutdown: CancellationToken,
+    auth: HttpAuth,
 ) -> std::io::Result<()> {
-    serve_http_listener_within(service, listener, shutdown, HttpLimits::default()).await
+    serve_http_listener_within(service, listener, shutdown, HttpLimits::default(), auth).await
+}
+
+/// What the MCP HTTP transport verifies every request against (2.23): the secret gx1 credentials
+/// are made with, the same secret the control plane is started with (`--token`). Held by the
+/// transport and never logged; a transport cannot be built without one.
+#[derive(Clone)]
+pub struct HttpAuth {
+    secret: Arc<str>,
+}
+
+impl HttpAuth {
+    /// An empty secret would verify credentials made with an empty secret, which is no check at
+    /// all, so it is refused.
+    pub fn new(secret: impl Into<String>) -> std::io::Result<Self> {
+        let secret = secret.into();
+        if secret.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the MCP HTTP transport needs a non-empty secret to verify credentials against",
+            ));
+        }
+        Ok(Self {
+            secret: Arc::from(secret),
+        })
+    }
+
+    /// Who the request's credential says is calling, or the word for why it is not accepted.
+    fn authenticate(&self, headers: &http::HeaderMap) -> Result<Caller, &'static str> {
+        let value = headers
+            .get(http::header::AUTHORIZATION)
+            .ok_or("noCredential")?
+            .to_str()
+            .map_err(|_| "unreadableCredential")?;
+        let (scheme, credential) = value.split_once(' ').ok_or("notBearer")?;
+        if !scheme.eq_ignore_ascii_case("bearer") {
+            return Err("notBearer");
+        }
+        let claims = Token::parse(credential.trim())
+            .and_then(|token| token.verify(self.secret.as_bytes()))
+            .map_err(|error| error.fault_name())?;
+        Ok(Caller {
+            subject: claims.subject,
+            scopes: claims.scopes,
+        })
+    }
+}
+
+/// The answer to a request with no acceptable credential: 401, `WWW-Authenticate: Bearer`, and the
+/// named refusal as the body (the same structured refusal an out-of-scope call gets), so a client
+/// that reads refusals reads this one. Neither the credential nor why it failed is in the body.
+fn unauthenticated(
+) -> http::Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::convert::Infallible>> {
+    use http_body_util::BodyExt as _;
+    let body = serde_json::to_vec(&serde_json::json!({
+        "error": StructuredRefusal::error(Refusal::Unauthenticated),
+    }))
+    .expect("a structured refusal is serialisable");
+    http::Response::builder()
+        .status(http::StatusCode::UNAUTHORIZED)
+        .header(http::header::WWW_AUTHENTICATE, "Bearer")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(http_body_util::Full::new(bytes::Bytes::from(body)).boxed())
+        .expect("a fixed response is well formed")
 }
 
 /// What the MCP HTTP transport holds every connection to (2.22). A connection
@@ -334,6 +426,7 @@ pub async fn serve_http_listener_within(
     listener: tokio::net::TcpListener,
     shutdown: CancellationToken,
     limits: HttpLimits,
+    auth: HttpAuth,
 ) -> std::io::Result<()> {
     let local = listener.local_addr()?;
     check_http_listen(local)?;
@@ -368,7 +461,29 @@ pub async fn serve_http_listener_within(
         for problem in configure_http_stream(&stream) {
             tracing::warn!(event = "mcp.limits_not_applied", detail = problem.as_str());
         }
-        let connection = hyper_util::service::TowerToHyperService::new(http.clone());
+        // 2.23: every request is judged before the protocol sees it. The credential is verified per
+        // request (cheap, and nothing is remembered between them); on success the caller rides the
+        // request's extensions to the tool call, which is gated by the scopes it grants.
+        let http = http.clone();
+        let auth = auth.clone();
+        let connection = hyper::service::service_fn(
+            move |mut request: hyper::Request<hyper::body::Incoming>| {
+                let http = http.clone();
+                let auth = auth.clone();
+                async move {
+                    match auth.authenticate(request.headers()) {
+                        Ok(caller) => {
+                            request.extensions_mut().insert(caller);
+                            Ok::<_, std::convert::Infallible>(http.handle(request).await)
+                        }
+                        Err(fault) => {
+                            tracing::info!(event = "mcp.unauthenticated", fault);
+                            Ok(unauthenticated())
+                        }
+                    }
+                }
+            },
+        );
         let shutdown = shutdown.clone();
         tokio::spawn(async move {
             let _place = place;
@@ -387,6 +502,9 @@ pub async fn serve_http_listener_within(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The secret the tests' credentials are made with.
+    const SECRET: &str = "mcp-http-test-secret-0123456789abcd";
     use crate::ToolHandler;
     use gx_contracts::auth::Scope;
     use std::time::Duration;
@@ -625,9 +743,9 @@ mod tests {
         }
     }
 
-    /// 2.21: the transport asks the one bind policy. It verifies no credential,
-    /// so no interface but loopback is allowed it, token or not, and the message
-    /// names the transport and the reason.
+    /// 2.21: the transport asks the one bind policy. It is a local agent endpoint, so no
+    /// interface but loopback is allowed it, token or not, and the message names the
+    /// transport and the reason.
     #[test]
     fn the_http_policy_names_the_transport_and_allows_loopback_only() {
         for ip in ["0.0.0.0", "192.168.1.50", "::"] {
@@ -636,7 +754,7 @@ mod tests {
             assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied, "{ip}");
             let said = refused.to_string();
             assert!(
-                said.contains("MCP HTTP transport") && said.contains("verifies no credential"),
+                said.contains("MCP HTTP transport") && said.contains("listens on loopback only"),
                 "{ip}: {said}"
             );
         }
@@ -652,7 +770,9 @@ mod tests {
     fn the_http_transport_refuses_a_reserved_port_before_it_binds() {
         for port in [4100, 4200, 4300] {
             let refused = Server::new(Vec::new())
-                .serve_http(port, |_| panic!("nothing listens on a reserved port"))
+                .serve_http(port, HttpAuth::new(SECRET).unwrap(), |_| {
+                    panic!("nothing listens on a reserved port")
+                })
                 .expect_err("a reserved port is refused");
             assert_eq!(
                 refused.kind(),
@@ -685,6 +805,7 @@ mod tests {
             listener,
             shutdown.clone(),
             limits,
+            HttpAuth::new(SECRET).unwrap(),
         ));
         (address, runtime, shutdown)
     }
@@ -816,7 +937,8 @@ mod tests {
                 let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
                     .await
                     .unwrap();
-                serve_http_listener(service, listener, shutdown).await
+                serve_http_listener(service, listener, shutdown, HttpAuth::new(SECRET).unwrap())
+                    .await
             })
             .expect_err(
                 "only 127.0.0.1 is served: this listener was served until it was shut down",

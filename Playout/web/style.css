@@ -164,7 +164,7 @@ code {
    the product name beside it is the interface face. */
 .bar__mark {
   font-family: var(--sk-font-display);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   letter-spacing: 0.01em;
   text-transform: none;
@@ -212,6 +212,16 @@ code {
 .field--grow {
   flex: 1 1 220px;
   max-width: 320px;
+}
+
+.field--operator {
+  flex: 0 1 190px;
+  min-width: 150px;
+}
+
+.field--operator .field__label,
+#signInButton {
+  white-space: nowrap;
 }
 
 .field--narrow {

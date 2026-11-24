@@ -10,6 +10,7 @@
 mod lyon;
 pub mod mask;
 pub mod paint;
+pub mod variable_feather;
 mod vello;
 
 use gx_contracts::color::{ColorValue, OutputTransform, WorkingColorSpace};
@@ -192,9 +193,17 @@ pub struct RasterSurface {
     width: u32,
     height: u32,
     pixels: Vec<WorkingRgba>,
+    /// The project's colour depth: each blended result is stored at it.
+    depth: gx_contracts::color::ColorDepth,
 }
 
 impl RasterSurface {
+    /// This surface stores every blended result at `depth`.
+    pub(crate) fn with_depth(mut self, depth: gx_contracts::color::ColorDepth) -> Self {
+        self.depth = depth;
+        self
+    }
+
     /// Create a transparent surface. Transparent is the same in every space.
     pub fn transparent(width: u32, height: u32) -> Self {
         Self::window(width, height, [0.0, 0.0])
@@ -208,6 +217,7 @@ impl RasterSurface {
             width,
             height,
             pixels: vec![WorkingRgba::transparent(); (width as usize) * (height as usize)],
+            depth: gx_contracts::color::ColorDepth::Bits32,
         }
     }
 
@@ -229,6 +239,7 @@ impl RasterSurface {
             width,
             height,
             pixels,
+            depth: gx_contracts::color::ColorDepth::Bits32,
         }
     }
 
@@ -307,6 +318,7 @@ impl RasterSurface {
         );
         let (lw, lh) = (layer_width as f32, layer_height as f32);
         let width = self.width as usize;
+        let depth = self.depth;
         for (index, dst) in self.pixels.iter_mut().enumerate() {
             let (x, y) = ((index % width) as f32 + 0.5, (index / width) as f32 + 0.5);
             let sx = rows[0] * x + rows[1] * y + rows[2];
@@ -328,7 +340,7 @@ impl RasterSurface {
             } else {
                 0.5
             };
-            *dst = crate::blend::blend(mode, *dst, s, noise);
+            *dst = crate::blend::store_pixel(depth, crate::blend::blend(mode, *dst, s, noise));
         }
     }
 
@@ -348,13 +360,14 @@ impl RasterSurface {
                 | gx_contracts::material::BlendMode::DancingDissolve
         );
         let width = self.width as usize;
+        let depth = self.depth;
         for (index, (dst, src)) in self.pixels.iter_mut().zip(&layer.pixels).enumerate() {
             let noise = if dissolve {
                 crate::blend::hash_noise((index % width) as u32, (index / width) as u32, seed)
             } else {
                 0.5
             };
-            *dst = crate::blend::blend(mode, *dst, *src, noise);
+            *dst = crate::blend::store_pixel(depth, crate::blend::blend(mode, *dst, *src, noise));
         }
     }
 }
@@ -436,6 +449,7 @@ mod tests {
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
             id: "rasterise-test".into(),
             name: "Rasterise test".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -453,6 +467,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects,
         }
     }

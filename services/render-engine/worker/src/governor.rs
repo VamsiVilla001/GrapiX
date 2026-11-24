@@ -325,6 +325,19 @@ pub struct NonLiveGate {
     freed: Condvar,
 }
 
+/// While Preview is decimated, one frame in this many is delivered.
+pub const PREVIEW_DECIMATION: u64 = 4;
+
+/// How long a refused request is told to wait: a release takes [`RELEASE_AFTER`] calm frames,
+/// five seconds at 50 fps.
+pub const RETRY_AFTER_MS: u32 = 5000;
+
+/// Whether Preview delivers engine frame `frame` at `level`: every frame normally, one in
+/// [`PREVIEW_DECIMATION`] once Preview is decimated. Program is never asked.
+pub fn preview_due(level: Level, frame: u64) -> bool {
+    level < Level::PreviewDecimated || frame % PREVIEW_DECIMATION == 0
+}
+
 /// A slot held while a detached render runs.
 pub struct Slot<'a>(&'a NonLiveGate);
 
@@ -337,6 +350,27 @@ impl NonLiveGate {
 
     pub fn level(&self) -> Level {
         Level::ALL[usize::from(self.level.load(Ordering::SeqCst)).min(Level::ALL.len() - 1)]
+    }
+
+    /// Wait until the level is below `level`, at most `most`; true if it is.
+    pub fn wait_below(&self, level: Level, most: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + most;
+        let mut running = self
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while self.level() >= level {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            running = self
+                .freed
+                .wait_timeout(running, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        true
     }
 
     /// How many may run at the current level.
@@ -371,6 +405,12 @@ impl NonLiveGate {
             .running
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl gx_asset_plane::CalmGate for NonLiveGate {
+    fn wait_until_calm(&self, most: std::time::Duration) -> bool {
+        self.wait_below(Level::PrepareDeferred, most)
     }
 }
 
@@ -680,5 +720,46 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         gate.set_level(Level::Normal);
         waiter.join().unwrap();
+    }
+
+    // --- 3.24 levels 2 to 4 ---
+
+    #[test]
+    fn preview_is_delivered_every_frame_until_it_is_decimated_and_then_one_in_four() {
+        for level in [Level::Normal, Level::DetachedThrottled] {
+            assert!((0..8).all(|frame| preview_due(level, frame)), "{level}");
+        }
+        for level in [
+            Level::PreviewDecimated,
+            Level::PrepareDeferred,
+            Level::NonLiveRefused,
+        ] {
+            let due: Vec<u64> = (0..9).filter(|f| preview_due(level, *f)).collect();
+            assert_eq!(due, [0, 4, 8], "{level}");
+        }
+        assert_eq!(PREVIEW_DECIMATION, 4);
+    }
+
+    #[test]
+    fn a_wait_for_calm_ends_when_the_level_falls_and_gives_up_when_it_does_not() {
+        let gate = std::sync::Arc::new(NonLiveGate::default());
+        // Already calm below the level: no wait.
+        assert!(gate.wait_below(Level::PrepareDeferred, std::time::Duration::ZERO));
+        gate.set_level(Level::PrepareDeferred);
+        let started = std::time::Instant::now();
+        assert!(!gate.wait_below(Level::PrepareDeferred, std::time::Duration::from_millis(60)));
+        assert!(started.elapsed() >= std::time::Duration::from_millis(50));
+        // A release from another thread lets the waiter through, well before its deadline.
+        let releaser = {
+            let gate = std::sync::Arc::clone(&gate);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(40));
+                gate.set_level(Level::PreviewDecimated);
+            })
+        };
+        let started = std::time::Instant::now();
+        assert!(gate.wait_below(Level::PrepareDeferred, std::time::Duration::from_secs(10)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        releaser.join().unwrap();
     }
 }

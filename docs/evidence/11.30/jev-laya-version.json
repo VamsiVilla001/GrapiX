@@ -1,0 +1,205 @@
+{
+ "input": {
+  "state": {
+   "decision": "What Ctrl+Shift+S, 'Save as next version', does for a scene in GrapiX's Editor (row 11.30), and what happens to the scene's undo history.",
+   "what_exists_today": "A scene open in the Editor is a session: the document as opened plus a log of edit steps (the undo history). A scene is either stored in a project (it has a project and a scene id, and is saved in place to that stored copy), or was saved to a file, or is unsaved. Saving in place already works for each. The row says: Ctrl+S saves in place and never makes a version. Ctrl+Shift+S is the only way to make a new version: the next free numbered copy (for example strap_v002, strap_v003) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason. A project scene has an id, which is also its file name in the project, and a display name. The session's history replays its steps over the document as opened, so changing the scene's id or name while keeping the history needs extra rules: an earlier step that renamed the scene would replay over a new name.",
+   "who_uses_it": "Broadcast graphics designers. Ross XPression's Increment and Save writes the project to a new numbered file and leaves the old file as it was last saved. Photoshop's Save As keeps the undo history.",
+   "option_meaning_A": "Write the session's current document, including its unsaved edits, as a new stored scene under the next free id, and leave the old stored scene exactly as it was last saved. The session then belongs to the new scene.",
+   "option_meaning_B": "First save the current scene in place (so the old version also gets the unsaved edits), then copy the stored scene to the next id and open the copy.",
+   "option_meaning_C": "Copy only what is already stored; unsaved edits stay in the session, still unsaved, attached to the old version.",
+   "option_history_fresh": "After a next version the new scene starts with a fresh undo history: the document is the new base and earlier steps are not kept. Simple and always correct.",
+   "option_history_keep": "Keep the undo history across the version save. This needs extra rules so that replaying old steps never brings back the old id or name; more code and more room for a wrong replay.",
+   "option_unsaved_refuse": "A scene that has never been saved (no project scene, no file) refuses Ctrl+Shift+S by name and says to save it first; there is no current version to number from.",
+   "option_unsaved_firstsave": "A scene that has never been saved treats Ctrl+Shift+S as an ordinary first save.",
+   "option_number_next_after_current": "The new number is the one after the current version's number (strap_v003 gives strap_v004), moving on to the next free one if taken; a scene with no number starts at _v002.",
+   "option_number_lowest_free": "The new number is the lowest free one from _v002, filling gaps.",
+   "constraints": "Rust owns the document and the store. A write into a project is checked against the project's colour settings. A failed save must leave the session, its history and the unsaved mark exactly as they were. The previous version must stay byte-identical."
+  },
+  "questions": {
+   "best_meaning": {
+    "type": "choice",
+    "instructions": "What should 'Save as next version' do?",
+    "criteria": {
+     "A": "Option A: write the current document with its unsaved edits as the new version; the old version stays as last saved.",
+     "B": "Option B: save in place first, then copy to the next version.",
+     "C": "Option C: copy only what is stored; unsaved edits stay with the old version."
+    }
+   },
+   "best_history": {
+    "type": "choice",
+    "instructions": "What should happen to the undo history after a next-version save, given the implementation trade-off described?",
+    "criteria": {
+     "fresh": "A fresh history in the new scene.",
+     "keep": "Keep the history across the version save."
+    }
+   },
+   "best_unsaved": {
+    "type": "choice",
+    "instructions": "What should Ctrl+Shift+S do for a scene that has never been saved?",
+    "criteria": {
+     "refuse": "Refuse by name and say to save it first.",
+     "firstsave": "Treat it as an ordinary first save."
+    }
+   },
+   "best_number": {
+    "type": "choice",
+    "instructions": "How should the next version number be chosen?",
+    "criteria": {
+     "after": "The number after the current one, then the next free.",
+     "lowest": "The lowest free number from 2."
+    }
+   },
+   "fresh_history_acceptable": {
+    "type": "noul",
+    "instructions": "Is it acceptable for a broadcast designer that Save as next version starts a fresh undo history, if the screen says so?",
+    "criteria": {
+     "true": "Yes, a version is a milestone and a fresh history is acceptable.",
+     "false": "No, losing undo across a version save would upset designers."
+    }
+   },
+   "old_version_untouched_matters": {
+    "type": "noul",
+    "instructions": "Does it matter that the old version stays exactly as it was last saved, even when the unsaved edits were made to it?",
+    "criteria": {
+     "true": "Yes, the old version is the record of the last saved state and must stay as it was.",
+     "false": "No, the old version should also receive the edits."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "best_meaning": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.98,
+    "probabilities": {
+     "A": 0.99,
+     "B": 0,
+     "C": 0.01
+    }
+   },
+   "best_history": {
+    "type": "choice",
+    "choice": "fresh",
+    "confidence": 0.88,
+    "probabilities": {
+     "fresh": 0.94,
+     "keep": 0.06
+    }
+   },
+   "best_unsaved": {
+    "type": "choice",
+    "choice": "firstsave",
+    "confidence": 0.3,
+    "probabilities": {
+     "refuse": 0.35,
+     "firstsave": 0.65
+    }
+   },
+   "best_number": {
+    "type": "choice",
+    "choice": "after",
+    "confidence": 0.42,
+    "probabilities": {
+     "after": 0.71,
+     "lowest": 0.29
+    }
+   },
+   "fresh_history_acceptable": {
+    "type": "noul",
+    "noul": 0.6
+   },
+   "old_version_untouched_matters": {
+    "type": "noul",
+    "noul": 0.95
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 5083,
+   "output_tokens": 0,
+   "state_tokens": 787,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "best_meaning": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4527,
+     "B": 0.3096,
+     "C": 0.2377
+    },
+    "confidence": 0.0322,
+    "answer_confidence": 0.4527,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "best_history": {
+    "type": "choice",
+    "choice": "keep",
+    "probabilities": {
+     "fresh": 0.0187,
+     "keep": 0.9813
+    },
+    "confidence": 0.8657,
+    "answer_confidence": 0.9813,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "best_unsaved": {
+    "type": "choice",
+    "choice": "firstsave",
+    "probabilities": {
+     "refuse": 0.3573,
+     "firstsave": 0.6427
+    },
+    "confidence": 0.0596,
+    "answer_confidence": 0.6427,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "best_number": {
+    "type": "choice",
+    "choice": "after",
+    "probabilities": {
+     "after": 0.8959,
+     "lowest": 0.1041
+    },
+    "confidence": 0.5182,
+    "answer_confidence": 0.8959,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "fresh_history_acceptable": {
+    "type": "noul",
+    "noul": 0.9794,
+    "confidence": 0.9794,
+    "answer_confidence": 0.9794,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "old_version_untouched_matters": {
+    "type": "noul",
+    "noul": 0.988,
+    "confidence": 0.988,
+    "answer_confidence": 0.988,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

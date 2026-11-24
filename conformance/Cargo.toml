@@ -24,6 +24,10 @@ serde_json = { workspace = true }
 gx-control-transport = { workspace = true }
 gx-playout = { path = "../services/playout" }
 gx-editor = { path = "../services/editor" }
+# 2.28: the refusal audit drives `settingInvalid` against the real settings store.
+gx-settings = { path = "../Shared/settings" }
+# 2.29: the refusal audit drives `workspaceInvalid` and `workspaceNewer` against the real store.
+gx-workspace-store = { path = "../Shared/workspace-store" }
 gx-editor-mcp = { path = "../services/editor-mcp" }
 gx-playout-mcp = { path = "../services/playout-mcp" }
 gx-mcp-server = { path = "../services/mcp-server" }

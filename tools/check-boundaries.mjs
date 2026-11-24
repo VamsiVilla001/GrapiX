@@ -36,7 +36,15 @@
 //        and each of them asks the one bind policy
 //        (`gx_contracts::endpoints::check_listen`) before it binds
 //     R11 the engine's own host:port (4400, 4401) is written once, in
-//        `Shared/contracts/src/endpoints.rs`
+//        `Shared/contracts/src/endpoints.rs`; the rule reads TypeScript, JavaScript
+//        and module scripts under Editor, Playout and tools
+//   build-plan 2.26: Playout is held to what the Editor is held to.
+//     R1 and R4 also apply to Playout: its shell's commands are the named
+//        `PLAYOUT_SHELL_SURFACE`, none takes an authoring document, and the page
+//        (`Playout/web`, plain JavaScript) invokes only those, by literal name
+//     R9 also reads JavaScript, and R10 also refuses a listener opened another way
+//        (`TcpSocket`, a socket crate, a Unix or named-pipe listener) outside the
+//        listed bind sites
 //
 // `check(files)` is pure over an explicit file set so the rules can be tested
 // with synthetic files; walking the repository happens only from the CLI.
@@ -53,7 +61,7 @@ const SKIPPED_DIRECTORIES = ["node_modules", "target", "dist", ".git", ".claude"
  *  one `OpenScene` through the executor; it carries no document. */
 const SHELL_MUTATE = ["cmd_execute", "cmd_import_file"];
 const SHELL_READ = [
-  "cmd_session_view", "cmd_publish", "cmd_engine_preview", "cmd_take_page_preview",
+  "cmd_session_view", "cmd_session_history", "cmd_publish", "cmd_engine_preview", "cmd_take_page_preview",
   "cmd_object_kinds", "cmd_animation_surface", "cmd_effect_surface", "cmd_control_properties",
   "cmd_starter_presets", "cmd_motion_presets", "cmd_default_endpoint", "cmd_project_list",
   "cmd_scene_list", "cmd_scene_read", "cmd_take_page_list", "cmd_take_page_read",
@@ -69,13 +77,35 @@ const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link", "cmd_a
  *  page's Help ▸ Export diagnostic bundle (2.14; the Editor has no native menu).
  *  Neither takes a document, and both are held to the read rule. */
 const SHELL_LOG = ["cmd_log", "cmd_export_diagnostics"];
-const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG]);
-const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG]);
+/** Starting work (11.43): create a project at a chosen path, open one from its `.gpx`, close it, and the
+ *  recent list. They change which project the shell has open, never a scene, and take a path and a name
+ *  only: no authoring document. Held to the read rule. */
+const SHELL_PROJECT = [
+  "cmd_new_project", "cmd_open_project", "cmd_open_project_folder", "cmd_save_project_as", "cmd_exit", "cmd_close_project", "cmd_settings_get", "cmd_settings_set", "cmd_settings_reset",
+  "cmd_workspace_get", "cmd_workspace_put", "cmd_workspace_delete", "cmd_workspace_list", "cmd_workspace_active", "cmd_workspace_set_active", "cmd_workspace_order", "cmd_workspace_set_order",
+  "cmd_current_project", "cmd_recent_projects", "cmd_forget_recent_project", "cmd_default_location_projects",
+];
+const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG, ...SHELL_PROJECT]);
+/** Playout's shell (2.26): the operator's reads and Program commands, the operator's sign-in (2.15), the
+ *  endpoint default and the front end's own log. There is no command that authors, edits or publishes, and
+ *  none takes an authoring document or a time (ADR-002: the engine chooses the frame). */
+const PLAYOUT_SHELL_SURFACE = new Set([
+  "cmd_log", "cmd_connect", "cmd_status", "cmd_performance", "cmd_cue", "cmd_take", "cmd_clear", "cmd_phase",
+  "cmd_configure_output", "cmd_sign_in", "cmd_sign_out", "cmd_operator", "cmd_default_endpoint",
+]);
+const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG, ...SHELL_PROJECT]);
 /** The one TypeScript file that calls the shell with a command name it was
  *  handed rather than a literal: the bridge that gives every call a correlation
  *  id and reports its end (2.13). Every call site elsewhere still names its
  *  command literally (R4). */
-const INVOKE_CHOKEPOINTS = new Set(["Editor/src/shell-bridge.ts"]);
+const INVOKE_CHOKEPOINTS = new Set(["Editor/src/shell-bridge.ts", "Playout/web/shell-bridge.js"]);
+/** Playout's page (2.26) wraps the bridge in one `function invoke(command, args)` and calls that with literal
+ *  names. The wrapper's own body passes the name it was handed on; every call outside it is still held to R4. */
+const INVOKE_WRAPPERS = new Set(["Playout/web/main.js"]);
+
+/** What a product's shell may expose (R1): the allowed names, and which of them are held to the read rule. */
+const EDITOR_SHELL = { label: "SHELL_SURFACE", surface: SHELL_SURFACE, readOnly: (name) => READ_SURFACE.has(name) };
+const PLAYOUT_SHELL = { label: "PLAYOUT_SHELL_SURFACE", surface: PLAYOUT_SHELL_SURFACE, readOnly: () => true };
 
 const DOCUMENT_TYPES = /\b(?:SceneDocument|TakePage|TextStyle|ControlField|SceneKeyframe|TimelinePhase|DataContext|EditorCommand|SceneEdit)\b/;
 const STORE_WRITES = /\.(?:write_scene|delete_scene|create_project|write_take_page|confirm)\s*\(|\breplace_asset_bytes\s*\(|\bgx_fs::write_atomic\s*\(|\bfs::write\s*\(/;
@@ -83,7 +113,9 @@ const CONTRACT_MUTATORS = /\b(?:create_object|delete_object|duplicate_object|ren
 const CONTROL_PLANE_CLIENTS = /\bgx-(?:control-plane|control-transport|playout)\b/;
 const EDITOR_CRATES = /^(?:Editor\/shell|services\/editor|services\/editor-mcp|mocks\/mock-editor)\//;
 const STORE_WRITE_ALLOWED = new Set([
-  "services/editor/src/project.rs", "services/editor/src/design_system.rs",
+  "services/editor/src/project.rs", "services/editor/src/project/assets.rs",
+  "services/editor/src/recent.rs",
+  "services/editor/src/design_system.rs",
   "services/editor/src/fidelity.rs", "services/editor/src/command.rs",
 ]);
 const CFG_TEST = /#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/;
@@ -269,7 +301,7 @@ const BIND_SITES = new Set([
   "Shared/asset-plane/src/preflight.rs",
   "services/mcp-server/src/wire.rs",
 ]);
-const SOCKET_BIND = /\b(?:TcpListener|UdpSocket)::bind\b/;
+const SOCKET_BIND = /\b(?:TcpListener|UdpSocket)::bind\b|\b(?:TcpSocket|UnixListener|UnixDatagram|NamedPipeServer|ServerOptions|CreateNamedPipe\w*)\b|\bsocket2\s*::|\buse\s+socket2\b/;
 const ASKS_THE_POLICY = /\bcheck_(?:\w+_)?listen\s*\(/;
 
 /** The engine's own host:port, written out (R11, 2.21): it is named once, in `endpoints.rs`. */
@@ -301,7 +333,7 @@ function checkProductBoundaries(path, text, add) {
   }
 }
 
-function checkTauriSurface(path, { code }, add, shell) {
+function checkTauriSurface(path, { code }, add, shell, product = EDITOR_SHELL) {
   const attributes = [...code.matchAll(TAURI_ATTRIBUTE)].length;
   const functions = [...code.matchAll(TAURI_FUNCTION)];
   if (functions.length !== attributes) {
@@ -313,8 +345,8 @@ function checkTauriSurface(path, { code }, add, shell) {
     const open = match.index + match[0].length - 1;
     const close = closing(code, open);
     const params = close < 0 ? code.slice(open + 1) : code.slice(open + 1, close);
-    if (!SHELL_SURFACE.has(name)) add(at(path, code, match.index), `Tauri command ${name} is not in SHELL_SURFACE (R1)`);
-    if (READ_SURFACE.has(name) && DOCUMENT_TYPES.test(params)) {
+    if (!product.surface.has(name)) add(at(path, code, match.index), `Tauri command ${name} is not in ${product.label} (R1)`);
+    if (product.readOnly(name) && DOCUMENT_TYPES.test(params)) {
       add(at(path, code, match.index), `read command ${name} accepts an authoring document/command parameter (R1)`);
     }
     if (name === "cmd_execute") {
@@ -336,12 +368,25 @@ function checkTauriSurface(path, { code }, add, shell) {
   }
 }
 
-function checkInvokes(path, raw, add) {
+function checkInvokes(path, raw, add, surface = SHELL_SURFACE, surfaceName = "SHELL_SURFACE") {
   if (INVOKE_CHOKEPOINTS.has(path)) return;
   const text = scrub(raw, "ts");
   const code = scrub(raw, "ts", { blankStrings: true });
+  // The body of a declared wrapper, in a file that is allowed one: it passes its parameter on.
+  const wrapperBodies = [];
+  if (INVOKE_WRAPPERS.has(path)) {
+    for (const declaration of code.matchAll(INVOKE)) {
+      if (!declaration[1]) continue;
+      const parameters = declaration.index + declaration[0].length - 1;
+      const parametersEnd = closing(code, parameters);
+      const bodyOpen = parametersEnd < 0 ? -1 : code.indexOf("{", parametersEnd);
+      const bodyClose = bodyOpen < 0 ? -1 : closing(code, bodyOpen);
+      if (bodyClose > 0) wrapperBodies.push([bodyOpen, bodyClose]);
+    }
+  }
   for (const match of code.matchAll(INVOKE)) {
     if (match[1]) continue; // `function invoke(...)`: a declaration, not a call.
+    if (wrapperBodies.some(([from, to]) => match.index > from && match.index < to)) continue;
     const open = match.index + match[0].length - 1;
     const close = closing(code, open);
     const args = topLevelSpans(code, open + 1, close < 0 ? code.length : close);
@@ -354,7 +399,7 @@ function checkInvokes(path, raw, add) {
     if (/^[A-Za-z_$][\w$]*\??\s*:/.test(first)) continue;
     const name = first.match(/^(["'`])([^"'`\\$]*)\1$/);
     if (!name) add(at(path, code, match.index), `invoke first argument must be a literal command name, got \`${first.replace(/\s+/g, " ")}\` (R4)`);
-    else if (!SHELL_SURFACE.has(name[2])) add(at(path, code, match.index), `invoke command ${name[2]} is not in SHELL_SURFACE (R4)`);
+    else if (!surface.has(name[2])) add(at(path, code, match.index), `invoke command ${name[2]} is not in ${surfaceName} (R4)`);
     if (second?.startsWith("{") && DOCUMENT_KEY.test(second)) {
       add(at(path, code, match.index), "invoke arguments may not carry scene/document data (R4)");
     }
@@ -366,6 +411,7 @@ export function check(files) {
   const violations = [];
   const add = (path, message) => violations.push(`${path}: ${message}`);
   const shell = { functions: new Set(), handlers: new Set(), handlerSeen: false };
+  const playoutShell = { functions: new Set(), handlers: new Set(), handlerSeen: false };
 
   for (const file of files) {
     const path = normalize(file.path);
@@ -384,6 +430,7 @@ export function check(files) {
         }
       }
       if (path.startsWith("Editor/shell/src/")) checkTauriSurface(path, source, add, shell);
+      if (path.startsWith("Playout/shell/src/")) checkTauriSurface(path, source, add, playoutShell, PLAYOUT_SHELL);
       if (path.startsWith("services/editor-mcp/src/")) {
         for (const match of source.code.matchAll(/\bstruct\s+(\w+)[^{;(]*([{(])/g)) {
           const open = match.index + match[0].length - 1;
@@ -418,13 +465,14 @@ export function check(files) {
     if (manifest) {
       add(at(path, raw, manifest.index), `Editor-side crate depends on control-plane client ${manifest[0]} (R6, invariant 4)`);
     }
-    if (/^(?:Editor|Playout)\/.*\.tsx?$/.test(path) && !path.startsWith("Shared/generated-ts/")) {
+    if (/^(?:(?:Editor|Playout)\/.*|tools\/[^/]*)\.(?:tsx?|m?js)$/.test(path) && !path.startsWith("Shared/generated-ts/")) {
       const text = scrub(raw, "ts");
       const written = ENGINE_ENDPOINT.exec(text);
       if (written) add(at(path, text, written.index), `the engine's host:port ${written[0]} is written out: ask the shell for the default endpoint (R11, 2.21)`);
     }
     if (/^Editor\/(?:web|src)\/.*\.tsx?$/.test(path)) checkInvokes(path, raw, add);
-    if (/^(?:Editor|Playout)\/.*\.tsx?$/.test(path) && !path.startsWith("Shared/generated-ts/")) {
+    if (/^Playout\/(?:web|src)\/.*\.(?:tsx?|m?js)$/.test(path)) checkInvokes(path, raw, add, PLAYOUT_SHELL_SURFACE, "PLAYOUT_SHELL_SURFACE");
+    if (/^(?:Editor|Playout)\/.*\.(?:tsx?|m?js)$/.test(path) && !path.startsWith("Shared/generated-ts/")) {
       const branch = /(?:===|!==|==|!=)\s*["'](?:CoLocated|Lan)["']|["'](?:CoLocated|Lan)["']\s*(?:===|!==|==|!=)|case\s+["'](?:CoLocated|Lan)["']/.exec(raw);
       if (branch) add(at(path, raw, branch.index), "a consumer branches on the engine's locality (R9, 5.5)");
     }
@@ -436,13 +484,14 @@ export function check(files) {
     }
   }
 
-  if (shell.functions.size > 0 && !shell.handlerSeen) add("Editor/shell/src", "missing generate_handler! command set (R1)");
-  if (shell.handlerSeen) {
-    for (const name of shell.handlers) {
-      if (!shell.functions.has(name)) add("Editor/shell/src", `generate_handler! lists ${name}, which is not a parsed #[tauri::command] fn (R1)`);
+  for (const [where, state] of [["Editor/shell/src", shell], ["Playout/shell/src", playoutShell]]) {
+    if (state.functions.size > 0 && !state.handlerSeen) add(where, "missing generate_handler! command set (R1)");
+    if (!state.handlerSeen) continue;
+    for (const name of state.handlers) {
+      if (!state.functions.has(name)) add(where, `generate_handler! lists ${name}, which is not a parsed #[tauri::command] fn (R1)`);
     }
-    for (const name of shell.functions) {
-      if (!shell.handlers.has(name)) add("Editor/shell/src", `#[tauri::command] fn ${name} is missing from generate_handler! (R1)`);
+    for (const name of state.functions) {
+      if (!state.handlers.has(name)) add(where, `#[tauri::command] fn ${name} is missing from generate_handler! (R1)`);
     }
   }
   return violations;
@@ -460,7 +509,8 @@ export function repositoryFiles(root = ROOT) {
         continue;
       }
       const path = relative(root, full).split(sep).join("/");
-      if (/\.(?:rs|ts|tsx)$/.test(entry) || entry === "Cargo.toml" || path.startsWith("Shared/generated-ts/schemas/")) {
+      if (/\.(?:rs|ts|tsx)$/.test(entry) || entry === "Cargo.toml" || path.startsWith("Shared/generated-ts/schemas/")
+        || (/\.m?js$/.test(entry) && /^(?:Editor|Playout|tools)\//.test(path))) {
         out.push({ path, text: readFileSync(full, "utf8") });
       }
     }

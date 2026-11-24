@@ -60,6 +60,10 @@ fn the_engine_writes_a_requests_correlation_id_on_every_record_the_request_cause
     };
     {
         let mut client = Client::connect(address).expect("connect");
+        // As the Playout shell does: a Program command is sent for a signed-in operator (2.15).
+        client.set_operator(Some(
+            &gx_contracts::auth::OperatorName::parse("Test Operator").unwrap(),
+        ));
         // As the Playout shell does for one operator command.
         {
             let _scope = gx_telemetry::corr::enter("po-take-9");

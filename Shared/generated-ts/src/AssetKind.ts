@@ -4,4 +4,4 @@
  * The kind of thing an asset is. `Font` is here so the asset store and the
  * font subsystem agree on what a font asset is.
  */
-export type AssetKind = "image" | "video" | "svg" | "font" | "model" | "imageSequence" | "wgsl" | "script" | "live" | "renderTexture" | "json" | "lut" | "unknown";
+export type AssetKind = "image" | "video" | "audio" | "svg" | "font" | "model" | "imageSequence" | "wgsl" | "script" | "live" | "renderTexture" | "json" | "lut" | "unknown";

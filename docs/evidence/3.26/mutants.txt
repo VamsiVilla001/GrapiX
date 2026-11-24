@@ -1,0 +1,14 @@
+lighten-is-min               killed by
+darken-is-max                killed by
+difference-is-xor            killed by
+add-is-sum                   killed by
+subtract-is-difference       killed by
+initial-from-whole           killed by
+initial-none-is-empty        killed by
+first-darken-hides           killed by
+first-intersect-hides        killed by
+linear-radius-floor          killed by
+axis-identity-lost           killed by
+y-uses-x                     killed by
+smooth-falloff-is-box        killed by
+killed 13 of 13; survivors:

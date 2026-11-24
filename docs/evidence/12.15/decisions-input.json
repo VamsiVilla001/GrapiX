@@ -1,0 +1,28 @@
+{
+ "state": {
+  "decision": "Two design choices in bulk Cue ID suggestion (build plan row 12.15), made while coding on 24 Nov 2026 and put to Jev and Laya afterwards.",
+  "row_text": "Suggesting Cue IDs for many entries shows a diff that the operator confirms. Nothing is renamed before confirmation and a duplicate is refused by name.",
+  "context": "A Playout show holds Cue IDs, unique within the show without regard to case, locked while their cue is on air. An operator selects many rundown entries and asks for Cue IDs by a prefix and a number (L3-01, L3-02...) or from each entry's name. The preview is a list of lines (add, rename, unchanged, refused with a named reason). Between the preview and the confirmation another operator may type a Cue ID or a cue may go on air.",
+  "what_was_built": "Confirming works the plan out again against the show as it is now and applies it only if it equals the plan shown and no line is refused, all or nothing; otherwise it is refused by name (a stale plan, or the first refused line). A suggestion that collides with an existing Cue ID is shown as a refused line naming the scene that holds it; the suggestion does not skip to the next free number."
+ },
+ "questions": {
+  "confirm": {
+   "type": "choice",
+   "instructions": "What should confirming a bulk Cue ID plan do?",
+   "criteria": {
+    "A": "Recompute against the show now; apply only an identical plan with no refused line, all or nothing; otherwise refuse by name (what was built).",
+    "B": "Apply the lines that are clean and leave the refused ones, telling the operator which were skipped.",
+    "C": "Apply the plan as it was shown, without recomputing, trusting the preview."
+   }
+  },
+  "collision": {
+   "type": "choice",
+   "instructions": "When a numbered suggestion (L3-02) is already used in the show, what should the preview do?",
+   "criteria": {
+    "A": "Show the line as refused, naming the scene that holds the Cue ID, and let the operator change the prefix or start (what was built).",
+    "B": "Skip to the next free number for that line (L3-03), so the plan is clean.",
+    "C": "Offer both: refuse by default, with a switch to skip taken numbers."
+   }
+  }
+ }
+}

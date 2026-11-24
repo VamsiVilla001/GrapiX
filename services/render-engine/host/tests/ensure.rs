@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use gx_control_plane::bind::check_bind;
-use gx_engine_host::{ensure, Provenance};
+use gx_engine_host::{ensure_with_journal, Provenance};
 use parking_lot::Mutex;
 
 // These tests spawn real worker processes that bind OS ports. Run them one at
@@ -59,8 +59,13 @@ fn kill_worker_on(port: u16) {
     // leaks a fixture process, it does not fail the test.
     if let Ok(out) = Command::new("netstat").args(["-ano"]).output() {
         let text = String::from_utf8_lossy(&out.stdout);
+        // The local address column must end with exactly this port: a bare `contains` would
+        // also match port 5439 inside `:54395` and end a process that is not this fixture.
+        let suffix = format!(":{port}");
         for line in text.lines() {
-            if line.contains(&format!(":{port}")) && line.contains("LISTENING") {
+            let mut columns = line.split_whitespace();
+            let local = columns.nth(1).unwrap_or("");
+            if local.ends_with(&suffix) && line.contains("LISTENING") {
                 if let Some(pid) = line.split_whitespace().last() {
                     let _ = Command::new("taskkill")
                         .args(["/F", "/PID", pid])
@@ -77,6 +82,47 @@ fn kill_worker_on(port: u16) {
 #[cfg(not(windows))]
 fn kill_worker_on(_port: u16) {}
 
+/// End the worker listening on `port` (test teardown only) by asking it to stop over the
+/// control plane (2.19), and wait until its port is closed.
+///
+/// `taskkill` alone is not enough: on the machine these tests are run on it hangs for a minute
+/// and ends nothing (23 Nov 2026), so every run left a worker holding `gx-render-worker.exe`
+/// open and the next build failed with "access is denied". The engine's own `stop` needs no
+/// operating-system tool. `kill_worker_on` stays as the fallback for a worker that does not
+/// answer.
+fn stop_worker_on(port: u16) {
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let Ok(mut client) = gx_control_transport::Client::connect(addr) else {
+        // Nothing is listening: there is no worker to end.
+        return;
+    };
+    let reply = client.request(gx_control_plane::message::ClientRequest::Stop);
+    drop(client);
+    if matches!(reply, Ok(gx_control_plane::message::EngineReply::Stopping)) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    eprintln!("the worker on {addr} did not stop when asked ({reply:?}); ending it by process id");
+    kill_worker_on(port);
+}
+
+/// Reaps the worker a test made `ensure` spawn on `port`, when the test ends for any reason.
+/// A teardown call at the end of the test body is skipped by a failed assertion, and the worker
+/// it leaves holds `gx-render-worker.exe` open, so the next build fails with "access is denied"
+/// (it did, on 23 Nov 2026, twice). This is the test ending its own fixture, never the host
+/// stopping an engine.
+struct ReapOnDrop(u16);
+impl Drop for ReapOnDrop {
+    fn drop(&mut self) {
+        stop_worker_on(self.0);
+    }
+}
+
 /// Start a worker on a port, waiting for it to answer.
 ///
 /// The child is owned by `KillOnDrop` from the moment it exists, before the
@@ -91,6 +137,10 @@ fn start_worker(binary: &PathBuf, port: u16) -> KillOnDrop {
             // 2.12: a test process logs to a scratch folder, not the operator's log root.
             .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
             .args(["--port", &port.to_string()])
+            // A test never reads or writes the operator's own recovery journal: an old journal
+            // that no longer restores would fail a test that is about adopting an engine.
+            .args(["--recovery-journal"])
+            .arg(scratch_journal(port))
             // Detach stdio so the long-lived worker does not hold the test
             // harness's output pipe open after the test process wants to exit.
             .stdin(Stdio::null())
@@ -123,7 +173,7 @@ fn the_host_adopts_an_engine_it_did_not_start() {
 
     let mut supervised = {
         quiet_logs();
-        ensure(binary.to_str().unwrap(), port, &[])
+        ensure_with_journal(binary.to_str().unwrap(), port, &[], &scratch_journal(port))
     }
     .expect("ensure adopts the running engine");
 
@@ -147,9 +197,11 @@ fn the_host_spawns_when_nothing_is_listening() {
     };
     let _guard = PORT_LOCK.lock();
     let port = free_port();
+    // Declared before anything can spawn, so a failed assertion below still reaps the worker.
+    let _reap = ReapOnDrop(port);
     let mut supervised = {
         quiet_logs();
-        ensure(binary.to_str().unwrap(), port, &[])
+        ensure_with_journal(binary.to_str().unwrap(), port, &[], &scratch_journal(port))
     }
     .expect("ensure spawns an engine when none is running");
 
@@ -164,7 +216,7 @@ fn the_host_spawns_when_nothing_is_listening() {
     // have had to spawn a replacement.
     let mut again = {
         quiet_logs();
-        ensure(binary.to_str().unwrap(), port, &[])
+        ensure_with_journal(binary.to_str().unwrap(), port, &[], &scratch_journal(port))
     }
     .expect("the engine must still be there after the supervisor dropped");
     assert_eq!(
@@ -176,10 +228,17 @@ fn the_host_spawns_when_nothing_is_listening() {
     assert!(again.status().is_some());
     drop(again);
 
-    // Teardown: reap the fixture worker by port so the test does not leak a
-    // process that locks the binary for the next build. This is the *test*
-    // ending its own fixture, never the host stopping an engine.
-    kill_worker_on(port);
+    // Teardown: the fixture worker is asked to stop, and it must be gone, or the next build
+    // cannot replace its binary. `_reap` does the same when an assertion above fails.
+    stop_worker_on(port);
+    assert!(
+        gx_control_transport::Client::connect(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port
+        ))
+        .is_err(),
+        "the fixture worker on port {port} is still answering after the test ended it"
+    );
 }
 
 #[test]
@@ -192,6 +251,13 @@ fn ensure_refuses_a_reserved_port() {
 
 /// 2.12: a worker that `ensure` spawns inherits this test's environment, so it
 /// logs to a scratch folder rather than the operator's log root.
+/// A recovery journal in a scratch folder, one per port, so no test touches the operator's own.
+fn scratch_journal(port: u16) -> PathBuf {
+    let dir = std::env::temp_dir().join("gx-test-journals");
+    std::fs::create_dir_all(&dir).expect("scratch folder for journals");
+    dir.join(format!("recovery-{port}-{}.json", std::process::id()))
+}
+
 fn quiet_logs() {
     std::env::set_var("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"));
 }

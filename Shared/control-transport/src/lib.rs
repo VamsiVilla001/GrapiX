@@ -11,13 +11,17 @@
 
 #![forbid(unsafe_code)]
 
-pub mod auth;
+pub mod as_run;
 pub mod client;
 pub mod server;
 
-pub use auth::{Claims, ClaimsError, Token, TokenError};
+// The gx1 credential moved to `gx-credential` (2.23) so the MCP HTTP server can verify one without
+// linking this crate's client; the names stay where callers have always found them.
+pub use as_run::{verify as verify_as_run, AsRunEntry, AsRunLog, ChainBreak};
 pub use client::{Client, Reconciliation, REQUEST_TIMEOUT};
 pub use gx_control_plane::bind::Endpoint;
+pub use gx_credential as auth;
+pub use gx_credential::{Claims, ClaimsError, Token, TokenError};
 pub use server::{ServeError, Server, ServerLimits};
 
 #[cfg(test)]
@@ -57,7 +61,15 @@ mod tests {
         let server = Server::bind(loopback(), None, engine).expect("bind loopback");
         let addr = server.local_addr().expect("local addr");
         server.serve_in_background();
-        Client::connect(addr).expect("connect")
+        let mut client = Client::connect(addr).expect("connect");
+        client.set_operator(Some(&test_operator()));
+        client
+    }
+
+    /// 2.15: a Program command names the person who sent it, so every test that sends one
+    /// signs in first.
+    fn test_operator() -> gx_contracts::auth::OperatorName {
+        gx_contracts::auth::OperatorName::parse("Test Operator").expect("a valid name")
     }
 
     #[test]
@@ -230,6 +242,8 @@ mod tests {
 
         let mut a = Client::connect(addr).expect("client a");
         let mut b = Client::connect(addr).expect("client b");
+        a.set_operator(Some(&test_operator()));
+        b.set_operator(Some(&test_operator()));
 
         a.handle(ClientRequest::Take(TakeRequest {
             take_id: TakeId("t".into()),
@@ -315,7 +329,8 @@ mod tests {
                 content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
                 at: TakeAt::NextOpportunity,
             }),
-        );
+        )
+        .with_operator(Some("Test Operator".into()));
         write_envelope(&mut raw, &take);
         let first = read_reply(&mut raw);
         assert!(matches!(first.payload, EngineReply::Taken(ref committed) if committed.frame == 1));

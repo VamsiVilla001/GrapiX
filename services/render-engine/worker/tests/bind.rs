@@ -1,10 +1,10 @@
 //! 2.21: the shipped `gx-render-worker` listens where `--bind` says, and only where
 //! the one bind policy allows.
 //!
-//! Real engine processes. The control plane may leave loopback only with a token;
-//! the asset plane verifies no credential yet, so it stays on loopback whatever
-//! `--bind` says, and it asks the same policy about reserved ports as the control
-//! plane does. A refusal names the plane and the reason, in the process's own log.
+//! Real engine processes. The control plane may leave loopback only with a token. So may the
+//! asset plane since 2.24, which verifies the same gx1 credential on every connection's first
+//! frame; without a token it stays on loopback whatever `--bind` says. Both ask the same policy
+//! about reserved ports. A refusal names the plane and the reason, in the process's own log.
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -145,7 +145,7 @@ fn off_loopback_without_a_token_the_control_plane_refuses_by_name_and_nothing_li
 }
 
 #[test]
-fn with_a_token_the_control_plane_leaves_loopback_and_the_asset_plane_does_not() {
+fn with_a_token_both_planes_leave_loopback_and_the_asset_plane_verifies_credentials() {
     let dir = scratch();
     let secret = fresh_secret();
     let _engine = start(
@@ -169,8 +169,8 @@ fn with_a_token_the_control_plane_leaves_loopback_and_the_asset_plane_does_not()
         "the control plane listens off loopback: {control}"
     );
     assert!(
-        is_loopback(assets.ip()),
-        "the asset plane verifies no credential, so it stays on loopback: {assets}"
+        !is_loopback(assets.ip()),
+        "with a token the asset plane follows --bind too: {assets}"
     );
     assert_eq!(started["fields"]["bind"], "0.0.0.0", "{started}");
 
@@ -182,6 +182,69 @@ fn with_a_token_the_control_plane_leaves_loopback_and_the_asset_plane_does_not()
         Client::connect_with_token(reach, token).expect("a credential for the secret connects");
     let reply = client.request(ClientRequest::Status).expect("a reply");
     assert!(matches!(reply, EngineReply::Status(_)), "{reply:?}");
+
+    // The asset plane verifies the same credential (2.24), over loopback to the port it listens on.
+    let asset_reach = SocketAddr::new(IpAddr::from([127, 0, 0, 1]), assets.port());
+    let refused_as = |reply: gx_asset_plane::LocalityReply| match reply {
+        gx_asset_plane::LocalityReply::Refused(gx_asset_plane::PublishRefusal::AuthRefused {
+            cause,
+        }) => Some(cause),
+        _ => None,
+    };
+    let none = gx_asset_plane::declared_locality(asset_reach).expect("a reply");
+    assert_eq!(
+        refused_as(none),
+        Some(gx_contracts::Refusal::Unauthenticated),
+        "no credential"
+    );
+    let other = Token::mint(
+        "intruder",
+        Role::Editor,
+        vec![Scope::Author],
+        "another-secret-0123456789abcdefghij",
+    )
+    .expect("a credential is minted");
+    {
+        let _credential = gx_asset_plane::auth::enter(other.as_str());
+        let reply = gx_asset_plane::declared_locality(asset_reach).expect("a reply");
+        assert_eq!(
+            refused_as(reply),
+            Some(gx_contracts::Refusal::Unauthenticated),
+            "a credential made with another secret"
+        );
+    }
+    let author = Token::mint("editor-1", Role::Editor, vec![Scope::Author], &secret)
+        .expect("a credential is minted");
+    {
+        let _credential = gx_asset_plane::auth::enter(author.as_str());
+        let reply = gx_asset_plane::declared_locality(asset_reach).expect("a reply");
+        assert!(
+            matches!(reply, gx_asset_plane::LocalityReply::Declared { .. }),
+            "{reply:?}"
+        );
+    }
+    // A Playout credential holds no Author scope: it may read locality and publish nothing.
+    let playout = Token::mint("desk-1", Role::Playout, vec![Scope::Cue], &secret)
+        .expect("a credential is minted");
+    {
+        let _credential = gx_asset_plane::auth::enter(playout.as_str());
+        let scene: gx_contracts::scene::SceneDocument = serde_json::from_value(serde_json::json!({
+            "version": gx_contracts::scene::SCENE_SCHEMA_VERSION,
+            "id": "draft", "name": "draft", "workingColorSpace": "linear-srgb", "colorDepth": "32",
+            "canvas": { "width": 4, "height": 2, "frameRate": { "num": 50, "den": 1 } },
+            "timeline": { "durationFrames": 10, "channels": [] },
+            "objects": []
+        }))
+        .expect("a minimal scene parses");
+        match gx_asset_plane::publish_scene(asset_reach, scene).expect("a reply") {
+            gx_asset_plane::PublishReply::Refused(
+                gx_asset_plane::PublishRefusal::AuthRefused {
+                    cause: gx_contracts::Refusal::ScopeNotGranted { required, .. },
+                },
+            ) => assert_eq!(required, Some(Scope::Author)),
+            other => panic!("a Playout credential published: {other:?}"),
+        }
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -199,11 +262,11 @@ fn refuses_a_connection(addr: SocketAddr) -> bool {
     std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(3)).is_err()
 }
 
-/// The engine is reached over the interface `--bind` names, and only there: the
-/// control plane answers on this machine's own network address and not on
-/// loopback, and the asset plane does not answer on the network address at all.
+/// The engine is reached over the interface `--bind` names, and only there: both planes answer on
+/// this machine's own network address (the asset plane since 2.24, with the token) and neither
+/// answers on loopback.
 #[test]
-fn an_engine_bound_to_this_machines_address_is_reached_over_it_and_only_control() {
+fn an_engine_bound_to_this_machines_address_is_reached_over_it_on_both_planes() {
     let Some(own) = own_network_address() else {
         // No silent pass: say so. The 0.0.0.0 test above still runs.
         eprintln!("NOT RUN: this machine has no network address to bind");
@@ -233,9 +296,10 @@ fn an_engine_bound_to_this_machines_address_is_reached_over_it_and_only_control(
         own,
         "the control plane is on the named interface"
     );
-    assert!(
-        is_loopback(assets.ip()),
-        "the asset plane stays on loopback: {assets}"
+    assert_eq!(
+        assets.ip(),
+        own,
+        "with a token the asset plane is on the named interface too"
     );
 
     // Reached over the network address, with a credential for the secret.
@@ -254,15 +318,15 @@ fn an_engine_bound_to_this_machines_address_is_reached_over_it_and_only_control(
         )),
         "a control plane bound to {own} must not also answer on loopback"
     );
-    // And only control: the asset plane does not answer on the network address.
+    // The asset plane is on the same interface and not on loopback either.
     assert!(
-        refuses_a_connection(SocketAddr::new(own, assets.port())),
-        "the asset plane must not be reachable over {own}"
+        refuses_a_connection(SocketAddr::new(IpAddr::from([127, 0, 0, 1]), assets.port())),
+        "an asset plane bound to {own} must not also answer on loopback"
     );
-    // It does answer where it listens.
+    // It answers where it listens.
     assert!(
         !refuses_a_connection(assets),
-        "the asset plane answers on loopback: {assets}"
+        "the asset plane answers on the named interface: {assets}"
     );
     eprintln!("RAN: bound and reached over this machine's own network address");
     let _ = std::fs::remove_dir_all(dir);
@@ -302,5 +366,55 @@ fn a_bind_that_is_not_an_address_is_a_usage_error() {
         !logged(&dir).iter().any(|r| r["event"] == "engine.start"),
         "it never started"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 12.11: the shipped engine writes the as-run record. A take of something never published is
+/// refused by the engine, and that refusal is one record, naming who sent it, in a chain that
+/// verifies.
+#[test]
+fn the_engine_writes_an_as_run_record_for_a_program_command() {
+    use gx_contracts::auth::OperatorName;
+    use gx_contracts::{ContentHash, Revision, TakeId};
+    use gx_control_plane::intent::{TakeAt, TakeRequest};
+
+    let dir = scratch();
+    let secret = fresh_secret();
+    let _engine = start(
+        &dir,
+        &["--port", "0", "--asset-port", "0", "--token", &secret],
+    );
+    let started = wait_for(&dir, "engine.start");
+    let control = address(&started, "control");
+    let token = Token::mint("as-run-test", Role::Playout, vec![Scope::Take], &secret)
+        .expect("a credential is minted");
+    let mut client = Client::connect_with_token(control, token).expect("connects");
+    client.set_operator(Some(&OperatorName::parse("Ada Lovelace").unwrap()));
+    let reply = client
+        .request(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("never-published".into()),
+            revision: Revision(1),
+            content_hash: Some(ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        }))
+        .expect("a reply");
+    assert!(matches!(reply, EngineReply::Refused(_)), "{reply:?}");
+
+    let as_run = dir.join("logs").join("as-run");
+    let file = std::fs::read_dir(&as_run)
+        .expect("the as-run directory exists")
+        .flatten()
+        .next()
+        .expect("one as-run file")
+        .path();
+    let text = std::fs::read_to_string(&file).unwrap();
+    let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    assert_eq!(record["request"], "take");
+    assert_eq!(record["operator"], "Ada Lovelace");
+    assert_eq!(record["subject"], "as-run-test");
+    assert_eq!(record["result"], "refused");
+    assert_eq!(record["page"], "never-published");
+    assert_eq!(gx_control_transport::verify_as_run(&file), Ok(1));
+    assert!(!text.contains(&secret), "the secret is never written");
     let _ = std::fs::remove_dir_all(dir);
 }

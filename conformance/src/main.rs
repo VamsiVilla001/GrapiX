@@ -256,6 +256,10 @@ fn run_over_transport(report: &mut Report, token: Option<&str>, locality: Locali
             return;
         }
     };
+    // 2.15: a Program command is sent for a signed-in operator.
+    client.set_operator(Some(
+        &gx_contracts::auth::OperatorName::parse("Conformance Operator").expect("a valid name"),
+    ));
 
     report.set_peer(format!(
         "control-transport client to {bound} (L0, loopback TCP{}; engine declares {locality:?})",
@@ -346,7 +350,13 @@ fn run_against_real_engine(report: &mut Report) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     let client = loop {
         match Client::connect(addr) {
-            Ok(client) => break Some(client),
+            Ok(mut client) => {
+                client.set_operator(Some(
+                    &gx_contracts::auth::OperatorName::parse("Conformance Operator")
+                        .expect("a valid name"),
+                ));
+                break Some(client);
+            }
             Err(_) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
@@ -538,7 +548,13 @@ fn start_worker_in(
             )));
         }
         match Client::connect(addr) {
-            Ok(client) => break client,
+            Ok(mut client) => {
+                client.set_operator(Some(
+                    &gx_contracts::auth::OperatorName::parse("Conformance Operator")
+                        .expect("a valid name"),
+                ));
+                break client;
+            }
             Err(_) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }

@@ -1,0 +1,10 @@
+import { connect } from "./lib.mjs";
+const c = await connect(9333, 80);
+const { ev, shot } = c;
+await ev(`const m = document.querySelector('.app-menu[data-menu="edit"]'); m.open = true; await new Promise(r=>setTimeout(r,300));
+  document.querySelector('[data-menu-item="edit.settings"]').click(); await new Promise(r=>setTimeout(r,1500)); return 1;`);
+console.log(JSON.stringify(await ev(`const d = document.querySelector("dialog[open]"); if (!d) return { open: false, ids: [...document.querySelectorAll("dialog")].map((x) => x.id) };
+  return { open: true, id: d.id, text: [...d.querySelectorAll("label, .settings-row, .field")].map((e) => e.textContent.trim().replace(/\s+/g, " ").slice(0, 100)).filter((t) => /pen|snap|double/i.test(t)) };`), null, 1));
+await shot("m6-settings");
+await ev(`document.querySelector("dialog[open]")?.close(); return 1;`);
+c.done();

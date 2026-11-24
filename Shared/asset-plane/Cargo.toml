@@ -7,6 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 gx-contracts = { workspace = true }
+# 2.24: the asset plane verifies the control plane's gx1 credential.
+gx-credential = { workspace = true }
 gx-fs = { workspace = true }
 gx-telemetry = { workspace = true }
 tracing = "0.1"

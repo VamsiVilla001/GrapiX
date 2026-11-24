@@ -28,14 +28,43 @@ const E_INVERT: u32 = 19u;
 const E_POSTERIZE: u32 = 20u;
 const E_THRESHOLD: u32 = 21u;
 const E_VIBRANCE: u32 = 22u;
-const ORIGIN_SLOT: u32 = 28u;
+const E_TRITONE: u32 = 23u;
+const E_CHANNEL_MIXER: u32 = 24u;
+const E_COLOR_BALANCE: u32 = 25u;
+const E_GAMMA_PEDESTAL_GAIN: u32 = 26u;
+const E_COLOR_BALANCE_HLS: u32 = 27u;
+const E_BLACK_WHITE: u32 = 28u;
+const E_PHOTO_FILTER: u32 = 29u;
+const E_LEAVE_COLOR: u32 = 30u;
+const E_VIDEO_LIMITER: u32 = 31u;
+const E_BROADCAST_COLORS: u32 = 32u;
+const E_CC_TONER: u32 = 33u;
+const E_CC_COLOR_OFFSET: u32 = 34u;
+const E_CC_THRESHOLD: u32 = 35u;
+const E_CC_THRESHOLD_RGB: u32 = 36u;
+const E_CHANGE_COLOR: u32 = 37u;
+const E_SHIFT_CHANNELS: u32 = 38u;
+const E_LINEAR_COLOR_KEY: u32 = 39u;
+const E_REMOVE_COLOR_MATTING: u32 = 40u;
+const E_EXTRACT: u32 = 41u;
+const E_CC_COLOR_NEUTRALIZER: u32 = 42u;
+const E_UNMULT: u32 = 43u;
+const E_SPILL_SUPPRESSOR: u32 = 44u;
+const E_COLOR_RANGE: u32 = 45u;
+const E_ARITHMETIC: u32 = 46u;
+const E_COLOR_DIFFERENCE_KEY: u32 = 47u;
+const E_SELECTIVE_COLOR: u32 = 48u;
+const E_MIX: u32 = 49u;
+const SQRT_3: f32 = 1.7320508;
+const ORIGIN_SLOT: u32 = 60u;
+const DEPTH_SLOT: u32 = 62u;
 const PI: f32 = 3.14159265358979;
 const LUT_N: u32 = 1024u;
 const CURVE_BLOCK: u32 = 1031u;
 
 struct EffectParams {
     kind: vec4<u32>,
-    p: array<vec4<f32>, 8>,
+    p: array<vec4<f32>, 16>,
 }
 
 @group(0) @binding(0) var effect_src: texture_2d<f32>;
@@ -44,9 +73,21 @@ struct EffectParams {
 @group(0) @binding(3) var<storage, read> curve: array<f32>;
 // The saved input of a glow or drop shadow, for its combine pass.
 @group(0) @binding(4) var effect_aux: texture_2d<f32>;
+// 3.28: the mask weights of a mix pass (alpha is the weight); a placeholder otherwise.
+@group(0) @binding(5) var effect_weights: texture_2d<f32>;
 
 fn P(i: u32) -> f32 {
     return effect.p[i / 4u][i % 4u];
+}
+
+// The project's colour depth: 8 and 16 bit store a whole level held to 0-1,
+// 32 bit (levels 0) stores nothing; `blend::store_pixel` on the CPU.
+fn store_depth(v: vec4<f32>) -> vec4<f32> {
+    let levels = P(DEPTH_SLOT);
+    if (levels > 0.0) {
+        return floor(clamp(v, vec4<f32>(0.0), vec4<f32>(1.0)) * levels + 0.5) / levels;
+    }
+    return v;
 }
 
 // pow for x >= 0 with 0^y = 0 (y > 0), 1 (y == 0), as Rust's powf.
@@ -98,6 +139,94 @@ fn curve_eval(channel: u32, v: f32) -> f32 {
 
 fn effect_luma(c: vec3<f32>) -> f32 {
     return 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z;
+}
+
+// Rust's f32::round: halves go away from zero (WGSL's round goes to even), for non-negative values.
+fn round_half_up(x: f32) -> f32 {
+    let f = floor(x);
+    return select(f, f + 1.0, x - f >= 0.5);
+}
+
+// How much a colour belongs to each Selective Color range, in the order reds, yellows, greens,
+// cyans, blues, magentas, whites, neutrals, blacks (selective_weights in effects.rs). The channel
+// order is a stable insertion sort, largest first, so a tie keeps red, green, blue order.
+fn selective_weights(c0: vec3<f32>) -> array<f32, 9> {
+    let c = clamp(c0, vec3<f32>(0.0), vec3<f32>(1.0));
+    // The stable insertion sort of the three channel indices, largest first, unrolled by hand: a
+    // loop whose trip count depends on the data, with stores by index, cannot be unrolled by FXC
+    // (DX12, X3511). A strict > keeps a tie in red, green, blue order.
+    var a0 = 0u;
+    var a1 = 1u;
+    var a2 = 2u;
+    if (c[a1] > c[a0]) {
+        let t = a0;
+        a0 = a1;
+        a1 = t;
+    }
+    if (c[a2] > c[a1]) {
+        let t = a1;
+        a1 = a2;
+        a2 = t;
+        if (c[a1] > c[a0]) {
+            let u = a0;
+            a0 = a1;
+            a1 = u;
+        }
+    }
+    let mx = c[a0];
+    let md = c[a1];
+    let mn = c[a2];
+    // A primary takes the largest channel's lead over the middle (reds when red is largest, greens
+    // for green, blues for blue); a secondary takes the middle's lead over the smallest (yellows
+    // when blue is smallest, cyans for red, magentas for green).
+    let lead = mx - md;
+    let rest = md - mn;
+    return array<f32, 9>(
+        select(0.0, lead, a0 == 0u),
+        select(0.0, rest, a2 == 2u),
+        select(0.0, lead, a0 == 1u),
+        select(0.0, rest, a2 == 0u),
+        select(0.0, lead, a0 == 2u),
+        select(0.0, rest, a2 == 1u),
+        max((mn - 0.5) * 2.0, 0.0),
+        clamp(1.0 - (abs(mx - 0.5) + abs(mn - 0.5)), 0.0, 1.0),
+        max((0.5 - mx) * 2.0, 0.0),
+    );
+}
+
+fn matte_levels(v: f32, in_b: f32, in_w: f32, gamma: f32, out_b: f32, out_w: f32) -> f32 {
+    let t0 = clamp((v - in_b / 255.0) / max((in_w - in_b) / 255.0, 1e-4), 0.0, 1.0);
+    let t = powz(t0, 1.0 / max(gamma, 0.01));
+    return clamp(out_b / 255.0 + t * (out_w - out_b) / 255.0, 0.0, 1.0);
+}
+
+fn lab_f(t: f32) -> f32 {
+    if (t > 0.008856) { return pow(t, 1.0 / 3.0); }
+    return 7.787 * t + 16.0 / 116.0;
+}
+
+fn to_lab(c: vec3<f32>) -> vec3<f32> {
+    let cc = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    let l = vec3<f32>(srgb_decode(cc.x), srgb_decode(cc.y), srgb_decode(cc.z));
+    let x = (0.4124 * l.x + 0.3576 * l.y + 0.1805 * l.z) / 0.95047;
+    let y = 0.2126 * l.x + 0.7152 * l.y + 0.0722 * l.z;
+    let z = (0.0193 * l.x + 0.1192 * l.y + 0.9505 * l.z) / 1.08883;
+    let fx = lab_f(x);
+    let fy = lab_f(y);
+    let fz = lab_f(z);
+    return vec3<f32>(116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz));
+}
+
+fn range_components(space: u32, c: vec3<f32>) -> vec3<f32> {
+    if (space == 1u) {
+        let y = 0.299 * c.x + 0.587 * c.y + 0.114 * c.z;
+        let u = -0.14713 * c.x - 0.28886 * c.y + 0.436 * c.z;
+        let v = 0.615 * c.x - 0.51499 * c.y - 0.10001 * c.z;
+        return vec3<f32>(y * 255.0, u * 255.0 + 128.0, v * 255.0 + 128.0);
+    }
+    if (space == 2u) { return c * 255.0; }
+    let lab = to_lab(c);
+    return vec3<f32>(lab.x * 2.55, lab.y + 128.0, lab.z + 128.0);
 }
 
 fn rgb_to_hsl(c: vec3<f32>) -> vec3<f32> {
@@ -152,6 +281,24 @@ fn exposure_channel(v: f32) -> f32 {
         return select(e, -e, o < 0.0);
     }
     return mirror_pow(v * P(0u) + P(1u), P(2u));
+}
+
+// Gamma/Pedestal/Gain for one channel; `base` is its first parameter. Black Stretch
+// (P(9)) lifts the low end, with (1 - x)^4 written as two squares, as on the CPU.
+fn gpg_channel(v: f32, base: u32) -> f32 {
+    var x = v;
+    let stretch = P(9u);
+    if (stretch > 0.0 && x > 0.0 && x < 1.0) {
+        let t = 1.0 - x;
+        let t2 = t * t;
+        x = x + stretch * 0.25 * x * (t2 * t2);
+    }
+    let pd = P(base + 1u);
+    return max(pd + (P(base + 2u) - pd) * powz(max(x, 0.0), P(base)), 0.0);
+}
+
+fn mixer_row(c: vec3<f32>, base: u32) -> f32 {
+    return max(c.x * P(base) + c.y * P(base + 1u) + c.z * P(base + 2u) + P(base + 3u), 0.0);
 }
 
 fn apply_effect(px: vec4<f32>) -> vec4<f32> {
@@ -222,6 +369,525 @@ fn apply_effect(px: vec4<f32>) -> vec4<f32> {
         let hsl = rgb_to_hsl(c);
         let s2 = clamp(hsl.y * (1.0 + P(1u)) + P(0u) * (1.0 - hsl.y) * min(hsl.y, 0.5), 0.0, 1.0);
         o = hsl_to_rgb(vec3<f32>(hsl.x, s2, hsl.z));
+    } else if (kind == E_TRITONE) {
+        let l = clamp(effect_luma(c), 0.0, 1.0);
+        let sh = vec3<f32>(P(0u), P(1u), P(2u));
+        let md = vec3<f32>(P(4u), P(5u), P(6u));
+        let hi = vec3<f32>(P(8u), P(9u), P(10u));
+        var t: vec3<f32>;
+        if (l < 0.5) {
+            t = sh + (md - sh) * (l * 2.0);
+        } else {
+            t = md + (hi - md) * ((l - 0.5) * 2.0);
+        }
+        o = c + (t - c) * P(12u);
+    } else if (kind == E_CHANNEL_MIXER) {
+        if (P(12u) > 0.5) {
+            o = vec3<f32>(mixer_row(c, 0u));
+        } else {
+            o = vec3<f32>(mixer_row(c, 0u), mixer_row(c, 4u), mixer_row(c, 8u));
+        }
+    } else if (kind == E_COLOR_BALANCE) {
+        let l = clamp(effect_luma(c), 0.0, 1.0);
+        let ws = clamp(1.0 - l * 2.0, 0.0, 1.0);
+        let wh = clamp(l * 2.0 - 1.0, 0.0, 1.0);
+        let wm = 1.0 - ws - wh;
+        let shift = vec3<f32>(P(0u), P(1u), P(2u)) * ws + vec3<f32>(P(3u), P(4u), P(5u)) * wm + vec3<f32>(P(6u), P(7u), P(8u)) * wh;
+        o = max(c + shift * 0.5, vec3<f32>(0.0));
+        if (P(9u) > 0.5) {
+            let d = effect_luma(c) - effect_luma(o);
+            o = max(o + vec3<f32>(d), vec3<f32>(0.0));
+        }
+    } else if (kind == E_GAMMA_PEDESTAL_GAIN) {
+        o = vec3<f32>(gpg_channel(c.x, 0u), gpg_channel(c.y, 3u), gpg_channel(c.z, 6u));
+    } else if (kind == E_COLOR_BALANCE_HLS && !(P(0u) == 0.0 && P(1u) == 0.0 && P(2u) == 0.0)) {
+        let hsl = rgb_to_hsl(c);
+        var l2: f32;
+        if (P(1u) > 0.0) { l2 = hsl.z + (1.0 - hsl.z) * P(1u); } else { l2 = hsl.z + hsl.z * P(1u); }
+        var s2: f32;
+        if (P(2u) > 0.0) { s2 = hsl.y + (1.0 - hsl.y) * P(2u); } else { s2 = hsl.y + hsl.y * P(2u); }
+        let h2 = hsl.x + P(0u);
+        o = hsl_to_rgb(vec3<f32>(h2 - floor(h2), clamp(s2, 0.0, 1.0), clamp(l2, 0.0, 1.0)));
+    } else if (kind == E_BLACK_WHITE) {
+        let hsl = rgb_to_hsl(c);
+        let hp = hsl.x * 6.0;
+        let i = u32(floor(hp)) % 6u;
+        let f = hp - floor(hp);
+        let w0 = P(i);
+        let w1 = P((i + 1u) % 6u);
+        let weight = w0 + (w1 - w0) * f;
+        let gray = max(effect_luma(c) + (weight - 0.5) * hsl.y * 0.6, 0.0);
+        if (P(6u) > 0.5) {
+            o = hsl_to_rgb(vec3<f32>(P(7u), P(8u), min(gray, 1.0)));
+        } else {
+            o = vec3<f32>(gray);
+        }
+    } else if (kind == E_PHOTO_FILTER && P(3u) != 0.0) {
+        let filtered = c * vec3<f32>(P(0u), P(1u), P(2u));
+        o = c + (filtered - c) * P(3u);
+        if (P(4u) > 0.5) {
+            let l0 = effect_luma(c);
+            let l1 = max(effect_luma(o), 1e-6);
+            o = o * l0 / l1;
+        }
+    } else if (kind == E_LEAVE_COLOR && P(0u) > 0.0) {
+        var distance: f32;
+        if (P(6u) > 0.5) {
+            let hsl = rgb_to_hsl(c);
+            if (hsl.y < 0.02) {
+                distance = 1.0;
+            } else {
+                let x = hsl.x - P(7u) + 0.5;
+                distance = abs((x - floor(x)) - 0.5) * 2.0;
+            }
+        } else {
+            let d = c - vec3<f32>(P(1u), P(2u), P(3u));
+            distance = sqrt(d.x * d.x + d.y * d.y + d.z * d.z) / SQRT_3;
+        }
+        var keep: f32;
+        if (P(4u) >= 1.0 || distance <= P(4u)) {
+            keep = 1.0;
+        } else if (P(5u) <= 1e-6) {
+            keep = 0.0;
+        } else {
+            keep = clamp(1.0 - (distance - P(4u)) / P(5u), 0.0, 1.0);
+        }
+        let g = effect_luma(c);
+        let k = P(0u) * (1.0 - keep);
+        o = c + (vec3<f32>(g) - c) * k;
+    } else if (kind == E_VIDEO_LIMITER) {
+        let lim = P(0u);
+        let start = P(2u);
+        let y = effect_luma(c);
+        var m = c;
+        if (P(1u) != 1.0) {
+            var y2 = min(max(y, 0.0), lim);
+            if (max(y, 0.0) > start && lim > start) {
+                let r = lim - start;
+                y2 = start + r * (1.0 - exp(-(max(y, 0.0) - start) / r));
+            }
+            m = m + vec3<f32>(y2 - y);
+        }
+        if (P(1u) != 0.0) {
+            let yl = effect_luma(m);
+            var t = 1.0;
+            for (var k = 0u; k < 3u; k = k + 1u) {
+                let v = m[k];
+                if (v > lim && v - yl > 1e-6) {
+                    t = min(t, (lim - yl) / (v - yl));
+                }
+                if (v < 0.0 && yl - v > 1e-6) {
+                    t = min(t, yl / (yl - v));
+                }
+            }
+            t = clamp(t, 0.0, 1.0);
+            if (t < 1.0) {
+                m = vec3<f32>(yl) + (m - vec3<f32>(yl)) * t;
+            }
+        }
+        m = clamp(m, vec3<f32>(0.0), vec3<f32>(lim));
+        o = m;
+        let d = abs(c - m);
+        if (P(3u) > 0.5 && (d.x > 1e-4 || d.y > 1e-4 || d.z > 1e-4)) {
+            o = vec3<f32>(P(4u), P(5u), P(6u));
+        }
+    } else if (kind == E_BROADCAST_COLORS) {
+        let limit = P(2u);
+        let y = 0.299 * c.x + 0.587 * c.y + 0.114 * c.z;
+        var chroma: f32;
+        if (P(0u) > 0.5) {
+            let u = 0.492 * (c.z - y);
+            let v = 0.877 * (c.x - y);
+            chroma = sqrt(u * u + v * v);
+        } else {
+            let i = 0.596 * c.x - 0.274 * c.y - 0.322 * c.z;
+            let q = 0.211 * c.x - 0.523 * c.y + 0.312 * c.z;
+            chroma = sqrt(i * i + q * q);
+        }
+        let unsafe_ = y + chroma > limit + 1e-5;
+        if (P(1u) == 2.0) {
+            if (unsafe_) { a = 0.0; }
+        } else if (P(1u) == 3.0) {
+            if (!unsafe_) { a = 0.0; }
+        } else if (unsafe_) {
+            if (P(1u) == 1.0) {
+                let room = max(limit - y, 0.0);
+                var s = 1.0;
+                if (chroma > 1e-6) { s = room / chroma; }
+                o = vec3<f32>(y) + (c - vec3<f32>(y)) * s;
+                if (y > limit) { o = o * (limit / y); }
+            } else {
+                o = c * (limit / (y + chroma));
+            }
+        }
+    }
+    if (kind == E_LINEAR_COLOR_KEY) {
+        let key = vec3<f32>(P(0u), P(1u), P(2u));
+        let tol = P(3u);
+        let soft = P(4u);
+        var d: f32;
+        let mode = u32(P(5u));
+        if (mode == 0u) {
+            let dv = c - key;
+            d = sqrt(dv.x * dv.x + dv.y * dv.y + dv.z * dv.z) / SQRT_3;
+        } else if (mode == 1u) {
+            let hsl = rgb_to_hsl(c);
+            let dh0 = abs(hsl.x - P(10u));
+            d = select(min(dh0, 1.0 - dh0) * 2.0, 1.0, hsl.y < 0.02);
+        } else {
+            let sum = c.x + c.y + c.z;
+            var x = 1.0 / 3.0;
+            var y = 1.0 / 3.0;
+            if (sum > 1e-6) {
+                x = c.x / sum;
+                y = c.y / sum;
+            }
+            d = sqrt((x - P(8u)) * (x - P(8u)) + (y - P(9u)) * (y - P(9u))) / 1.4142135;
+        }
+        var keyed: f32;
+        if (soft > 1e-6) {
+            keyed = clamp((d - tol) / soft, 0.0, 1.0);
+        } else {
+            keyed = select(0.0, 1.0, d > tol);
+        }
+        var m = keyed;
+        if (P(6u) > 0.5) {
+            m = 1.0 - keyed;
+        }
+        let view = u32(P(7u));
+        if (view == 2u) {
+            o = vec3<f32>(clamp(a * m, 0.0, 1.0));
+            a = 1.0;
+        } else if (view == 0u) {
+            a = a * m;
+        }
+    } else if (kind == E_REMOVE_COLOR_MATTING) {
+        let bg = vec3<f32>(P(0u), P(1u), P(2u));
+        var v = max(c - bg * (1.0 - a), vec3<f32>(0.0));
+        if (P(3u) > 0.5) {
+            v = min(v, vec3<f32>(a));
+        }
+        o = v / a;
+    } else if (kind == E_CHANGE_COLOR) {
+        let key = vec3<f32>(P(4u), P(5u), P(6u));
+        let tol = P(7u);
+        let soft = P(8u);
+        var d: f32;
+        let mode = u32(P(9u));
+        if (mode == 0u) {
+            let dv = c - key;
+            d = sqrt(dv.x * dv.x + dv.y * dv.y + dv.z * dv.z) / SQRT_3;
+        } else if (mode == 1u) {
+            let hsl = rgb_to_hsl(c);
+            let dh0 = abs(hsl.x - P(11u));
+            let dh = min(dh0, 1.0 - dh0) * 2.0;
+            d = select(dh, 1.0, hsl.y < 0.02);
+        } else {
+            let sum = max(c.x + c.y + c.z, 1e-6);
+            let dx = c.x / sum - P(12u);
+            let dy = c.y / sum - P(13u);
+            d = sqrt(dx * dx + dy * dy) * 1.5;
+        }
+        var m: f32;
+        if (d <= tol) {
+            m = 1.0;
+        } else if (soft <= 1e-6) {
+            m = 0.0;
+        } else {
+            m = clamp(1.0 - (d - tol) / soft, 0.0, 1.0);
+        }
+        if (P(10u) > 0.5) {
+            m = 1.0 - m;
+        }
+        if (P(0u) > 0.5) {
+            o = vec3<f32>(m);
+        } else if (m > 0.0) {
+            let hsl = rgb_to_hsl(c);
+            let h2 = hsl.x + P(1u);
+            let h3 = h2 - floor(h2);
+            let ds = P(3u);
+            let dl = P(2u);
+            let s2 = clamp(hsl.y + ds * select(hsl.y, 1.0 - hsl.y, ds > 0.0), 0.0, 1.0);
+            let l2 = clamp(hsl.z + dl * select(hsl.z, 1.0 - hsl.z, dl > 0.0), 0.0, 1.0);
+            let changed = hsl_to_rgb(vec3<f32>(h3, s2, l2));
+            o = c + (changed - c) * m;
+        }
+    } else if (kind == E_EXTRACT) {
+        let ch = u32(P(0u));
+        var v = effect_luma(c);
+        if (ch == 1u) {
+            v = c.x;
+        } else if (ch == 2u) {
+            v = c.y;
+        } else if (ch == 3u) {
+            v = c.z;
+        } else if (ch == 4u) {
+            v = a;
+        }
+        v = v * 255.0;
+        var k = 1.0;
+        if (v < P(1u)) {
+            k = 0.0;
+            if (P(3u) > 0.0) {
+                k = clamp(1.0 - (P(1u) - v) / P(3u), 0.0, 1.0);
+            }
+        } else if (v > P(2u)) {
+            k = 0.0;
+            if (P(4u) > 0.0) {
+                k = clamp(1.0 - (v - P(2u)) / P(4u), 0.0, 1.0);
+            }
+        }
+        if (P(5u) > 0.5) {
+            k = 1.0 - k;
+        }
+        a = a * k;
+    } else if (kind == E_CC_COLOR_NEUTRALIZER) {
+        let l = clamp(effect_luma(c), 0.0, 1.0);
+        let shadow = 1.0 - smoothstep(0.0, 0.5, l);
+        let high = smoothstep(0.5, 1.0, l);
+        let mid = 1.0 - shadow - high;
+        let keep = 1.0 - P(9u) * clamp(1.0 - 4.0 * l * (1.0 - l), 0.0, 1.0);
+        for (var k = 0u; k < 3u; k = k + 1u) {
+            let push = P(k) * shadow + P(3u + k) * mid + P(6u + k) * high;
+            var v = c[k] + push * keep;
+            v = 0.5 + (v - 0.5) * (1.0 + P(11u));
+            v = v + P(12u) * 0.25 * (1.0 - l) * (1.0 - l) + P(13u) * 0.25 * l * l;
+            v = max(v, 0.0);
+            o[k] = v + (c[k] - v) * P(10u);
+        }
+    } else if (kind == E_UNMULT) {
+        let white = P(0u) > 0.5;
+        var d = max(c.x, max(c.y, c.z));
+        var start = P(1u);
+        if (white) {
+            d = 1.0 - min(c.x, min(c.y, c.z));
+            start = 1.0 - P(1u);
+        }
+        d = clamp(d, 0.0, 1.0);
+        let width = P(2u) * (1.0 - start);
+        var m = 0.0;
+        if (width > 1e-6) {
+            m = clamp((d - start) / width, 0.0, 1.0);
+        } else if (d > start) {
+            m = 1.0;
+        }
+        if (m <= 1e-6) {
+            a = 0.0;
+        } else {
+            var v = c;
+            if (P(3u) > 0.5) {
+                let bg = select(0.0, 1.0, white);
+                v = (c - vec3<f32>(bg * (1.0 - m))) / m;
+            }
+            if (P(4u) > 0.5) {
+                v = clamp(v, vec3<f32>(0.0), vec3<f32>(1.0));
+            }
+            o = v;
+            a = a * m;
+        }
+    } else if (kind == E_ARITHMETIC) {
+        let op = u32(P(0u));
+        let clip = P(4u) > 0.5;
+        var res = vec3<f32>(0.0);
+        for (var i = 0u; i < 3u; i = i + 1u) {
+            let v = c[i];
+            let kv = P(1u + i);
+            let iv = u32(round_half_up(clamp(v, 0.0, 1.0) * 255.0));
+            let ik = u32(round_half_up(kv * 255.0));
+            var r = 0.0;
+            if (op == 0u) { r = f32(iv & ik) / 255.0; }
+            else if (op == 1u) { r = f32(iv | ik) / 255.0; }
+            else if (op == 2u) { r = f32(iv ^ ik) / 255.0; }
+            else if (op == 3u) { r = v + kv; }
+            else if (op == 4u) { r = v - kv; }
+            else if (op == 5u) { r = abs(v - kv); }
+            else if (op == 6u) { r = min(v, kv); }
+            else if (op == 7u) { r = max(v, kv); }
+            else if (op == 8u) { r = select(v, 0.0, v > kv); }
+            else if (op == 9u) { r = select(v, 0.0, v < kv); }
+            else if (op == 10u) { r = select(0.0, 1.0, v >= kv); }
+            else if (op == 11u) { r = v * kv; }
+            else { r = 1.0 - (1.0 - v) * (1.0 - kv); }
+            if (clip) { res[i] = clamp(r, 0.0, 1.0); } else { res[i] = max(r, 0.0); }
+        }
+        o = res;
+    } else if (kind == E_COLOR_DIFFERENCE_KEY) {
+        var display = c;
+        if (P(2u) > 0.5) {
+            display = vec3<f32>(srgb_encode(c.x), srgb_encode(c.y), srgb_encode(c.z));
+        }
+        var lin = display;
+        if (P(1u) > 0.5) {
+            let d = clamp(display, vec3<f32>(0.0), vec3<f32>(1.0));
+            lin = vec3<f32>(srgb_decode(d.x), srgb_decode(d.y), srgb_decode(d.z));
+        }
+        let pi = u32(P(3u));
+        let o1 = u32(P(4u));
+        let o2 = u32(P(5u));
+        let ua = 1.0 - clamp((lin[pi] - lin[o1]) / P(6u), 0.0, 1.0);
+        let ub = 1.0 - clamp((lin[pi] - lin[o2]) / P(7u), 0.0, 1.0);
+        let ca = matte_levels(ua, P(8u), P(9u), P(10u), P(11u), P(12u));
+        let cb = matte_levels(ub, P(13u), P(14u), P(15u), P(16u), P(17u));
+        let um = max(ua, ub);
+        let cm = matte_levels(max(ca, cb), P(18u), P(19u), P(20u), 0.0, 255.0);
+        let stage = u32(P(0u));
+        var shown = -1.0;
+        if (stage == 1u) { shown = ua; }
+        else if (stage == 2u) { shown = ca; }
+        else if (stage == 3u) { shown = ub; }
+        else if (stage == 4u) { shown = cb; }
+        else if (stage == 5u) { shown = um; }
+        else if (stage == 6u) { shown = cm; }
+        if (shown >= 0.0) {
+            o = vec3<f32>(shown * a);
+            a = 1.0;
+        } else {
+            a = a * cm;
+        }
+    } else if (kind == E_SELECTIVE_COLOR) {
+        let relative = P(0u) > 0.5;
+        let w = selective_weights(c);
+        var res = c;
+        for (var r = 0u; r < 9u; r = r + 1u) {
+            if (w[r] > 0.0) {
+                let base = 1u + 4u * r;
+                let black = P(base + 3u);
+                for (var i = 0u; i < 3u; i = i + 1u) {
+                    var delta = P(base + i) + black;
+                    if (relative) { delta = delta * max(1.0 - c[i], 0.0); }
+                    res[i] = res[i] - w[r] * delta;
+                }
+            }
+        }
+        o = max(res, vec3<f32>(0.0));
+    } else if (kind == E_COLOR_RANGE) {
+        var measured = c;
+        if (P(8u) > 0.5) {
+            measured = vec3<f32>(srgb_encode(c.x), srgb_encode(c.y), srgb_encode(c.z));
+        }
+        let v = range_components(u32(P(1u)), measured);
+        var out = 0.0;
+        out = max(out, max(P(2u) - v.x, v.x - P(3u)));
+        out = max(out, max(P(4u) - v.y, v.y - P(5u)));
+        out = max(out, max(P(6u) - v.z, v.z - P(7u)));
+        var m = 1.0;
+        if (out <= 0.0) {
+            m = 0.0;
+        } else if (P(0u) > 0.0) {
+            m = clamp(out / P(0u), 0.0, 1.0);
+        }
+        a = a * m;
+    } else if (kind == E_SPILL_SUPPRESSOR) {
+        let amount = P(3u);
+        if (P(4u) > 0.5) {
+            let mean = (c.x + c.y + c.z) / 3.0;
+            let dir = vec3<f32>(P(5u), P(6u), P(7u));
+            let along = (c.x - mean) * dir.x + (c.y - mean) * dir.y + (c.z - mean) * dir.z;
+            if (along > 0.0) {
+                o = c - dir * (along * amount);
+            }
+        } else {
+            let strong = u32(P(0u));
+            let first = u32(P(1u));
+            let second = u32(P(2u));
+            let spill = max(c[strong] - max(c[first], c[second]), 0.0);
+            // Only the strong channel moves. A select on constant indices, not a store through
+            // c[strong]: FXC (DX12) cannot store through a non-constant vector index (X3500).
+            o = select(
+                c,
+                c - vec3<f32>(spill * amount),
+                vec3<bool>(strong == 0u, strong == 1u, strong == 2u),
+            );
+        }
+    } else if (kind == E_SHIFT_CHANNELS) {
+        let hsl = rgb_to_hsl(c);
+        var picked = vec4<f32>(0.0);
+        for (var k = 0u; k < 4u; k = k + 1u) {
+            let code = u32(P(k));
+            var v = 0.0;
+            if (code == 0u) {
+                v = a;
+            } else if (code == 1u) {
+                v = c.x;
+            } else if (code == 2u) {
+                v = c.y;
+            } else if (code == 3u) {
+                v = c.z;
+            } else if (code == 4u) {
+                v = effect_luma(c);
+            } else if (code == 5u) {
+                v = hsl.x;
+            } else if (code == 6u) {
+                v = hsl.z;
+            } else if (code == 7u) {
+                v = hsl.y;
+            } else if (code == 8u) {
+                v = 1.0;
+            } else if (code == 9u) {
+                v = 0.5;
+            }
+            picked[k] = v;
+        }
+        o = picked.xyz;
+        a = clamp(picked.w, 0.0, 1.0);
+    } else if (kind == E_CC_TONER) {
+        let n = u32(P(15u));
+        let t = clamp(effect_luma(c), 0.0, 1.0) * f32(n);
+        let k = min(u32(floor(t)), n - 1u);
+        let f = t - f32(k);
+        let lo = vec3<f32>(P(3u * k), P(3u * k + 1u), P(3u * k + 2u));
+        let hi = vec3<f32>(P(3u * k + 3u), P(3u * k + 4u), P(3u * k + 5u));
+        let tone = lo + (hi - lo) * f;
+        o = tone + (c - tone) * P(16u);
+    } else if (kind == E_CC_COLOR_OFFSET && (P(0u) != 0.0 || P(1u) != 0.0 || P(2u) != 0.0)) {
+        for (var k = 0u; k < 3u; k = k + 1u) {
+            if (P(k) == 0.0) {
+                continue;
+            }
+            let x = c[k] + P(k);
+            var v = x;
+            if (x > 1.0) {
+                if (P(3u) == 1.0) {
+                    v = max(2.0 - x, 0.0);
+                } else if (P(3u) == 2.0) {
+                    v = select(1.0, 0.0, x - 1.0 < 0.5);
+                } else {
+                    v = x - floor(x);
+                }
+            }
+            o[k] = v;
+        }
+    } else if (kind == E_CC_THRESHOLD) {
+        let t = P(0u);
+        let inv = P(2u) > 0.5;
+        let blend = P(3u);
+        var m = vec3<f32>(0.0);
+        var na = a;
+        let mode = u32(P(1u));
+        if (mode == 1u) {
+            m = vec3<f32>(
+                select(0.0, 1.0, (c.x >= t) != inv),
+                select(0.0, 1.0, (c.y >= t) != inv),
+                select(0.0, 1.0, (c.z >= t) != inv),
+            );
+        } else if (mode == 2u) {
+            m = vec3<f32>(select(0.0, 1.0, (rgb_to_hsl(c).y >= t) != inv));
+        } else if (mode == 3u) {
+            m = c;
+            na = select(0.0, 1.0, (a >= t) != inv);
+        } else {
+            m = vec3<f32>(select(0.0, 1.0, (effect_luma(c) >= t) != inv));
+        }
+        o = m + (c - m) * blend;
+        a = na + (a - na) * blend;
+    } else if (kind == E_CC_THRESHOLD_RGB) {
+        let blend = P(6u);
+        let m = vec3<f32>(
+            select(0.0, 1.0, (c.x >= P(0u)) != (P(3u) > 0.5)),
+            select(0.0, 1.0, (c.y >= P(1u)) != (P(4u) > 0.5)),
+            select(0.0, 1.0, (c.z >= P(2u)) != (P(5u) > 0.5)),
+        );
+        o = m + (c - m) * blend;
     }
     let r = vec4<f32>(bound(o.x * a), bound(o.y * a), bound(o.z * a), bound(a));
     if (!covers(r.w)) {
@@ -381,6 +1047,11 @@ fn effect_step(@builtin(global_invocation_id) id: vec3<u32>) {
             acc += fx_sample(f32(q.x) + 0.5 + P(0u) * t, f32(q.y) + 0.5 + P(1u) * t);
         }
         out = finite4(acc * (1.0 / f32(n)));
+    } else if (kind == E_MIX) {
+        // The effect's output where its masks cover, its input (the aux target) elsewhere.
+        let o = textureLoad(effect_aux, q, 0);
+        let m = clamp(textureLoad(effect_weights, q, 0).w, 0.0, 1.0);
+        out = finite4(o * (1.0 - m) + px * m);
     } else if (kind == E_GLOW_COMBINE) {
         let o = textureLoad(effect_aux, q, 0);
         let g = px * P(0u);
@@ -399,6 +1070,9 @@ fn effect_step(@builtin(global_invocation_id) id: vec3<u32>) {
     } else {
         let l = vec2<f32>(P(ORIGIN_SLOT) + f32(q.x) + 0.5, P(ORIGIN_SLOT + 1u) + f32(q.y) + 0.5);
         out = coordinate_effect(kind, px, l);
+    }
+    if (kind != E_IDENTITY && kind != E_SAVE) {
+        out = store_depth(out);
     }
     textureStore(effect_out, q, out);
 }
@@ -450,7 +1124,7 @@ fn effect_line(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var i = 0; i < n; i++) {
         var q = vec2<i32>(line, i);
         if (horizontal) { q = vec2<i32>(i, line); }
-        textureStore(effect_out, q, acc * norm);
+        textureStore(effect_out, q, store_depth(acc * norm));
         let add = line_get(horizontal, line, i + r + 1, n, repeat);
         let sub = line_get(horizontal, line, i - r, n, repeat);
         acc = acc + (add - sub);

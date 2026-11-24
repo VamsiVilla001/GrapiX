@@ -151,6 +151,8 @@ pub struct Engine {
     events: Vec<EngineEvent>,
     /// 3.24: watches what Program's frames cost and sheds non-live work.
     governor: LoadGovernor,
+    /// Preview frames not delivered because Preview was decimated (3.24).
+    preview_skipped: u64,
     /// The gate detached renders wait at; the governor sets its level.
     gate: Arc<NonLiveGate>,
     /// Governor moves since start, and the latest in words.
@@ -169,10 +171,11 @@ const PREVIEW_CACHE_ENTRIES: usize = 4;
 /// Prepared draft scenes by content hash, oldest first.
 type PreviewCache = Vec<(ContentHash, Arc<PreparedScene>)>;
 
-/// The highest load level anything is wired to shed at (3.24): detached renders
-/// run one at a time. Higher levels are raised here as each is built, never
-/// before, so the engine never reports shedding it does not do.
-const WIRED_LEVEL: Level = Level::DetachedThrottled;
+/// The highest load level anything is wired to shed at (3.24): detached renders run one at a
+/// time; Preview is decimated; scene preparation waits; new headless renders, previews and
+/// publications are refused by name. Raised only as each is built, so the engine never reports
+/// shedding it does not do.
+const WIRED_LEVEL: Level = Level::NonLiveRefused;
 
 /// What attaching a recovery journal dropped (5.11).
 #[derive(Debug, Default)]
@@ -244,7 +247,15 @@ impl Engine {
             recovery: None,
             output_inhibited: false,
             events: Vec::new(),
-            governor: LoadGovernor::new(WIRED_LEVEL),
+            // In the engine's own unit tests the governor starts held at Normal: a debug build
+            // draws every frame late, and the GPU tests that read Preview would then find it
+            // decimated. The tests of the governor itself arm it (`arm_governor_for_test`).
+            governor: LoadGovernor::new(if cfg!(test) {
+                Level::Normal
+            } else {
+                WIRED_LEVEL
+            }),
+            preview_skipped: 0,
             gate: Arc::new(NonLiveGate::default()),
             shifts: 0,
             last_shift: None,
@@ -864,8 +875,15 @@ impl Engine {
             work: RenderWork::snapshot().since(work_before),
         });
         let render_nanos = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
-        self.emitter
-            .emit(Arc::clone(&preview), Arc::clone(&program));
+        // 3.24: under load Preview is delivered one frame in a few. Program is emitted on
+        // every frame either way.
+        if crate::governor::preview_due(self.gate.level(), frame_number) {
+            self.emitter
+                .emit(Arc::clone(&preview), Arc::clone(&program));
+        } else {
+            self.emitter.emit_program(Arc::clone(&program));
+            self.preview_skipped += 1;
+        }
         let interval_nanos = self.clock.offset_nanos(1).min(u128::from(u64::MAX)) as u64;
         // The clock may have passed frames while this loop was away; each is
         // a Program frame that was never emitted, and is counted as missed.
@@ -945,6 +963,35 @@ impl Engine {
             ));
             crate::log::load_shift(&transition, sample.frame, self.clock.epoch().0);
         }
+    }
+
+    /// The refusal a piece of non-live work earns at the current level, if any (3.24): at the
+    /// last level new headless renders, previews and publications are refused by name, with a
+    /// retry hint. Program and control are never asked.
+    fn shed(&self, request: &str) -> Option<Refusal> {
+        (self.gate.level() >= Level::NonLiveRefused).then(|| Refusal::LoadShed {
+            request: request.to_owned(),
+            level: Level::NonLiveRefused.to_string(),
+            retry_after_ms: crate::governor::RETRY_AFTER_MS,
+        })
+    }
+
+    /// Let the governor shed up to the last level, as a running engine does.
+    #[cfg(test)]
+    pub(crate) fn arm_governor_for_test(&mut self) {
+        self.governor = LoadGovernor::new(WIRED_LEVEL);
+    }
+
+    /// Preview frames skipped by decimation since start.
+    pub fn preview_skipped(&self) -> u64 {
+        self.preview_skipped
+    }
+
+    /// Force the level non-live work is shed at, as the governor would set it (tests and the
+    /// conformance audit only: the governor moves it again on the next frame).
+    #[doc(hidden)]
+    pub fn set_load_level_for_test(&mut self, level: Level) {
+        self.gate.set_level(level);
     }
 
     /// The level non-live work is shed at now.
@@ -1187,8 +1234,17 @@ impl AssetPublishPeer for Engine {
         self.locality
     }
 
+    fn calm_gate(&self) -> Option<Arc<dyn gx_asset_plane::CalmGate>> {
+        Some(Arc::clone(&self.gate) as Arc<dyn gx_asset_plane::CalmGate>)
+    }
+
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         let take_id = scene.id.clone();
+        if let Some(cause) = self.shed("publish") {
+            let reply = PublishReply::Refused(PublishRefusal::PreparationRefused { cause });
+            crate::log::publish(&take_id, &reply);
+            return reply;
+        }
         let reply = self.publish(scene);
         crate::log::publish(&take_id, &reply);
         reply
@@ -1200,6 +1256,9 @@ impl AssetPublishPeer for Engine {
     /// (which draws effects, masks and clips). No revision is created and nothing
     /// on Program changes.
     fn prepare_preview(&mut self, scene: SceneDocument, frame: u64) -> Result<PreviewJob, Refusal> {
+        if let Some(refusal) = self.shed("preview") {
+            return Err(refusal);
+        }
         let duration_frames = scene.timeline.duration_frames;
         if frame > duration_frames {
             return Err(Refusal::RenderFrameOutOfRange {
@@ -1400,6 +1459,9 @@ impl EnginePeer for Engine {
             crate::log::request(&note, &reply, epoch);
             Handled::Reply(reply)
         };
+        if let Some(refusal) = self.shed("render") {
+            return refused(refusal);
+        }
         if let Err(refusal) = self.check_not_dropped(&req.take_id) {
             return refused(refusal);
         }
@@ -1820,6 +1882,7 @@ mod tests {
     #[test]
     fn a_late_program_frame_sheds_detached_work_and_says_so_everywhere() {
         let mut e = engine();
+        e.arm_governor_for_test();
         let gate = e.non_live_gate();
         assert_eq!(gate.cap(), crate::governor::DETACHED_CAP_NORMAL);
         e.program = Some(on_program());
@@ -1865,11 +1928,102 @@ mod tests {
         assert_eq!(released["fields"]["reason"], "nothing is on Program");
     }
 
+    /// 3.24, the last level: new headless renders, previews and publications are refused by
+    /// name with a retry hint; Program and the control plane are not touched; and it returns when
+    /// the level falls.
+    #[test]
+    fn at_the_last_level_non_live_work_is_refused_by_name_and_program_is_not() {
+        use gx_control_plane::render::RenderRequest;
+        let mut e = engine();
+        let PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        } = e.publish(animated_scene())
+        else {
+            panic!("the animated scene publishes");
+        };
+        let render = || {
+            ClientRequest::Render(RenderRequest {
+                take_id: take_id.clone(),
+                revision,
+                content_hash: Some(content_hash.clone()),
+                frame: 10,
+            })
+        };
+        e.set_load_level_for_test(Level::NonLiveRefused);
+
+        let shed = |reply: &EngineReply| {
+            matches!(reply, EngineReply::Refused(Refusal::LoadShed { level, retry_after_ms, .. })
+                if level == "non-live-refused" && *retry_after_ms == crate::governor::RETRY_AFTER_MS)
+        };
+        let Handled::Reply(reply) = e.handle_detached(render()) else {
+            panic!("a refused render is answered in place, not run detached");
+        };
+        assert!(shed(&reply), "render: {reply:?}");
+        let published = e.publish_scene(animated_scene());
+        assert!(
+            matches!(&published, PublishReply::Refused(PublishRefusal::PreparationRefused {
+                cause: Refusal::LoadShed { request, .. } }) if request == "publish"),
+            "publish: {published:?}"
+        );
+        let previewed = e.prepare_preview(animated_scene(), 3);
+        assert!(
+            matches!(&previewed, Err(Refusal::LoadShed { request, .. }) if request == "preview"),
+            "preview: {:?}",
+            previewed.as_ref().err()
+        );
+        // Program is not asked: cue and take go through, and so does a read.
+        assert!(matches!(
+            e.handle(ClientRequest::Status),
+            EngineReply::Status(_)
+        ));
+
+        // The level falls: the same requests are answered again.
+        e.set_load_level_for_test(Level::Normal);
+        assert!(matches!(e.handle_detached(render()), Handled::Detached(_)));
+        assert!(matches!(
+            e.publish_scene(animated_scene()),
+            PublishReply::Published { .. }
+        ));
+    }
+
+    /// One level below the last, nothing is refused: preparation waits instead.
+    #[test]
+    fn below_the_last_level_nothing_is_refused() {
+        let mut e = engine();
+        for level in [
+            Level::Normal,
+            Level::DetachedThrottled,
+            Level::PreviewDecimated,
+            Level::PrepareDeferred,
+        ] {
+            e.set_load_level_for_test(level);
+            assert!(e.shed("render").is_none(), "{level}");
+        }
+        e.set_load_level_for_test(Level::NonLiveRefused);
+        assert!(e.shed("render").is_some());
+    }
+
+    /// 3.24: the engine offers the gate the asset plane's listener waits at, and it is the one
+    /// the governor sets.
+    #[test]
+    fn the_engine_offers_the_calm_gate_the_governor_sets() {
+        use gx_asset_plane::AssetPublishPeer;
+        let mut e = engine();
+        let gate = e.calm_gate().expect("the engine offers a calm gate");
+        e.set_load_level_for_test(Level::PrepareDeferred);
+        assert!(!gate.wait_until_calm(std::time::Duration::from_millis(30)));
+        e.set_load_level_for_test(Level::PreviewDecimated);
+        assert!(gate.wait_until_calm(std::time::Duration::from_millis(30)));
+    }
+
     /// An idle engine (no scene on Program) never sheds, however slow its frames:
     /// a debug build on a loaded machine must not throttle anyone's work.
     #[test]
     fn an_idle_engine_never_sheds_however_slow_its_frames() {
         let mut e = engine();
+        e.arm_governor_for_test();
         for frame in 0..500 {
             e.govern(&sample(frame, 40, true));
         }
@@ -2064,15 +2218,17 @@ mod tests {
     #[test]
     fn the_engine_never_goes_above_the_level_it_has_wired() {
         let mut e = engine();
+        e.arm_governor_for_test();
         e.program = Some(on_program());
         for frame in 0..500 {
             e.govern(&sample(frame, 30, true));
         }
         assert_eq!(
             e.load_level(),
-            Level::DetachedThrottled,
-            "only detached renders are throttled today; raise this with the next level built"
+            Level::NonLiveRefused,
+            "every level is wired now; a sustained overload reaches the last and goes no further"
         );
+        assert_eq!(Some(&e.load_level()), Level::ALL.last());
     }
 
     // --- 2.20: the protocol a client states ------------------------------------------
@@ -2196,7 +2352,15 @@ mod tests {
             gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("engine", "worker", &dir))
                 .unwrap();
         let subscriber = tracing_subscriber::registry().with(guard.layer());
-        tracing::subscriber::with_default(subscriber, body);
+        tracing::subscriber::with_default(subscriber, || {
+            // `tracing` caches, per call site, whether anyone listens. A test running beside this one
+            // can register a call site while no subscriber is listening and leave it cached as "never",
+            // and this capture then loses every event from it (seen in the gate: zero records).
+            // Re-evaluating the cache with this subscriber in place makes the capture independent of
+            // what ran before it.
+            tracing::callsite::rebuild_interest_cache();
+            body();
+        });
         guard.finish().unwrap();
         let mut records = Vec::new();
         for entry in std::fs::read_dir(dir.join("engine")).unwrap().flatten() {
@@ -2543,6 +2707,7 @@ mod tests {
         shape.base.fill = Some(ColorValue::opaque_white());
         SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
             id: "animated".into(),
             name: "Animated".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -2573,6 +2738,7 @@ mod tests {
                         },
                     ],
                 }],
+                path_channels: Vec::new(),
                 phases: vec![
                     TimelinePhase {
                         kind: PhaseKind::In,
@@ -2600,6 +2766,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: vec![SceneObject::Rect(shape)],
         }
     }

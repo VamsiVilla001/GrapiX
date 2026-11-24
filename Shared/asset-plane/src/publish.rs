@@ -30,6 +30,18 @@ pub struct PublishRequest {
     pub scene: SceneDocument,
 }
 
+/// What a peer under load lets the listener wait on (3.24): preparing a scene waits until the
+/// peer is calm, so it never competes with Program for the GPU. Held outside the peer's lock,
+/// so waiting here never delays a frame or a cue.
+pub trait CalmGate: Send + Sync {
+    /// Wait until the peer is calm, at most `most`; true if it is. Never refuses: a wait that
+    /// runs out lets the work through to be answered (or refused by name) by the peer itself.
+    fn wait_until_calm(&self, most: std::time::Duration) -> bool;
+}
+
+/// The longest a publication, a package or a preview waits for calm before it goes on.
+pub const MAX_CALM_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The asset-plane reply to one publication request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -93,6 +105,9 @@ pub enum PublishRefusal {
     /// package, bytes that do not match their manifest or declared hash, or
     /// (5.11) a store that could not keep them.
     PackageRefused { cause: gx_contracts::Refusal },
+    /// The asset plane refused the caller (2.24): no credential, one that does not verify
+    /// (`Unauthenticated`), or one without the scope the request needs (`ScopeNotGranted`).
+    AuthRefused { cause: gx_contracts::Refusal },
 }
 
 /// One engine-rendered preview frame: the PNG of a draft scene at a frame (11.65).
@@ -198,6 +213,12 @@ pub trait AssetPublishPeer: Send + 'static {
         None
     }
 
+    /// A gate the listener waits at, outside the peer's lock, before it asks the peer to prepare
+    /// a scene (3.24). `None`, the default, never waits.
+    fn calm_gate(&self) -> Option<Arc<dyn CalmGate>> {
+        None
+    }
+
     /// The store this peer keeps verified asset bytes in across a restart
     /// (5.11). When it names one, this listener writes every asset there,
     /// without holding the peer, before the peer is handed the bytes, so a
@@ -277,17 +298,27 @@ pub struct AssetPublishServer<P: AssetPublishPeer> {
     listener: TcpListener,
     peer: Arc<Mutex<P>>,
     metrics: crate::preflight::AssetTransferMetrics,
+    /// Transfers begun and not finished, shared by every connection (2.24).
+    partials: crate::preflight::Partials,
     /// What every connection is held to (2.22).
     limits: crate::limits::AssetLimits,
     /// Connections held now, against `limits.max_connections`.
     connections: Arc<std::sync::atomic::AtomicUsize>,
+    /// The secret every connection's first frame is verified against (2.24), or none: a listener
+    /// with none verifies nothing and is bound to loopback only.
+    auth: Option<crate::auth::AssetAuth>,
 }
 
-/// The asset plane's case of the one bind policy (2.21): it verifies no
-/// credential today, so it listens on loopback only, and on no reserved port.
-/// The refusal is `PermissionDenied`, naming the plane and the reason.
+/// The asset plane's case of the one bind policy (2.21): without a secret it verifies no
+/// credential, so it listens on loopback only, and on no reserved port; with one (2.24) it may
+/// leave loopback, as the control plane does. The refusal is `PermissionDenied`, naming the
+/// plane and the reason.
 pub(crate) fn check_asset_listen(addr: SocketAddr) -> io::Result<()> {
-    gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::Asset, addr, None)
+    check_asset_listen_with(addr, None)
+}
+
+pub(crate) fn check_asset_listen_with(addr: SocketAddr, secret: Option<&str>) -> io::Result<()> {
+    gx_contracts::endpoints::check_listen_io(gx_contracts::endpoints::Plane::Asset, addr, secret)
 }
 
 impl<P: AssetPublishPeer> AssetPublishServer<P> {
@@ -297,8 +328,32 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
             listener: TcpListener::bind(addr)?,
             peer,
             metrics: crate::preflight::AssetTransferMetrics::new(),
+            partials: crate::preflight::Partials::default(),
             limits: crate::limits::AssetLimits::default(),
             connections: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            auth: None,
+        })
+    }
+
+    /// A listener that verifies a gx1 credential on every connection's first frame against
+    /// `secret` (2.24), the secret the control plane is started with. The bind policy then lets
+    /// it leave loopback (a secret shorter than the policy's minimum is refused). Requests with
+    /// no credential, or one that does not verify, are refused by name.
+    pub fn bind_authenticating(
+        addr: SocketAddr,
+        peer: Arc<Mutex<P>>,
+        secret: &str,
+    ) -> io::Result<Self> {
+        check_asset_listen_with(addr, Some(secret))?;
+        let auth = crate::auth::AssetAuth::new(secret)?;
+        Ok(Self {
+            listener: TcpListener::bind(addr)?,
+            peer,
+            metrics: crate::preflight::AssetTransferMetrics::new(),
+            partials: crate::preflight::Partials::default(),
+            limits: crate::limits::AssetLimits::default(),
+            connections: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            auth: Some(auth),
         })
     }
 
@@ -339,7 +394,9 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
                         };
                         let peer = Arc::clone(&self.peer);
                         let metrics = self.metrics.clone();
+                        let partials = self.partials.clone();
                         let limits = self.limits;
+                        let auth = self.auth.clone();
                         thread::spawn(move || {
                             let _permit = permit;
                             for problem in crate::limits::configure(&stream, &limits) {
@@ -348,7 +405,14 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
                                     detail = problem.as_str(),
                                 );
                             }
-                            let _ = handle_publish(stream, peer, &metrics, &limits);
+                            let _ = handle_publish(
+                                stream,
+                                peer,
+                                &metrics,
+                                &partials,
+                                &limits,
+                                auth.as_ref(),
+                            );
                         });
                     }
                     Err(error) => {
@@ -579,6 +643,8 @@ fn exchange(
     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;
     let request = with_correlation(request, gx_telemetry::corr::current().as_deref());
     let request = with_carries(&request, &gx_telemetry::corr::carried());
+    // 2.24: the credential this thread works under, if any (a listener with no secret ignores it).
+    let request = crate::auth::with_credential(&request, crate::auth::current().as_deref());
     stream
         .write_all(&(request.len() as u32).to_be_bytes())
         .and_then(|()| stream.write_all(&request))
@@ -670,6 +736,9 @@ pub(crate) fn with_carries(request: &[u8], ids: &[String]) -> Vec<u8> {
 /// checked before it is entered or written.
 #[derive(Default)]
 struct Presented {
+    /// The credential the request header carried (2.24). A member that is not a string is
+    /// present and worthless: an empty credential, which verifies as nothing.
+    credential: Option<String>,
     correlation: Option<String>,
     carries: Vec<String>,
     /// Entries of `carries` that were not strings.
@@ -698,7 +767,9 @@ fn handle_publish<P: AssetPublishPeer>(
     mut stream: TcpStream,
     peer: Arc<Mutex<P>>,
     metrics: &crate::preflight::AssetTransferMetrics,
+    partials: &crate::preflight::Partials,
     limits: &crate::limits::AssetLimits,
+    auth: Option<&crate::auth::AssetAuth>,
 ) -> io::Result<()> {
     // 2.22: the first frame has `first_frame_deadline` from accept to begin and
     // `frame_deadline` to arrive whole.
@@ -732,6 +803,28 @@ fn handle_publish<P: AssetPublishPeer>(
         .as_deref()
         .filter(|id| gx_telemetry::corr::is_valid(id))
         .map(gx_telemetry::corr::enter);
+    // 2.24: who may make this request. Judged before the request is acted on and before anything it
+    // claims about itself (the edits it carries) is entered, in the reply type it expects.
+    if let Some(auth) = auth {
+        let (needs, name) = needs_of(&request);
+        match auth.authorise(presented.credential.as_deref(), needs, name) {
+            Ok(caller) => tracing::info!(
+                event = "asset.authenticated",
+                request = name,
+                subject = caller.subject.as_str(),
+                role = ?caller.role,
+            ),
+            Err((refusal, fault)) => {
+                tracing::info!(
+                    event = "asset.refused",
+                    request = name,
+                    refusal = refusal.code_name(),
+                    fault,
+                );
+                return write_auth_refusal(&mut stream, &request, refusal);
+            }
+        }
+    }
     // 2.17: a publish that names the edits it carries writes them on every
     // record it causes here. Ids that fail the shape check, repeats and any
     // beyond the limit are counted, not named.
@@ -741,6 +834,24 @@ fn handle_publish<P: AssetPublishPeer>(
         peer.lock()
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))
     };
+    // 3.24: preparing a scene (a publication, a package or a preview) waits here, outside the
+    // peer's lock, while the engine sheds load; the gate is read and released at once.
+    if matches!(
+        request,
+        AssetRequest::Publish(_) | AssetRequest::Package(_) | AssetRequest::Preview(_)
+    ) {
+        let gate = locked()?.calm_gate();
+        if let Some(gate) = gate {
+            let started = std::time::Instant::now();
+            if !gate.wait_until_calm(MAX_CALM_WAIT) {
+                tracing::warn!(
+                    event = "load.defer_expired",
+                    waited_ms = started.elapsed().as_millis() as u64,
+                    reason = "the engine was still shedding load; the work goes on to be answered by the engine",
+                );
+            }
+        }
+    }
     match request {
         AssetRequest::Transfer(first) => {
             let store = locked()?.asset_store();
@@ -753,6 +864,7 @@ fn handle_publish<P: AssetPublishPeer>(
                     most_bytes: crate::package::MAX_PACKAGE_BYTES,
                 },
                 metrics,
+                partials,
                 limits,
             )
         }
@@ -882,6 +994,43 @@ fn deliver_packaged<P: AssetPublishPeer>(
     peer.publish_scene(packaged.scene)
 }
 
+/// What a request needs from a credential, and what to call it in a scope refusal (2.24).
+fn needs_of(request: &AssetRequest) -> (crate::auth::Needs, &'static str) {
+    use crate::auth::Needs;
+    match request {
+        AssetRequest::Locality => (Needs::AnyCredential, "locality"),
+        AssetRequest::Publish(_) => (Needs::Author, "publish"),
+        AssetRequest::Fetch(_) => (Needs::Author, "fetch"),
+        AssetRequest::Transfer(_) => (Needs::Author, "transfer"),
+        AssetRequest::Package(_) => (Needs::Author, "package"),
+        AssetRequest::Preview(_) => (Needs::Author, "preview"),
+    }
+}
+
+/// Refuse the caller in the reply type the request expects, so its client reads the refusal by name.
+fn write_auth_refusal(
+    stream: &mut TcpStream,
+    request: &AssetRequest,
+    cause: Refusal,
+) -> io::Result<()> {
+    match request {
+        AssetRequest::Locality => write_header(
+            stream,
+            &LocalityReply::Refused(PublishRefusal::AuthRefused { cause }),
+        ),
+        AssetRequest::Publish(_) | AssetRequest::Package(_) => write_header(
+            stream,
+            &PublishReply::Refused(PublishRefusal::AuthRefused { cause }),
+        ),
+        AssetRequest::Fetch(_) => write_header(stream, &FetchReply::Refused { cause }),
+        AssetRequest::Preview(_) => write_header(stream, &PreviewReply::Refused { cause }),
+        AssetRequest::Transfer(_) => write_header(
+            stream,
+            &crate::preflight::AssetTransferReply::Refused { cause },
+        ),
+    }
+}
+
 fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<()> {
     let bytes = serde_json::to_vec(header).map_err(io::Error::other)?;
     stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
@@ -904,6 +1053,12 @@ fn parse_request(bytes: &[u8]) -> (AssetRequest, Presented) {
                 )
             }
         };
+    let credential = request
+        .remove(crate::auth::CREDENTIAL_KEY)
+        .map(|value| match value {
+            serde_json::Value::String(credential) => credential,
+            _ => String::new(),
+        });
     let correlation = match request.remove(CORRELATION_KEY) {
         Some(serde_json::Value::String(id)) => Some(id),
         _ => None,
@@ -927,6 +1082,7 @@ fn parse_request(bytes: &[u8]) -> (AssetRequest, Presented) {
     (
         parse_members(request),
         Presented {
+            credential,
             correlation,
             carries,
             not_ids,
@@ -1094,9 +1250,9 @@ mod tests {
     #[test]
     fn the_publish_server_asks_the_bind_policy_before_it_opens_a_socket() {
         for (ip, port, because) in [
-            ("0.0.0.0", 0, "verifies no credential"),
-            ("192.168.1.50", 0, "verifies no credential"),
-            ("::", 0, "verifies no credential"),
+            ("0.0.0.0", 0, "requires a token"),
+            ("192.168.1.50", 0, "requires a token"),
+            ("::", 0, "requires a token"),
             ("127.0.0.1", 4100, "port 4100 is reserved"),
             ("127.0.0.1", 4200, "port 4200 is reserved"),
             ("127.0.0.1", 4300, "port 4300 is reserved"),

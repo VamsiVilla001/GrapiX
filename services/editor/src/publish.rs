@@ -182,6 +182,9 @@ pub fn publish_document(
             endpoint: endpoint.to_owned(),
         })?;
     scene.revision.get_or_insert(Revision(1));
+    // 2.24: an engine started with a token verifies a credential on the asset plane. A process that
+    // holds one for it (`GX_ASSET_CREDENTIAL`, made with the engine's secret, Author scope) sends it.
+    let _credential = gx_asset_plane::auth::enter_from_environment();
     let expected = scene.content_hash();
     let unreachable = |source: &std::io::Error| PublishFailure::Unreachable {
         endpoint: endpoint.to_owned(),
@@ -189,9 +192,11 @@ pub fn publish_document(
     };
     let done =
         publish_as_package(address, directory, &scene, sources).map_err(|error| match error {
-            DocumentPublishError::Locality(PublishClientError::Connect(source)) => {
-                unreachable(&source)
-            }
+            // 2.24: a reset or an end of stream is the connection failing, not the engine
+            // answering wrongly: it reads as unreachable, never as a protocol failure.
+            DocumentPublishError::Locality(
+                PublishClientError::Connect(source) | PublishClientError::Transport(source),
+            ) => unreachable(&source),
             DocumentPublishError::Locality(other) => PublishFailure::Protocol {
                 detail: other.to_string(),
             },
@@ -215,7 +220,8 @@ pub fn publish_document(
                 PublishFailure::NotSent(refusal)
             }
             DocumentPublishError::Publish(PackagePublishError::Transfer(
-                AssetTransferClientError::Connect(source),
+                AssetTransferClientError::Connect(source)
+                | AssetTransferClientError::Transport(source),
             )) => unreachable(&source),
             DocumentPublishError::Publish(PackagePublishError::Transfer(
                 AssetTransferClientError::Refused(cause),
@@ -226,7 +232,7 @@ pub fn publish_document(
                 }
             }
             DocumentPublishError::Publish(PackagePublishError::Publish(
-                PublishClientError::Connect(source),
+                PublishClientError::Connect(source) | PublishClientError::Transport(source),
             )) => unreachable(&source),
             DocumentPublishError::Publish(PackagePublishError::Publish(other)) => {
                 PublishFailure::Protocol {
@@ -405,6 +411,32 @@ mod tests {
         assert!(
             !root.join("outbox").exists(),
             "nothing written before the read"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// 2.24: an engine that takes the connection and drops it (a reset, an end of stream) is a
+    /// connection that failed, not one that answered wrongly.
+    #[test]
+    fn a_connection_that_is_cut_is_unreachable_not_a_protocol_failure() {
+        let root = scratch();
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                drop(stream);
+            }
+        });
+        let failed = publish_document(
+            &format!("127.0.0.1:{port}"),
+            scene_with(vec![]),
+            &[],
+            &root.join("outbox"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(failed, PublishFailure::Unreachable { .. }),
+            "{failed:?}"
         );
         std::fs::remove_dir_all(root).unwrap();
     }

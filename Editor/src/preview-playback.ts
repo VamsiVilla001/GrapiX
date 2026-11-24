@@ -18,6 +18,7 @@ import type {
   SceneObject,
 } from "@grapix/contracts";
 
+import { applyPathChannels } from "./path-anim";
 import { evaluateChannel } from "./timeline/easing";
 
 export interface PreviewFrame {
@@ -60,6 +61,20 @@ export interface PreviewEvaluation {
 /// so applying a property by its Rust-advertised name keeps this composition
 /// open to the generated contract without a second hand-maintained switch.
 export function previewSceneAt(
+  document: SceneDocument,
+  requestedFrame: number,
+  surface: AnimationSurface | null,
+): PreviewEvaluation {
+  const numeric = previewNumericAt(document, requestedFrame, surface);
+  // 11.112: animated paths, by vertex id, then put where the channels have them at this frame.
+  const duration = Number(document.timeline.durationFrames);
+  const paths = applyPathChannels(numeric.document, Math.min(duration, Math.max(0, Math.round(requestedFrame))));
+  return paths.issues.length === 0 && paths.document === numeric.document
+    ? numeric
+    : { document: paths.document, issues: [...numeric.issues, ...paths.issues] };
+}
+
+function previewNumericAt(
   document: SceneDocument,
   requestedFrame: number,
   surface: AnimationSurface | null,

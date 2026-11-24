@@ -133,7 +133,10 @@ impl PreparedScene {
         }
         // 3.13: bindings apply, all or nothing, as the Editor's preview applies
         // them; the bound document is what renders.
-        let resolved = gx_contracts::bindings::resolve_scene_bindings(&document)?;
+        let mut resolved = gx_contracts::bindings::resolve_scene_bindings(&document)?;
+        // 11.113: an auto vertex's handles are derived once, here, by the one function
+        // every consumer shares; nothing downstream sees the stored ones.
+        gx_contracts::path_anim::resolve_auto_paths(&mut resolved);
         // 3.13: what this engine cannot draw refuses by name, never drops.
         crate::support::refuse_what_the_software_path_cannot_draw(&resolved)?;
 
@@ -265,6 +268,7 @@ impl PreparedScene {
             .channels
             .iter()
             .any(|channel| !channel.keys.is_empty())
+            || gx_contracts::path_anim::has_path_animation(&self.document)
             || self
                 .document
                 .objects
@@ -307,14 +311,17 @@ impl PreparedScene {
                 set_base_property(&mut evaluated, &channel.object_id, &channel.property, value)?;
             }
         }
+        // 11.112: animated paths, by vertex id; a topology mismatch holds a key and is not an error.
+        gx_contracts::path_anim::apply_path_channels(&mut evaluated, scene_frame)?;
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&self.texts))?;
+        let layers = self.layers_at(&mut evaluated)?;
         let surface = compose(
             &evaluated,
             &resolution.effective,
             &paths,
             scene_frame,
-            &self.effect_layers,
+            &layers,
             &self.clips,
         )?;
         Ok(surface.encode(output, self.document.working_color_space))
@@ -339,16 +346,44 @@ impl PreparedScene {
                 set_base_property(&mut evaluated, &channel.object_id, &channel.property, value)?;
             }
         }
+        // 11.112: animated paths, by vertex id; a topology mismatch holds a key and is not an error.
+        gx_contracts::path_anim::apply_path_channels(&mut evaluated, scene_frame)?;
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&self.texts))?;
+        let layers = self.layers_at(&mut evaluated)?;
         compose(
             &evaluated,
             &resolution.effective,
             &paths,
             scene_frame,
-            &self.effect_layers,
+            &layers,
             &self.clips,
         )
+    }
+
+    /// The layers drawn in their own space, for the frame `evaluated` is at: the prepared ones,
+    /// except that an object animating a path has its source drawn again (11.112).
+    fn layers_at(&self, evaluated: &mut SceneDocument) -> Result<std::borrow::Cow<'_, [Option<EffectLayer>]>, Refusal> {
+        let animated: Vec<usize> = self
+            .effect_layers
+            .iter()
+            .enumerate()
+            .filter(|(index, layer)| {
+                layer.is_some()
+                    && crate::layer_source::animates_a_path(&self.resolved, &self.resolved.objects[*index].base().id)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if animated.is_empty() {
+            return Ok(std::borrow::Cow::Borrowed(&self.effect_layers));
+        }
+        let mut layers = self.effect_layers.clone();
+        for index in animated {
+            let previous = layers[index].as_ref().expect("filtered to prepared layers");
+            let source = crate::layer_source::redraw_layer_source_cpu(evaluated, &self.texts, index, &previous.source)?;
+            layers[index] = Some(EffectLayer { source, iterations: previous.iterations.clone() });
+        }
+        Ok(std::borrow::Cow::Owned(layers))
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -396,7 +431,8 @@ fn compose(
     clips: &crate::clip::ClipPlan,
 ) -> Result<RasterSurface, Refusal> {
     crate::render_work::cpu_frame();
-    let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height);
+    let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height)
+        .with_depth(document.color_depth);
     let mut by_object: HashMap<&str, Vec<&crate::rasterise::PreparedPath>> = HashMap::new();
     for path in paths.paths() {
         by_object.entry(path.object_id()).or_default().push(path);
@@ -414,14 +450,18 @@ fn compose(
         let id = object.base().id.as_str();
         let mode = object.base().blend_mode();
         let effects = object.base().effects();
-        // 3.19: a clip child or a track matte source is never drawn itself;
-        // it is a matte.
-        if clips.is_matte(index) {
+        // 3.19: a clip child is never drawn itself; it is a matte. A track
+        // matte source is a matte too, and is also drawn like any layer when
+        // its own visibility says so (3.30, Masking spec v2, 6.2).
+        if clips.is_clip.get(index) == Some(&true) {
             continue;
         }
         let clip = clips.clip_of.get(index).copied().flatten();
         let track = clips.track_of.get(index).copied().flatten();
-        if clip.is_some() || track.is_some() {
+        // 3.28: Preserve Underlying Transparency is drawn alone too, then scaled
+        // by the alpha of what is below it.
+        let preserve = object.base().preserves_underlying_transparency();
+        if clip.is_some() || track.is_some() || preserve {
             // 3.19: a clipped or matted object is drawn alone, as the GPU
             // samples it, multiplied by its clip's matte alpha and then by its
             // track matte's value, then blended in its mode.
@@ -429,7 +469,8 @@ fn compose(
             if !(resolved.visible && resolved.opacity > 0.0) {
                 continue;
             }
-            let mut layer = RasterSurface::transparent(surface.width(), surface.height());
+            let mut layer = RasterSurface::transparent(surface.width(), surface.height())
+                .with_depth(document.color_depth);
             if let Some((pixels, w, h, rows, state)) = layers.warped(index)? {
                 layer.warp_blend(&pixels, w, h, &rows, state.opacity, BlendMode::Normal, 0);
             } else if let Some(object_paths) = by_object.get(id) {
@@ -446,6 +487,11 @@ fn compose(
             if let Some((source, mode)) = track {
                 for (px, m) in layer.pixels_mut().iter_mut().zip(&mattes[&source]) {
                     *px = px.scaled(crate::clip::track_value(*m, mode));
+                }
+            }
+            if preserve {
+                for (px, below) in layer.pixels_mut().iter_mut().zip(surface.pixels()) {
+                    *px = px.scaled(below.a);
                 }
             }
             surface.blend_layer(
@@ -477,7 +523,8 @@ fn compose(
             if !shown {
                 continue;
             }
-            let mut layer = RasterSurface::transparent(surface.width(), surface.height());
+            let mut layer = RasterSurface::transparent(surface.width(), surface.height())
+                .with_depth(document.color_depth);
             if let Some(object_paths) = by_object.get(id) {
                 VelloCpuRasteriser.rasterise_into(object_paths, &mut layer);
             }
@@ -546,11 +593,20 @@ impl LayerPixels<'_> {
             origin: source.origin,
             size: [object.base().width, object.base().height],
             space: self.document.working_color_space,
+            depth: self.document.color_depth,
         };
         let effects = object.base().effects();
         let mut plan = crate::effect_chain::EffectPlan::layout(effects, &layer.iterations);
         plan.pack(effects, &ctx);
-        let pixels = plan.run(layer_surface.pixels(), w, h, &ctx);
+        let weights: Vec<Option<Vec<f32>>> = source
+            .effect_weights
+            .iter()
+            .map(|w| match w {
+                Some(crate::layer_source::EffectWeights::Cpu(values)) => Some(values.clone()),
+                _ => None,
+            })
+            .collect();
+        let pixels = plan.run_with_weights(layer_surface.pixels(), w, h, &ctx, &weights);
         let state = crate::compositor::scene::layer_state(
             object.base().anchor,
             &self.effective[index],
@@ -598,7 +654,8 @@ fn matte(
             continue;
         }
         let canvas = &layers.document.canvas;
-        let mut surface = RasterSurface::transparent(canvas.width, canvas.height);
+        let mut surface = RasterSurface::transparent(canvas.width, canvas.height)
+            .with_depth(layers.document.color_depth);
         let (pixels, w, h, _, _) = layers
             .warped(index)?
             .expect("a matte is drawn in its own layer space");
@@ -646,6 +703,7 @@ mod tests {
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
             id: "scene_1".into(),
             name: "Lower Third".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -666,6 +724,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects,
         }
     }
@@ -881,6 +942,9 @@ mod tests {
                         vertices,
                         in_tangents: vec![v(0.0, 0.0); count],
                         out_tangents: vec![v(0.0, 0.0); count],
+                        vertex_ids: None,
+                        vertex_kinds: None,
+                        auto_tension: None,
                     },
                     compound_paths: None,
                     fill_enabled: false,
@@ -889,6 +953,7 @@ mod tests {
                     trim_start: trim.map(|t| t.0),
                     trim_end: trim.map(|t| t.1),
                     trim_offset: trim.map(|t| t.2),
+                    contour_ids: None,
                 })
             };
         let lit = |object: SceneObject| -> usize {
@@ -1110,6 +1175,9 @@ mod tests {
                 vertices: vec![v(0.0, 0.0), v(300.0, 0.0), v(0.0, 60.0), v(300.0, 120.0)],
                 in_tangents: vec![v(0.0, 0.0); 4],
                 out_tangents: vec![v(0.0, 0.0); 4],
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             compound_paths: None,
             fill_enabled: false,
@@ -1118,6 +1186,7 @@ mod tests {
             trim_start: None,
             trim_end: None,
             trim_offset: None,
+            contour_ids: None,
         });
         let prepared = PreparedScene::prepare(
             document(vec![zigzag]),
@@ -1787,9 +1856,10 @@ mod tests {
     }
 
     /// 3.19: on the CPU reference, each track matte mode lets through what its
-    /// name says, the source at its own opacity, and the source is never drawn.
+    /// name says, the source at its own opacity, and the source is drawn only
+    /// when its own visibility says so (3.30, Masking spec v2, 6.2).
     #[test]
-    fn track_mattes_let_through_alpha_or_luma_and_the_source_is_never_drawn() {
+    fn track_mattes_let_through_alpha_or_luma_and_a_hidden_source_is_not_drawn() {
         use gx_contracts::color::Rgba;
         use gx_contracts::scene::{TrackMatte, TrackMatteMode};
         let rect = |id: &str, x: f64, y: f64, w: f64, h: f64, colour: Rgba| {
@@ -1798,44 +1868,49 @@ mod tests {
             base.fill = Some(ColorValue::Solid { color: colour });
             SceneObject::Rect(RectObject { base, radius: 0.0 })
         };
-        // A red source over x 0..100 (Rec.709 luma 0.2126), visible.
-        let mut objects = vec![rect(
-            "source",
-            0.0,
-            0.0,
-            100.0,
-            500.0,
-            Rgba::srgb(1.0, 0.0, 0.0, 1.0),
-        )];
-        let modes = [
-            TrackMatteMode::Alpha,
-            TrackMatteMode::AlphaInverted,
-            TrackMatteMode::Luma,
-            TrackMatteMode::LumaInverted,
-        ];
-        for (k, mode) in modes.into_iter().enumerate() {
-            let mut consumer = rect(
-                &format!("consumer-{k}"),
+        // A red source over x 0..100 (Rec.709 luma 0.2126), hidden: it still
+        // mattes. `shown` below turns its eye on.
+        let build = |visible: bool| {
+            let mut objects = vec![rect(
+                "source",
                 0.0,
-                100.0 * k as f64,
-                200.0,
-                40.0,
-                Rgba::srgb(1.0, 1.0, 1.0, 1.0),
-            );
-            consumer.base_mut().track_matte = Some(TrackMatte {
-                source_id: "source".into(),
-                mode,
-            });
-            objects.push(consumer);
-        }
-        let prepared = PreparedScene::prepare(
-            document(objects),
-            &HashSet::new(),
-            &AssetBytes::new(),
-            &MaterialSupport::fixed_function(),
-        )
-        .expect("the matted scene prepares");
-        let frame = prepared.frame(OutputTransform::Srgb);
+                0.0,
+                100.0,
+                500.0,
+                Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+            )];
+            objects[0].base_mut().visible = visible;
+            let modes = [
+                TrackMatteMode::Alpha,
+                TrackMatteMode::AlphaInverted,
+                TrackMatteMode::Luma,
+                TrackMatteMode::LumaInverted,
+            ];
+            for (k, mode) in modes.into_iter().enumerate() {
+                let mut consumer = rect(
+                    &format!("consumer-{k}"),
+                    0.0,
+                    100.0 * k as f64,
+                    200.0,
+                    40.0,
+                    Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+                );
+                consumer.base_mut().track_matte = Some(TrackMatte {
+                    source_id: "source".into(),
+                    mode,
+                });
+                objects.push(consumer);
+            }
+            let prepared = PreparedScene::prepare(
+                document(objects),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the matted scene prepares");
+            prepared.frame(OutputTransform::Srgb)
+        };
+        let frame = build(false);
         let alpha = |x: usize, y: usize| frame.pixels[(y * frame.width as usize + x) * 4 + 3];
         // Inside the source (x 50), then outside it (x 150), per mode.
         let rows: Vec<[u8; 2]> = (0..4)
@@ -1845,8 +1920,495 @@ mod tests {
         assert_eq!(rows[1], [0, 255], "inverted alpha");
         assert_eq!(rows[2], [54, 0], "luma 0.2126");
         assert_eq!(rows[3], [201, 255], "inverted luma 0.7874");
-        // Between the consumers, inside the source: the source draws nothing.
-        assert_eq!(alpha(50, 70), 0, "a matte source is never drawn");
+        // Between the consumers, inside the source: a hidden source draws nothing.
+        assert_eq!(alpha(50, 70), 0, "a hidden matte source is not drawn");
+        // Visible, the same source is drawn as well, and still mattes.
+        let shown = build(true);
+        let seen = |x: usize, y: usize| shown.pixels[(y * shown.width as usize + x) * 4 + 3];
+        assert_eq!(seen(50, 70), 255, "a visible matte source is drawn");
+        assert_eq!(seen(150, 20), 0, "and the matte reads it the same");
+    }
+
+    fn white_square_shape(x0: f64, ids: Vec<u32>) -> (SceneObject, gx_contracts::scene::BezierPath) {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::scene::{BezierPath, FillRule, ShapeObject, Vec2};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let path = BezierPath {
+            closed: true,
+            vertices: vec![v(x0, 100.0), v(x0 + 100.0, 100.0), v(x0 + 100.0, 200.0), v(x0, 200.0)],
+            in_tangents: vec![v(0.0, 0.0); 4],
+            out_tangents: vec![v(0.0, 0.0); 4],
+            vertex_ids: Some(ids),
+            vertex_kinds: None,
+            auto_tension: None,
+        };
+        let mut base = ObjectBase::new("box", "box");
+        base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+        let shape = SceneObject::Shape(ShapeObject {
+            base,
+            path: path.clone(),
+            compound_paths: None,
+            fill_enabled: true,
+            stroke_enabled: false,
+            fill_rule: FillRule::Nonzero,
+            trim_start: None,
+            trim_end: None,
+            trim_offset: None,
+            contour_ids: None,
+        });
+        (shape, path)
+    }
+
+    /// 11.112: an animated path is evaluated by vertex id and re-rasterised each frame on
+    /// the reference; between keys of different topology the earlier key holds.
+    #[test]
+    fn an_animated_path_moves_between_its_keys_and_holds_across_a_topology_change() {
+        use gx_contracts::animation::SceneEasing;
+        use gx_contracts::path_anim::{PathChannel, PathKey};
+        use gx_contracts::path_geometry::PathTarget;
+        let (shape, left) = white_square_shape(100.0, vec![0, 1, 2, 3]);
+        let (_, right) = white_square_shape(500.0, vec![0, 1, 2, 3]);
+        let build = |second: gx_contracts::scene::BezierPath| {
+            let mut doc = document(vec![shape.clone()]);
+            doc.timeline.duration_frames = 100;
+            doc.timeline.path_channels = vec![PathChannel {
+                object_id: "box".into(),
+                target: PathTarget::Shape { subpath: 0 },
+                keys: vec![
+                    PathKey { frame: 0, path: left.clone(), easing: SceneEasing::Linear, bezier: None },
+                    PathKey { frame: 20, path: second, easing: SceneEasing::Linear, bezier: None },
+                ],
+            }];
+            PreparedScene::prepare(doc, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
+                .expect("the animated path prepares")
+        };
+        let alpha = |f: &crate::Frame, x: usize, y: usize| f.pixels[(y * f.width as usize + x) * 4 + 3];
+        let scene = build(right.clone());
+        assert!(scene.has_animation(), "a path channel is animation");
+        let at = |frame: u64| scene.frame_at(frame, OutputTransform::Srgb).expect("the frame renders");
+        let (f0, f10, f20) = (at(0), at(10), at(20));
+        assert_eq!((alpha(&f0, 150, 150), alpha(&f0, 350, 150), alpha(&f0, 550, 150)), (255, 0, 0));
+        assert_eq!((alpha(&f10, 150, 150), alpha(&f10, 350, 150), alpha(&f10, 550, 150)), (0, 255, 0), "halfway between the keys");
+        assert_eq!((alpha(&f20, 150, 150), alpha(&f20, 350, 150), alpha(&f20, 550, 150)), (0, 0, 255));
+        assert_eq!(alpha(&at(500), 550, 150), 255, "held after the last key");
+        // The same frame twice is the same pixels: the evaluation has no state.
+        assert_eq!(at(10).pixels, f10.pixels);
+        // Different ids in the same order of count: the earlier key holds, nothing is swapped by index.
+        let (_, odd) = white_square_shape(500.0, vec![0, 2, 1, 3]);
+        let held = build(odd);
+        let frame = held.frame_at(10, OutputTransform::Srgb).expect("the frame renders");
+        assert_eq!(frame.pixels, f0.pixels, "held on the first key");
+    }
+
+    /// A large scene: `n` shapes, and a path channel of `keys` keys for each of the first `channels` of them.
+    fn large_animated_document(n: usize, channels: usize, keys: usize) -> SceneDocument {
+        use gx_contracts::animation::SceneEasing;
+        use gx_contracts::path_anim::{PathChannel, PathKey};
+        use gx_contracts::path_geometry::PathTarget;
+        let mut objects = Vec::with_capacity(n);
+        let mut path_channels = Vec::new();
+        for i in 0..n {
+            let (SceneObject::Shape(mut shape), path) = white_square_shape(10.0 + i as f64, vec![0, 1, 2, 3]) else { unreachable!() };
+            shape.base.id = format!("box-{i}");
+            if i < channels {
+                path_channels.push(PathChannel {
+                    object_id: shape.base.id.clone(),
+                    target: PathTarget::Shape { subpath: 0 },
+                    keys: (0..keys).map(|k| PathKey { frame: k as u64, path: path.clone(), easing: SceneEasing::Linear, bezier: None }).collect(),
+                });
+            }
+            objects.push(SceneObject::Shape(shape));
+        }
+        let mut doc = document(objects);
+        doc.timeline.duration_frames = keys as u64 + 1;
+        doc.timeline.path_channels = path_channels;
+        doc
+    }
+
+    /// The work of a frame copies the one object it draws, not the document, and puts the document back as it was, even after a panic.
+    #[test]
+    fn a_frame_of_an_animated_source_copies_one_object_and_leaves_the_document_as_it_was() {
+        use crate::layer_source::{local_document, with_local_document};
+        let mut doc = large_animated_document(50, 10, 4);
+        let before = doc.clone();
+        let seen = with_local_document(&mut doc, 7, [3.0, 4.0], |local| {
+            let expected = local_document(&before, 7, [3.0, 4.0]);
+            assert_eq!(local, &expected, "the document the work sees is the copy it saw before");
+            (local.objects.len(), local.objects[0].base().id.clone(), local.objects[0].base().x)
+        });
+        assert_eq!(seen, (1, "box-7".to_string(), 3.0));
+        assert_eq!(doc, before, "the document is as it was");
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_local_document(&mut doc, 3, [0.0, 0.0], |_| panic!("a draw that fails half way"))
+        }));
+        assert!(caught.is_err());
+        assert_eq!(doc, before, "a panic in the middle puts the objects back too");
+    }
+
+    /// The copy a frame makes no longer grows with the scene (measured, printed): 2,000 shapes, 200 of them with 8-key path channels.
+    #[test]
+    fn a_frame_of_an_animated_source_costs_less_than_copying_the_document() {
+        use crate::layer_source::{local_document, with_local_document};
+        let mut doc = large_animated_document(2000, 200, 8);
+        let rounds = 40;
+        let start = std::time::Instant::now();
+        for r in 0..rounds {
+            let local = local_document(&doc, r % 200, [0.0, 0.0]);
+            std::hint::black_box(&local);
+        }
+        let whole = start.elapsed();
+        let start = std::time::Instant::now();
+        for r in 0..rounds {
+            with_local_document(&mut doc, r % 200, [0.0, 0.0], |local| {
+                std::hint::black_box(local);
+            });
+        }
+        let swapped = start.elapsed();
+        println!("per frame and animated layer: copy of the document {:?}, one object {:?}", whole / rounds as u32, swapped / rounds as u32);
+        assert!(swapped * 5 < whole, "one object ({swapped:?}) should cost far less than the document ({whole:?})");
+    }
+
+    /// 11.113: an auto vertex draws the handles derived from its neighbours, and a drawn path
+    /// with those handles written out is the same picture.
+    #[test]
+    fn an_auto_vertex_draws_the_derived_handles() {
+        use gx_contracts::path_geometry::{derive_auto_handles, effective};
+        use gx_contracts::scene::{BezierPath, FillRule, ShapeObject, Vec2, VertexKind};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let auto = BezierPath {
+            closed: true,
+            vertices: vec![v(100.0, 100.0), v(300.0, 60.0), v(500.0, 100.0), v(300.0, 300.0)],
+            in_tangents: vec![v(0.0, 0.0); 4],
+            out_tangents: vec![v(0.0, 0.0); 4],
+            vertex_ids: None,
+            vertex_kinds: Some(vec![VertexKind::Auto; 4]),
+            auto_tension: None,
+        };
+        let mut written = auto.clone();
+        for i in 0..4 {
+            let (inn, out) = derive_auto_handles(&auto, i);
+            written.in_tangents[i] = inn;
+            written.out_tangents[i] = out;
+        }
+        written.vertex_kinds = None;
+        assert_eq!(effective(&auto).out_tangents, written.out_tangents);
+        let render = |path: BezierPath| {
+            let (mut object, _) = white_square_shape(0.0, vec![0, 1, 2, 3]);
+            if let SceneObject::Shape(ShapeObject { path: slot, fill_rule, .. }) = &mut object {
+                *slot = path;
+                *fill_rule = FillRule::Nonzero;
+            }
+            PreparedScene::prepare(document(vec![object]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
+                .expect("the shape prepares")
+                .frame(OutputTransform::Srgb)
+        };
+        let (a, b) = (render(auto.clone()), render(written));
+        assert_eq!(a.pixels, b.pixels, "derived handles draw as the same handles written out");
+        // And they are not the straight polygon: the corners of a stored-handle-free polygon differ.
+        let mut polygon = auto;
+        polygon.vertex_kinds = None;
+        assert_ne!(render(polygon).pixels, a.pixels);
+    }
+
+    /// 3.30: two layers may matte each other (a matte reads its source before the source's own matte, so nothing recurses), and a matte
+    /// whose source is gone leaves the layer drawn without one.
+    #[test]
+    fn layers_that_matte_each_other_render_and_a_gone_source_passes_through() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::scene::{TrackMatte, TrackMatteMode};
+        let rect_at = |id: &str, x: f64, source: Option<&str>| {
+            let mut base = ObjectBase::new(id, id);
+            (base.x, base.y, base.width, base.height) = (x, 0.0, 100.0, 40.0);
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+            base.track_matte = source.map(|s| TrackMatte { source_id: s.into(), mode: TrackMatteMode::Alpha });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        let render = |objects: Vec<SceneObject>| {
+            PreparedScene::prepare(document(objects), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
+                .expect("the scene prepares")
+                .frame(OutputTransform::Srgb)
+        };
+        let alpha = |f: &crate::Frame, x: usize| f.pixels[(20 * f.width as usize + x) * 4 + 3];
+        // A (0..100) matted by B (50..150) and B by A: each shows only where the other is, so both show 50..100.
+        let mutual = render(vec![rect_at("a", 0.0, Some("b")), rect_at("b", 50.0, Some("a"))]);
+        assert_eq!([alpha(&mutual, 25), alpha(&mutual, 75), alpha(&mutual, 125)], [0, 255, 0]);
+        // A chain: c is matted by a, which is matted by b. The matte reads a's pixels (0..100), not a after b.
+        let hidden = |mut object: SceneObject| {
+            object.base_mut().visible = false;
+            object
+        };
+        let chain = render(vec![hidden(rect_at("a", 0.0, Some("b"))), hidden(rect_at("b", 50.0, None)), rect_at("c", 20.0, Some("a"))]);
+        assert_eq!(alpha(&chain, 30), 255, "c shows over a's own pixels, 20..100, inside a");
+        assert_eq!(alpha(&chain, 110), 0);
+        // A source that is not in the scene: the layer is drawn, unmatted.
+        let gone = render(vec![rect_at("a", 0.0, Some("missing"))]);
+        assert_eq!([alpha(&gone, 25), alpha(&gone, 75), alpha(&gone, 125)], [255, 255, 0]);
+    }
+
+    /// 3.30 (spec 6.5): the matte inspection views are drawn by the engine from a changed copy of the document.
+    #[test]
+    fn the_matte_views_draw_the_alpha_the_luma_and_the_layer_with_and_without_its_matte() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::matte_view::{matte_view_document, MatteView, MatteViewRequest};
+        use gx_contracts::scene::{TrackMatte, TrackMatteMode};
+        let rect_at = |id: &str, x: f64, colour: Rgba, source: Option<&str>| {
+            let mut base = ObjectBase::new(id, id);
+            (base.x, base.y, base.width, base.height) = (x, 0.0, 100.0, 40.0);
+            base.fill = Some(ColorValue::Solid { color: colour });
+            base.track_matte = source.map(|s| TrackMatte { source_id: s.into(), mode: TrackMatteMode::Alpha });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        let doc = document(vec![
+            rect_at("card", 0.0, Rgba::srgb(0.0, 0.0, 1.0, 1.0), Some("disc")),
+            rect_at("disc", 50.0, Rgba::srgb(1.0, 0.5, 0.0, 0.5), None),
+        ]);
+        let render = |view: Option<MatteView>| {
+            let shown = match view {
+                Some(view) => matte_view_document(&doc, &MatteViewRequest { object_id: "card".into(), view }).unwrap(),
+                None => doc.clone(),
+            };
+            PreparedScene::prepare(shown, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
+                .expect("the view prepares")
+                .frame(OutputTransform::Srgb)
+        };
+        let px = |f: &crate::Frame, x: usize| {
+            let i = (20 * f.width as usize + x) * 4;
+            [f.pixels[i], f.pixels[i + 1], f.pixels[i + 2], f.pixels[i + 3]]
+        };
+        // The source's alpha: white where the source is, at its own half alpha; nothing elsewhere.
+        let alpha = render(Some(MatteView::Alpha));
+        assert_eq!(px(&alpha, 25), [0, 0, 0, 0]);
+        let a = px(&alpha, 100);
+        assert!(a[0] > 250 && a[1] > 250 && a[2] > 250 && (126..=129).contains(&a[3]), "{a:?}");
+        // The luma: a grey, not the orange, at about half the orange's luma (alpha times Y).
+        let luma = render(Some(MatteView::Luma));
+        let l = px(&luma, 100);
+        assert!(l[0] == l[1] && l[1] == l[2], "grey: {l:?}");
+        assert!(l[3] >= 126 && l[3] <= 129, "{l:?}");
+        // Without its matte the card is whole; with it the card is where the disc is, and the disc itself is not drawn.
+        let before = render(Some(MatteView::Before));
+        assert_eq!([px(&before, 25)[2], px(&before, 25)[3]], [255, 255]);
+        let applied = render(Some(MatteView::Applied));
+        assert_eq!(px(&applied, 25)[3], 0);
+        assert!((126..=129).contains(&px(&applied, 75)[3]), "the matte's own half alpha: {:?}", px(&applied, 75));
+        assert_eq!(px(&applied, 125)[3], 0);
+        // The ordinary frame is not any of them.
+        assert_ne!(render(None).pixels, applied.pixels);
+    }
+
+    /// 11.108: a mask's variable feather, from the contract's points to the layer's pixels.
+    #[test]
+    fn a_mask_with_feather_points_softens_its_edge_by_the_amount_the_points_give_along_it() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::scene::{BezierPath, FeatherPoint, Mask, MaskFalloff, MaskMode, Vec2};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let build = |points: Option<Vec<FeatherPoint>>, falloff: Option<MaskFalloff>| {
+            let mut base = ObjectBase::new("card", "card");
+            (base.x, base.y, base.width, base.height) = (0.0, 0.0, 200.0, 80.0);
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+            base.masks = Some(vec![Mask {
+                id: None,
+                path: BezierPath {
+                    closed: true,
+                    vertices: vec![v(40.0, 0.0), v(160.0, 0.0), v(160.0, 80.0), v(40.0, 80.0)],
+                    in_tangents: vec![v(0.0, 0.0); 4],
+                    out_tangents: vec![v(0.0, 0.0); 4],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
+                },
+                mode: MaskMode::Add,
+                feather: 0.0,
+                feather_y: None,
+                falloff,
+                feather_points: points,
+                expansion: 0.0,
+                opacity: 1.0,
+                inverted: false,
+            }]);
+            PreparedScene::prepare(
+                document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the scene prepares")
+            .frame(OutputTransform::Srgb)
+        };
+        let alpha = |f: &crate::Frame, x: usize| f.pixels[(40 * f.width as usize + x) * 4 + 3];
+        // The left edge (segment 3, from (40,80) back up to (40,0)) fades 20 pixels inward; the right edge stays hard.
+        let points = vec![FeatherPoint { segment: 3, t: 0.5, radius: -20.0, tension: 0.0 }, FeatherPoint { segment: 1, t: 0.5, radius: 0.0, tension: 0.0 }];
+        let linear = build(Some(points.clone()), Some(MaskFalloff::Linear));
+        assert_eq!(alpha(&linear, 20), 0, "outside the mask");
+        assert!((i32::from(alpha(&linear, 50)) - 127).abs() <= 8, "ten pixels in, halfway through a 20 pixel fade: {}", alpha(&linear, 50));
+        assert_eq!(alpha(&linear, 100), 255);
+        assert_eq!(alpha(&linear, 158), 255, "the right edge is hard up to the edge");
+        assert_eq!(alpha(&linear, 165), 0);
+        // Smooth is not linear: a quarter in it is less than a quarter.
+        let smooth = build(Some(points), None);
+        assert!(alpha(&smooth, 45) < alpha(&linear, 45), "{} against {}", alpha(&smooth, 45), alpha(&linear, 45));
+        // No points: the edge is hard, as a mask with no feather is.
+        let hard = build(None, None);
+        assert_eq!([alpha(&hard, 38), alpha(&hard, 42)], [0, 255]);
+    }
+
+    /// 3.28: an effect with a mask reference acts only where its masks cover,
+    /// and a mask in mode `none` serves as the reference without clipping.
+    #[test]
+    fn an_effect_with_a_mask_reference_acts_only_where_the_mask_covers() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::effect::{Effect, EffectInstance, Fill};
+        use gx_contracts::scene::{BezierPath, Mask, MaskMode, Vec2};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let left_half = BezierPath {
+            closed: true,
+            vertices: vec![v(0.0, 0.0), v(100.0, 0.0), v(100.0, 40.0), v(0.0, 40.0)],
+            in_tangents: vec![v(0.0, 0.0); 4],
+            out_tangents: vec![v(0.0, 0.0); 4],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
+        };
+        let build = |reference: Option<&str>, mode: MaskMode| {
+            let mut base = ObjectBase::new("card", "card");
+            (base.x, base.y, base.width, base.height) = (0.0, 0.0, 200.0, 40.0);
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+            base.masks = Some(vec![Mask {
+                id: Some("left".into()),
+                path: left_half.clone(),
+                mode,
+                feather: 0.0,
+                feather_y: None,
+                falloff: None,
+                feather_points: None,
+                expansion: 0.0,
+                opacity: 1.0,
+                inverted: false,
+            }]);
+            let mut fx = EffectInstance::new(
+                "red",
+                Effect::Fill(Fill { color: Rgba::srgb(1.0, 0.0, 0.0, 1.0), opacity: 1.0 }),
+            );
+            fx.mask_ids = reference.map(|id| vec![id.to_string()]);
+            base.effects = Some(vec![fx]);
+            let prepared = PreparedScene::prepare(
+                document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the scene prepares");
+            prepared.frame(OutputTransform::Srgb)
+        };
+        let px = |f: &crate::Frame, x: usize| {
+            let i = (20 * f.width as usize + x) * 4;
+            [f.pixels[i], f.pixels[i + 1], f.pixels[i + 2], f.pixels[i + 3]]
+        };
+        // With a reference in mode none: the fill is red on the left, the layer is whole and white on the right.
+        let limited = build(Some("left"), MaskMode::None);
+        assert_eq!(px(&limited, 50), [255, 0, 0, 255], "red where the mask covers");
+        assert_eq!(px(&limited, 150), [255, 255, 255, 255], "untouched, and not clipped, outside it");
+        // The same effect with no reference is red everywhere the layer is (the mask in mode none clips nothing).
+        let everywhere = build(None, MaskMode::None);
+        assert_eq!([px(&everywhere, 50), px(&everywhere, 150)], [[255, 0, 0, 255]; 2]);
+    }
+
+    /// 3.28 (M-37): the effect's reference changes where the effect acts and nothing about
+    /// the layer's own mask: a clipping mask and a reference mask are two different things.
+    #[test]
+    fn changing_an_effect_reference_does_not_change_the_layers_own_mask() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::effect::{Effect, EffectInstance, Fill};
+        use gx_contracts::scene::{BezierPath, Mask, MaskMode, Vec2};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let strip = |id: &str, mode: MaskMode, x1: f64| Mask {
+            id: Some(id.into()),
+            path: BezierPath {
+                closed: true,
+                vertices: vec![v(0.0, 0.0), v(x1, 0.0), v(x1, 40.0), v(0.0, 40.0)],
+                in_tangents: vec![v(0.0, 0.0); 4],
+                out_tangents: vec![v(0.0, 0.0); 4],
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
+            },
+            mode,
+            feather: 0.0,
+            feather_y: None,
+            falloff: None,
+            feather_points: None,
+            expansion: 0.0,
+            opacity: 1.0,
+            inverted: false,
+        };
+        let build = |reference: &str| {
+            let mut base = ObjectBase::new("card", "card");
+            (base.x, base.y, base.width, base.height) = (0.0, 0.0, 200.0, 40.0);
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+            // A clip over x 0..150, and a reference-only mask over x 0..50 (mode none).
+            base.masks = Some(vec![strip("clip", MaskMode::Add, 150.0), strip("only", MaskMode::None, 50.0), strip("wide", MaskMode::None, 100.0)]);
+            let mut fx = EffectInstance::new(
+                "red",
+                Effect::Fill(Fill { color: Rgba::srgb(1.0, 0.0, 0.0, 1.0), opacity: 1.0 }),
+            );
+            fx.mask_ids = Some(vec![reference.to_string()]);
+            base.effects = Some(vec![fx]);
+            PreparedScene::prepare(
+                document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the scene prepares")
+            .frame(OutputTransform::Srgb)
+        };
+        let px = |f: &crate::Frame, x: usize| {
+            let i = (20 * f.width as usize + x) * 4;
+            [f.pixels[i], f.pixels[i + 1], f.pixels[i + 2], f.pixels[i + 3]]
+        };
+        for (reference, red_to) in [("only", 50), ("wide", 100)] {
+            let frame = build(reference);
+            assert_eq!(px(&frame, red_to / 2), [255, 0, 0, 255], "{reference}: red inside the reference");
+            assert_eq!(px(&frame, red_to + 20), [255, 255, 255, 255], "{reference}: white outside it, inside the clip");
+            // The clip is the same whichever mask the effect names.
+            assert_eq!(px(&frame, 140)[3], 255, "{reference}: the clip keeps x 140");
+            assert_eq!(px(&frame, 160)[3], 0, "{reference}: the clip removes x 160");
+        }
+    }
+
+    /// 3.28: Preserve Underlying Transparency scales a layer by the alpha of
+    /// what is composited below it, so it shows only over what is there.
+    #[test]
+    fn preserve_underlying_transparency_shows_a_layer_only_over_what_is_below() {
+        use gx_contracts::color::Rgba;
+        let rect = |id: &str, x: f64, w: f64, opacity: f64, preserve: bool| {
+            let mut base = ObjectBase::new(id, id);
+            (base.x, base.y, base.width, base.height) = (x, 0.0, w, 40.0);
+            base.opacity = opacity;
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+            base.preserve_underlying_transparency = preserve.then_some(true);
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        // Below: a half-opaque rect over x 0..100. Above: a full-width layer.
+        let build = |preserve: bool| {
+            let prepared = PreparedScene::prepare(
+                document(vec![rect("below", 0.0, 100.0, 0.5, false), rect("above", 0.0, 200.0, 1.0, preserve)]),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the scene prepares");
+            prepared.frame(OutputTransform::Srgb)
+        };
+        let plain = build(false);
+        let kept = build(true);
+        let alpha = |f: &crate::Frame, x: usize| f.pixels[(20 * f.width as usize + x) * 4 + 3];
+        // Without the switch the layer covers everything it spans.
+        assert_eq!([alpha(&plain, 50), alpha(&plain, 150)], [255, 255]);
+        // With it: over the half-opaque rect it is half as opaque again, over nothing it is nothing.
+        // below .5, then above scaled by .5 over it: .5 + .5 * .5 = .75.
+        assert!((i32::from(alpha(&kept, 50)) - 191).abs() <= 1, "{}", alpha(&kept, 50));
+        assert_eq!(alpha(&kept, 150), 0, "over nothing it shows nothing");
     }
 
     /// The render features (3.17 to 3.19) authored through the scene edits, as
@@ -1956,10 +2518,10 @@ mod tests {
             "clip group"
         );
         // The matte source lets the plate through where they overlap, and is
-        // never drawn where it stands alone.
+        // drawn where it stands alone because it is visible (3.30).
         assert_eq!(
             [alpha(850, 60), alpha(950, 60), alpha(1050, 60)],
-            [0, 255, 0],
+            [0, 255, 255],
             "track matte"
         );
         // The trimmed stroke lights half what the untrimmed one does.

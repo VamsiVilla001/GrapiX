@@ -124,7 +124,7 @@ fn an_unauthenticated_take_is_refused_and_never_reaches_program() {
 #[test]
 fn authenticating_then_taking_works_on_the_same_connection() {
     let (addr, _engine) = protected();
-    let mut raw = RawPeer::connect(addr);
+    let mut raw = RawPeer::connect(addr).signed_in("Test Operator");
 
     let authed = raw.send(ClientRequest::Authenticate {
         token: credential(TOKEN).as_str().to_owned(),
@@ -177,6 +177,9 @@ fn program_survives_a_reconnect_and_the_epoch_matches() {
     // client's knowledge of Program, not Program itself.
     let (addr, _engine) = protected();
     let mut client = Client::connect_with_token(addr, credential(TOKEN)).expect("connect");
+    client.set_operator(Some(
+        &gx_contracts::auth::OperatorName::parse("Test Operator").unwrap(),
+    ));
 
     assert!(matches!(client.handle(take()), EngineReply::Taken(_)));
 
@@ -242,12 +245,23 @@ fn reconnecting_re_authenticates_so_a_rotated_token_stops_working() {
 struct RawPeer {
     stream: TcpStream,
     seq: u64,
+    /// Who the raw peer says is operating it (2.15); sent with every request.
+    operator: Option<String>,
 }
 
 impl RawPeer {
     fn connect(addr: SocketAddr) -> Self {
         let stream = TcpStream::connect(addr).expect("connect");
-        Self { stream, seq: 0 }
+        Self {
+            stream,
+            seq: 0,
+            operator: None,
+        }
+    }
+
+    fn signed_in(mut self, name: &str) -> Self {
+        self.operator = Some(name.to_owned());
+        self
     }
 
     fn send(&mut self, request: ClientRequest) -> EngineReply {
@@ -256,7 +270,8 @@ impl RawPeer {
             MessageId(format!("raw.{}", self.seq)),
             Sequence(self.seq),
             request,
-        );
+        )
+        .with_operator(self.operator.clone());
         let frame = encode(&envelope).expect("encode");
         self.stream.write_all(&frame).expect("write");
         self.stream.flush().expect("flush");

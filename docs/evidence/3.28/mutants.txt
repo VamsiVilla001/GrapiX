@@ -1,0 +1,18 @@
+mix-swapped                          killed by
+mix-default-zero                     SURVIVED
+mix-pass-identity                    killed by
+no-save-pre                          killed by
+reference-none-counts-lost           killed by
+reference-filter-inverted            killed by
+weights-not-passed                   killed by
+preserve-ignored                     killed by
+preserve-not-drawn-alone             killed by
+reference-to-unknown-mask-allowed    killed by
+duplicate-mask-id-allowed            killed by
+gpu-mix-ignores-mask                 killed by
+gpu-mix-reads-wrong-weight           killed by
+gpu-preserve-ignored                 killed by
+gpu-preserve-flag-not-sent           killed by
+killed 14 of 15; survivors:
+
+After the first run: mix-default-zero survived; a new test (a_mask_reference_mixes_the_effect_with_its_input_by_the_weights) catches it. 15 of 15.

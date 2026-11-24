@@ -136,6 +136,8 @@ export const CARD_SORT_LAYOUT: Layout = {
         "preview",
         "unsupported",
         "inspector",
+        "pivot",
+        "masks",
         "animation",
         "effect-controls",
         "text-styles",
@@ -148,7 +150,7 @@ export const CARD_SORT_LAYOUT: Layout = {
       groups: [
         {
           id: "inspector-group",
-          panels: ["inspector", "animation", "effect-controls", "text-styles", "fonts"],
+          panels: ["inspector", "pivot", "masks", "animation", "effect-controls", "text-styles", "fonts"],
           active: "inspector",
         },
         { id: "library-group", panels: ["effects", "materials"], active: "effects" },

@@ -7,6 +7,14 @@
     "BezierPath": {
       "description": "A cubic bezier path, structured like Lottie/Bodymovin's \"sh\" shape so it\nround-trips with the web's proven vector-animation format. Segment k→k+1 is\na cubic bezier; tangents are relative to their vertex. All three arrays\nmust be the same length — the constraint that also makes a path animatable.",
       "properties": {
+        "autoTension": {
+          "description": "Tension of the `auto` handles, 0 to 1 (default 0.5: centripetal\nCatmull-Rom). Absent means the default.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "closed": {
           "type": "boolean"
         },
@@ -21,6 +29,28 @@
             "$ref": "#/$defs/Vec2"
           },
           "type": "array"
+        },
+        "vertexIds": {
+          "description": "A stable id per vertex (11.112), parallel to `vertices`; absent on old\nscenes (the vertex index then stands for it). Ids survive inserts,\ndeletes, reversal and undo, so two keys of an animated path correspond\nby id, never by index.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "vertexKinds": {
+          "description": "The kind of each vertex (11.113), parallel to `vertices`; absent means\n\"inferred from the handles\" as before. An `auto` vertex's stored handles\nare ignored: [`BezierPath::effective`] derives them.",
+          "items": {
+            "$ref": "#/$defs/VertexKind"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "vertices": {
           "items": {
@@ -37,6 +67,39 @@
       ],
       "type": "object"
     },
+    "FeatherPoint": {
+      "description": "A point of a mask's variable feather (11.108, Masking spec v2 4.6): where on the mask's path it sits (segment `segment`, parameter `t`),\nhow far the edge softens there and how smoothly that blends into the next point.",
+      "properties": {
+        "radius": {
+          "description": "Signed, in pixels of the layer: positive softens the edge outward, negative inward; the transition spans `|radius|` on that\nside only. Zero is a hard edge there.",
+          "format": "double",
+          "type": "number"
+        },
+        "segment": {
+          "description": "The segment of the mask's path the point is on.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "t": {
+          "description": "Where on that segment, 0 to 1.",
+          "format": "double",
+          "type": "number"
+        },
+        "tension": {
+          "default": 0.0,
+          "description": "0 to 1: how the radius changes toward the next point: 0 in a straight line, 1 smoothly (smoothstep).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "segment",
+        "t",
+        "radius"
+      ],
+      "type": "object"
+    },
     "Mask": {
       "description": "One layer mask (3.19): a closed path in the object's own coordinates.",
       "properties": {
@@ -46,11 +109,47 @@
           "format": "double",
           "type": "number"
         },
+        "falloff": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MaskFalloff"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the feather falls off (3.27); a Gaussian when absent."
+        },
         "feather": {
           "default": 0.0,
           "description": "Softens the edge: a Gaussian blur of the mask's coverage, in pixels\n(the blur's standard deviation is half of it).",
           "format": "double",
           "type": "number"
+        },
+        "featherPoints": {
+          "description": "Variable feather (11.108): when there are points, the edge softens by the amount the points give along the path (blended around\nthe closed contour by distance along it) instead of by `feather`, which then does nothing. Absent or empty: the uniform feather.",
+          "items": {
+            "$ref": "#/$defs/FeatherPoint"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "featherY": {
+          "description": "The feather across the other axis, in pixels; absent, the same as\n`feather` (3.27). Both are in the object's own pixels, so the viewer's\nzoom never changes them.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "A name that stays with the mask when the stack is reordered or renamed,\nwhich an effect's mask reference points at (3.28). Absent for a mask\nnothing refers to; unique within the object when present.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "inverted": {
           "default": false,
@@ -73,6 +172,21 @@
         "path"
       ],
       "type": "object"
+    },
+    "MaskFalloff": {
+      "description": "How a mask's feather falls off across its edge (3.27, Masking spec v2).",
+      "oneOf": [
+        {
+          "const": "smooth",
+          "description": "A Gaussian: the edge ramps like an S, softest at the ends.",
+          "type": "string"
+        },
+        {
+          "const": "linear",
+          "description": "A box of the feather's width: the edge ramps in a straight line.",
+          "type": "string"
+        }
+      ]
     },
     "MaskMode": {
       "description": "How a mask combines with the masks above it (3.19), After Effects' modes.",
@@ -99,7 +213,17 @@
         },
         {
           "const": "difference",
-          "description": "Keeps where exactly one of it and the masks above covers.",
+          "description": "Keeps where exactly one of it and the masks above covers; on soft\ncoverage the absolute difference of the two (the Masking spec v2's\nbaseline, `|a - c|`).",
+          "type": "string"
+        },
+        {
+          "const": "lighten",
+          "description": "Keeps the larger of its coverage and the masks above's.",
+          "type": "string"
+        },
+        {
+          "const": "darken",
+          "description": "Keeps the smaller of its coverage and the masks above's.",
           "type": "string"
         }
       ]
@@ -121,6 +245,31 @@
         "y"
       ],
       "type": "object"
+    },
+    "VertexKind": {
+      "description": "How a path vertex's handles behave (11.113, pen spec v2 section 4).",
+      "oneOf": [
+        {
+          "const": "corner",
+          "description": "Handles move independently (or are absent).",
+          "type": "string"
+        },
+        {
+          "const": "smooth",
+          "description": "Handles stay collinear and opposite; each keeps its own length.",
+          "type": "string"
+        },
+        {
+          "const": "symmetric",
+          "description": "Handles stay collinear, opposite and of equal length.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Handles are derived from the neighbours; stored ones are ignored.",
+          "type": "string"
+        }
+      ]
     }
   },
   "additionalProperties": false,

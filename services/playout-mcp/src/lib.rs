@@ -65,6 +65,8 @@ pub struct AssetPlaneImages(pub std::net::SocketAddr);
 
 impl ImageSource for AssetPlaneImages {
     fn fetch(&self, hash: &gx_contracts::ContentHash) -> Result<Vec<u8>, Refusal> {
+        // 2.24: under the credential this process holds for the engine's asset plane, if any.
+        let _credential = gx_asset_plane::auth::enter_from_environment();
         gx_asset_plane::publish::fetch_bytes(self.0, hash).map_err(transport_failed)
     }
 }
@@ -595,6 +597,7 @@ mod tests {
     fn scene(id: &str) -> gx_contracts::scene::SceneDocument {
         gx_contracts::scene::SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
             id: id.into(),
             name: id.into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -615,6 +618,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: Vec::new(),
         }
     }

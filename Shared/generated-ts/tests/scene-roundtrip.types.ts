@@ -191,10 +191,10 @@ const scene: SceneDocument = {
   id: "scene_1",
   name: "Lower Third",
   version: 2,
-  workingColorSpace: "srgb",
+  workingColorSpace: "srgb", colorDepth: "32",
   revision: 3n,
   canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
-  timeline: { durationFrames: 250n, channels: [], phases: [] },
+  timeline: { durationFrames: 250n, channels: [], phases: [], pathChannels: [] },
   dataContext: {},
   assets: [
     {
@@ -212,7 +212,7 @@ const scene: SceneDocument = {
   fonts: [],
   materials: [],
   controls: [],
-  textStyles: [],
+  textStyles: [], pathLinks: [], guides: [],
   objects: catalogue,
 };
 

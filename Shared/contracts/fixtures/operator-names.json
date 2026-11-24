@@ -1,0 +1,28 @@
+{
+  "_comment": "2.15: what a person may be called when they sign in to Playout. Read by the Rust parser (gx-contracts auth tests) and the Playout page (Playout/tests/operator.test.mjs), so the two cannot disagree. Rules: trimmed; 1 to 64 characters; letters (any script), digits, and the characters space . ' - _ ; starts with a letter or digit; never two spaces in a row.",
+  "cases": [
+    { "input": "Ada", "name": "Ada" },
+    { "input": "  Ada Lovelace  ", "name": "Ada Lovelace" },
+    { "input": "A. N. Other", "name": "A. N. Other" },
+    { "input": "O'Brien-Smith_2", "name": "O'Brien-Smith_2" },
+    { "input": "José Álvarez", "name": "José Álvarez" },
+    { "input": "李小龍", "name": "李小龍" },
+    { "input": "7", "name": "7" },
+    { "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    { "input": "", "reason": "empty" },
+    { "input": "   ", "reason": "empty" },
+    { "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reason": "tooLong" },
+    { "input": "Ada\nLovelace", "reason": "badCharacter" },
+    { "input": "Ada\tLovelace", "reason": "badCharacter" },
+    { "input": "Ada<Lovelace>", "reason": "badCharacter" },
+    { "input": "Ada;Lovelace", "reason": "badCharacter" },
+    { "input": "Ada\u00a0Lovelace", "reason": "badCharacter" },
+    { "input": "Ada<", "reason": "badCharacter" },
+    { "input": "Ada/Lovelace", "reason": "badCharacter" },
+    { "input": "Ada@home", "reason": "badCharacter" },
+    { "input": "Ada,Lovelace", "reason": "badCharacter" },
+    { "input": "-Ada", "reason": "badStart" },
+    { "input": "'quoted'", "reason": "badStart" },
+    { "input": "Ada  Lovelace", "reason": "doubleSpace" }
+  ]
+}

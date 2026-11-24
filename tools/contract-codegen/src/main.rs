@@ -29,13 +29,13 @@ use gx_contracts::command::{
     ApplyPreset, ApplyTextStyle, CloseScene, CommandOutcome, ConfirmDesignSystem, CreateKeyframe,
     CreateObject, CreateProject, CreateScene, CreateShape, DeclareControl, DeleteMaterial,
     DeleteObject, DeleteScene, DuplicateObject, DuplicateScene, EditEffect, EditProperty,
-    EditScene, EditorCommand, HistoryDirection, MoveKeyframe, OpenScene, PresetPhase, Redo,
-    RelinkAsset, RelinkMaterial, RemoveControl, RemoveKeyframe, RemovePhase, RenameObject,
-    ReplaceControl, ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget,
-    SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey, SessionView,
-    SetAnchor, SetBinding, SetBlendMode, SetClipChild, SetEffects, SetGroupChildren,
+    EditScene, EditorCommand, HistoryDirection, HistoryStep, HistoryView, MoveKeyframe, OpenScene,
+    PresetPhase, Redo, RelinkAsset, RelinkMaterial, RemoveControl, RemoveKeyframe, RemovePhase,
+    RenameObject, ReplaceControl, ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage,
+    SaveTarget, SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
+    SessionView, SetAnchor, SetBinding, SetBlendMode, SetClipChild, SetEffects, SetGroupChildren,
     SetObjectField, SetObjectLocked, SetObjectMasks, SetObjectVisible, SetPaint, SetPhase,
-    SetSceneId, SetSceneName, SetShapePath, SetStroke, SetTrackMatte, SetTrim, Undo,
+    EditPath, SetPreserveTransparency, SetSceneId, SetSceneName, SetShapePath, SetStroke, SetTrackMatte, SetTrim, Undo,
     UpdateKeyframe,
 };
 use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue, TakePage};
@@ -46,6 +46,11 @@ use gx_contracts::design_system::{
     MotionPreset, MotionTokens, NamedEasing, PresetParam, Provenance, Stagger, StampedTemplate,
     TokenMapping, TokenRef, UnexpressibleToken, VisualTokens,
 };
+use gx_contracts::figma_frame::{
+    FigmaColor, FigmaEffect, FigmaNode, FigmaPaint, FigmaStop, FigmaText,
+};
+use gx_contracts::cue_suggest::{CueDiffLine, CueNaming, CuePlan, DiffKind, SuggestRequest, SuggestTarget};
+use gx_contracts::ids::{CueEntry, CueId, CueTable, IdFault};
 use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
     FontStyle,
@@ -61,6 +66,8 @@ use gx_contracts::mcp::{
     ToolDescriptor, ToolEffect,
 };
 use gx_contracts::object_edit::ObjectField;
+use gx_contracts::matte_view::{MatteView, MatteViewRequest};
+use gx_contracts::path_geometry::{HandleCoupling, HandleSide, PathOp, PathTarget};
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::provenance::{
     AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool,
@@ -76,6 +83,10 @@ use gx_contracts::scene::{
     SlabProperties, StrokeCap, StrokeJoin, StrokeStyle, TextAlign, TextAutoFit, TextCase,
     TextDecoration, TextDirection, TextLayout, TextObject, TextOverflow, TrackMatte,
     TrackMatteMode, Vec2, Vec3, VerticalAlign, WritingMode,
+};
+use gx_contracts::settings::{
+    DefaultInterpolation, LogLevel, MachineSettings, ProcessPriority, SettingsScope,
+    StartupBehaviour, UserSettings,
 };
 use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
 use gx_contracts::{
@@ -124,6 +135,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Role,
         Scope,
         TakeId,
+        // identifiers (1.13)
+        CueId,
+        CueEntry,
+        CueTable,
+        IdFault,
+        // bulk Cue ID suggestion (12.15)
+        CueNaming,
+        SuggestTarget,
+        SuggestRequest,
+        DiffKind,
+        CueDiffLine,
+        CuePlan,
         ContentHash,
         Revision,
         // published revisions and review (11.38)
@@ -150,6 +173,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FontStyle,
         FontFaceDefinition,
         FontDefinition,
+        // application settings (2.28)
+        UserSettings,
+        MachineSettings,
+        SettingsScope,
+        StartupBehaviour,
+        DefaultInterpolation,
+        ProcessPriority,
+        LogLevel,
         // gx-contracts: colour (1.4)
         WorkingColorSpace,
         SourceColorSpace,
@@ -251,6 +282,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Substitution,
         ImportEntry,
         ImportReport,
+        // gx-contracts: the typed Figma frame an agent hands to scenes.ingest_figma (18.2)
+        FigmaColor,
+        FigmaStop,
+        FigmaPaint,
+        FigmaEffect,
+        FigmaText,
+        FigmaNode,
         // gx-contracts: typed Editor command model (11.36)
         SessionKey,
         SceneOrigin,
@@ -317,8 +355,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SetAnchor,
         SetEffects,
         SetShapePath,
+        EditPath,
+        PathTarget,
+        PathOp,
+        MatteView,
+        MatteViewRequest,
+        HandleSide,
+        HandleCoupling,
         EditEffect,
         SessionView,
+        HistoryStep,
+        HistoryView,
         CommandOutcome,
         // gx-contracts: declared template controls (11.26)
         ControlFieldKind,

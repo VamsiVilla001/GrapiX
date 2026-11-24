@@ -31,6 +31,7 @@
 
 import { createBridge, corrOf, installCapture } from "./shell-bridge.js";
 import { createTelemetryPanel } from "./telemetry-panel.js";
+import { describeNameFault, parseOperatorName } from "./operator.js";
 
 const rawBridge = globalThis.__TAURI__ && globalThis.__TAURI__.core;
 const inShell = typeof rawBridge?.invoke === "function";
@@ -228,6 +229,9 @@ const ui = {
   endpointInput: id("endpointInput"),
   tokenInput: id("tokenInput"),
   connectButton: id("connectButton"),
+  operatorInput: id("operatorInput"),
+  operatorHint: id("operatorHint"),
+  signInButton: id("signInButton"),
   refreshButton: id("refreshButton"),
   telemetryButton: id("telemetryButton"),
   connectionState: id("connectionState"),
@@ -321,6 +325,8 @@ function setChip(node, text, variant) {
 
 const session = {
   connected: false,
+  /** The signed-in operator's name as the shell holds it, or null (2.15). */
+  operator: null,
   /** Last `prominence` derived from the engine's severity. */
   prominence: "blocking",
   /** `clock.label`, verbatim, as last reported. */
@@ -399,6 +405,61 @@ function logCommitted(kind, committed) {
 function logFailure(kind, err) {
   const { name, detail, kind: outcome } = describeError(err);
   log(kind, outcome === "refused" ? "refused" : "error", name, detail);
+  // The engine says there is no operator on this command: the shell's own answer is the
+  // truth, so the page asks it rather than keep showing a name that no longer holds.
+  if (err && typeof err === "object" && err.refusal?.refusal === "operatorRequired") void syncOperator();
+}
+
+// ---------------------------------------------------------------------------
+// The operator (2.15).
+// ---------------------------------------------------------------------------
+
+function renderOperator() {
+  const name = session.operator;
+  ui.operatorInput.value = name ?? ui.operatorInput.value;
+  ui.operatorInput.readOnly = name !== null;
+  ui.operatorHint.textContent = name === null ? "signed out" : "signed in";
+  ui.signInButton.textContent = name === null ? "Sign in" : "Sign out";
+  refreshTransportGate();
+}
+
+/** Ask the shell who is signed in; the shell holds it, not this page. */
+async function syncOperator() {
+  try {
+    const view = await invoke("cmd_operator");
+    session.operator = typeof view?.name === "string" ? view.name : null;
+  } catch (err) {
+    session.operator = null;
+    logFailure("OPERATOR", err);
+  }
+  renderOperator();
+}
+
+async function doSignIn() {
+  const parsed = parseOperatorName(ui.operatorInput.value);
+  if (!parsed.ok) {
+    log("OPERATOR", "error", "sign-in not sent", describeNameFault(parsed.reason));
+    return;
+  }
+  try {
+    const view = await invoke("cmd_sign_in", { name: parsed.name });
+    session.operator = view.name;
+    log("OPERATOR", "ok", `${view.name} signed in`, "Program commands now carry this name.");
+  } catch (err) {
+    logFailure("OPERATOR", err);
+  }
+  renderOperator();
+}
+
+async function doSignOut() {
+  try {
+    await invoke("cmd_sign_out");
+    log("OPERATOR", "ok", `${session.operator ?? "operator"} signed out`, "Program commands are held until someone signs in.");
+    session.operator = null;
+  } catch (err) {
+    logFailure("OPERATOR", err);
+  }
+  renderOperator();
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +664,13 @@ function refreshTransportGate() {
     ui.transportBlockWhy.textContent =
       "Program commands cannot be sent from here. Program itself continues on the render node.";
     ui.acknowledgeButton.hidden = true;
+  } else if (session.operator === null) {
+    ui.transportBlock.hidden = false;
+    ui.transportBlockWord.textContent = "NO OPERATOR";
+    ui.transportBlockLabel.textContent = "Nobody is signed in to Playout.";
+    ui.transportBlockWhy.textContent =
+      "Every Program command carries the person who sent it. Sign in with your name to send one.";
+    ui.acknowledgeButton.hidden = true;
   } else if (clockBlocked) {
     ui.transportBlock.hidden = false;
     ui.transportBlockWord.textContent = "TRANSPORT BLOCKED";
@@ -618,7 +686,7 @@ function refreshTransportGate() {
 
   // Disabled for real, not only covered: a keyboard reaching a button under an
   // overlay would be the whole mechanism defeated.
-  const usable = session.connected && !clockBlocked && !session.busy;
+  const usable = session.connected && session.operator !== null && !clockBlocked && !session.busy;
   ui.cueButton.disabled = !usable;
   ui.takeButton.disabled = !usable;
   ui.clearButton.disabled = !usable;
@@ -626,7 +694,7 @@ function refreshTransportGate() {
   ui.continueButton.disabled = !usable;
   ui.updateButton.disabled = !usable;
   ui.outButton.disabled = !usable;
-  ui.configureButton.disabled = !session.connected || session.busy;
+  ui.configureButton.disabled = !session.connected || session.operator === null || session.busy;
   ui.refreshButton.disabled = !session.connected || session.busy;
 }
 
@@ -972,7 +1040,9 @@ function renderCommitted(kind, committed) {
       : "";
 }
 
-async function transport(kind, command, args) {
+/** Send one Program command. `send` is the call that names its command (`(payload) => invoke("cmd_take", payload)`),
+ *  so the name is a literal at the call site, where the boundary guard reads it (R4, 2.26). */
+async function transport(kind, send, args) {
   const schedule = readFrame();
   if (!schedule.ok) {
     log("LOCAL", "error", `${kind} not sent`, schedule.reason);
@@ -982,7 +1052,7 @@ async function transport(kind, command, args) {
   const payload = { ...args, frame: schedule.frame };
 
   try {
-    const committed = await invoke(command, payload);
+    const committed = await send(payload);
     renderCommitted(kind, committed);
     logCommitted(kind, committed);
   } catch (err) {
@@ -1005,7 +1075,7 @@ async function doCue() {
     log("LOCAL", "error", "CUE not sent", target.reason);
     return;
   }
-  await transport("CUE", "cmd_cue", { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
+  await transport("CUE", (payload) => invoke("cmd_cue", payload), { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
 }
 
 async function doTake() {
@@ -1014,11 +1084,11 @@ async function doTake() {
     log("LOCAL", "error", "TAKE not sent", target.reason);
     return;
   }
-  await transport("TAKE", "cmd_take", { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
+  await transport("TAKE", (payload) => invoke("cmd_take", payload), { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
 }
 
 async function doClear() {
-  await transport("CLEAR", "cmd_clear", {});
+  await transport("CLEAR", (payload) => invoke("cmd_clear", payload), {});
 }
 
 async function doPhase(phase, kind) {
@@ -1113,6 +1183,10 @@ function updateFrameMode() {
 }
 
 ui.connectButton.addEventListener("click", () => run(doConnect));
+ui.signInButton.addEventListener("click", () => void (session.operator === null ? doSignIn() : doSignOut()));
+ui.operatorInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && session.operator === null) void doSignIn();
+});
 ui.refreshButton.addEventListener("click", () => run(doStatus));
 
 // 2.27: live telemetry, from the Help menu (the shell emits the event) or the
@@ -1173,6 +1247,7 @@ async function boot() {
   installCapture(globalThis, console, bridge);
 
   log("SESSION", "info", "Playout surface ready", "Not connected. Commands are held until connect.");
+  await syncOperator();
 
   try {
     const endpoint = await invoke("cmd_default_endpoint");

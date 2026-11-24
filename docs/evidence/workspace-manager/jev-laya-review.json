@@ -1,0 +1,2447 @@
+{
+ "errors-1": {
+  "state": {
+   "what_this_is": "Outcomes of calling functions of GrapiX's dock model on a small workspace. Some outcomes come from the real code and some from a build with a fault put in on purpose; you are not told which. A tree is written [group: tabs, the tab marked * is showing] or {split side-by-side|stacked weights ...: children}. Judge each case only by its own call, its 'before' and its result.",
+   "cases": [
+    "Case 1. call: openPanel(\"from-the-future\")\n   result: THREW TypeError: Cannot read properties of undefined (reading 'singleton')",
+    "Case 2. call: openPanel(\"rundown\") in the Editor\n   result: REFUSED PANEL_NOT_AVAILABLE: \"Rundown belongs to the playout application\"; the layout it was given is unchanged",
+    "Case 3. call: moveGroup(\"left\" onto itself)\n   result: REFUSED INVALID_DOCK_TARGET: \"a group cannot be moved onto itself\"; the layout it was given is unchanged",
+    "Case 4. call: registering a panel that is both a singleton and allows more than one\n   result: REFUSED PANEL_REGISTRATION_INVALID: \"panel \"object-manager\" cannot be registered: a panel cannot be both a singleton and allow more than one\"",
+    "Case 5. call: setSplitWeights(root, [1, 2]) on a split with 3 children\n   result: REFUSED INVALID_DOCK_TARGET: \"split root has 3 children, not 2 weights\"; the layout it was given is unchanged",
+    "Case 6. call: registering panel type object-manager twice\n   result: accepted",
+    "Case 7. call: a saved layout with viewState {\"api\": {\"password\": \"x\"}}\n   result: REFUSED LAYOUT_VALIDATION_FAILED: \"the layout breaks rule 9: viewState.api.password looks like a password, token or secret, which a layout never keeps\"",
+    "Case 8. call: closePanelChecked(\"viewport-1\"), a panel registered as not closable\n   result: REFUSED PANEL_NOT_CLOSABLE: \"Composition cannot be closed. It can be moved to another place, or its group shown at full size.\"; the layout it was given is unchanged",
+    "Case 9. call: movePanel(\"ghost-1\" to the centre of group \"left\")\n   result: REFUSED PANEL_NOT_AVAILABLE: \"no open panel is called ghost-1\"; the layout it was given is unchanged",
+    "Case 10. call: movePanel(\"viewport-1\", beside its own group \"viewport-group\", left); it is the only panel in that group\n   result: NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [scene-viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=scene-viewport-group); the layout it was given is unchanged",
+    "Case 11. call: openPanel(\"timeline\", a second one asked for) while one is open\n   result: NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=timeline-group); the layout it was given is unchanged",
+    "Case 12. call: a saved layout whose root split has weights 0.9, 0.9, 0.9\n   result: REFUSED LAYOUT_VALIDATION_FAILED: \"the layout breaks rule 4: the weights of split root do not add up to one\""
+   ]
+  },
+  "questions": {
+   "case1_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 1: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case2_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 2: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case2_cause_named": {
+    "type": "noul",
+    "instructions": "Case 2: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case2_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 2: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 3: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_cause_named": {
+    "type": "noul",
+    "instructions": "Case 3: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 3: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 4: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_cause_named": {
+    "type": "noul",
+    "instructions": "Case 4: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 4: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case5_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 5: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case5_cause_named": {
+    "type": "noul",
+    "instructions": "Case 5: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case5_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 5: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case6_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 6: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 7: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_cause_named": {
+    "type": "noul",
+    "instructions": "Case 7: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 7: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case8_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 8: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case8_cause_named": {
+    "type": "noul",
+    "instructions": "Case 8: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case8_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 8: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case9_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 9: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case9_cause_named": {
+    "type": "noul",
+    "instructions": "Case 9: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case9_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 9: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case10_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 10: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case11_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 11: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 12: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_cause_named": {
+    "type": "noul",
+    "instructions": "Case 12: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 12: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   }
+  },
+  "labels": {
+   "case1_satisfies_rule": false,
+   "case2_satisfies_rule": true,
+   "case2_cause_named": null,
+   "case2_next_step_clear": null,
+   "case3_satisfies_rule": true,
+   "case3_cause_named": null,
+   "case3_next_step_clear": null,
+   "case4_satisfies_rule": true,
+   "case4_cause_named": null,
+   "case4_next_step_clear": null,
+   "case5_satisfies_rule": true,
+   "case5_cause_named": null,
+   "case5_next_step_clear": null,
+   "case6_satisfies_rule": false,
+   "case7_satisfies_rule": true,
+   "case7_cause_named": null,
+   "case7_next_step_clear": null,
+   "case8_satisfies_rule": true,
+   "case8_cause_named": null,
+   "case8_next_step_clear": null,
+   "case9_satisfies_rule": true,
+   "case9_cause_named": null,
+   "case9_next_step_clear": null,
+   "case10_satisfies_rule": false,
+   "case11_satisfies_rule": false,
+   "case12_satisfies_rule": true,
+   "case12_cause_named": null,
+   "case12_next_step_clear": null
+  },
+  "origin": {
+   "case1_satisfies_rule": {
+    "fact": "E6",
+    "source": "open-ignores-unavailable"
+   },
+   "case2_satisfies_rule": {
+    "fact": "E7",
+    "source": "real"
+   },
+   "case2_cause_named": {
+    "fact": "E7",
+    "source": "real"
+   },
+   "case2_next_step_clear": {
+    "fact": "E7",
+    "source": "real"
+   },
+   "case3_satisfies_rule": {
+    "fact": "E3",
+    "source": "real"
+   },
+   "case3_cause_named": {
+    "fact": "E3",
+    "source": "real"
+   },
+   "case3_next_step_clear": {
+    "fact": "E3",
+    "source": "real"
+   },
+   "case4_satisfies_rule": {
+    "fact": "E15",
+    "source": "real"
+   },
+   "case4_cause_named": {
+    "fact": "E15",
+    "source": "real"
+   },
+   "case4_next_step_clear": {
+    "fact": "E15",
+    "source": "real"
+   },
+   "case5_satisfies_rule": {
+    "fact": "E5",
+    "source": "real"
+   },
+   "case5_cause_named": {
+    "fact": "E5",
+    "source": "real"
+   },
+   "case5_next_step_clear": {
+    "fact": "E5",
+    "source": "real"
+   },
+   "case6_satisfies_rule": {
+    "fact": "E14",
+    "source": "registry-duplicate-allowed"
+   },
+   "case7_satisfies_rule": {
+    "fact": "E13",
+    "source": "real"
+   },
+   "case7_cause_named": {
+    "fact": "E13",
+    "source": "real"
+   },
+   "case7_next_step_clear": {
+    "fact": "E13",
+    "source": "real"
+   },
+   "case8_satisfies_rule": {
+    "fact": "E9",
+    "source": "real"
+   },
+   "case8_cause_named": {
+    "fact": "E9",
+    "source": "real"
+   },
+   "case8_next_step_clear": {
+    "fact": "E9",
+    "source": "real"
+   },
+   "case9_satisfies_rule": {
+    "fact": "E1",
+    "source": "real"
+   },
+   "case9_cause_named": {
+    "fact": "E1",
+    "source": "real"
+   },
+   "case9_next_step_clear": {
+    "fact": "E1",
+    "source": "real"
+   },
+   "case10_satisfies_rule": {
+    "fact": "E2",
+    "source": "alone-beside-self-allowed"
+   },
+   "case11_satisfies_rule": {
+    "fact": "E8",
+    "source": "open-singleton-second-allowed"
+   },
+   "case12_satisfies_rule": {
+    "fact": "E11",
+    "source": "real"
+   },
+   "case12_cause_named": {
+    "fact": "E11",
+    "source": "real"
+   },
+   "case12_next_step_clear": {
+    "fact": "E11",
+    "source": "real"
+   }
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.05
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "case2_cause_named": {
+     "type": "noul",
+     "noul": 0.79
+    },
+    "case2_next_step_clear": {
+     "type": "noul",
+     "noul": 0.68
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case3_cause_named": {
+     "type": "noul",
+     "noul": 0.84
+    },
+    "case3_next_step_clear": {
+     "type": "noul",
+     "noul": 0.66
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9
+    },
+    "case4_cause_named": {
+     "type": "noul",
+     "noul": 0.66
+    },
+    "case4_next_step_clear": {
+     "type": "noul",
+     "noul": 0.5
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "case5_cause_named": {
+     "type": "noul",
+     "noul": 0.57
+    },
+    "case5_next_step_clear": {
+     "type": "noul",
+     "noul": 0.79
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.24
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.88
+    },
+    "case7_cause_named": {
+     "type": "noul",
+     "noul": 0.73
+    },
+    "case7_next_step_clear": {
+     "type": "noul",
+     "noul": 0.54
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.92
+    },
+    "case8_cause_named": {
+     "type": "noul",
+     "noul": 0.78
+    },
+    "case8_next_step_clear": {
+     "type": "noul",
+     "noul": 0.86
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case9_cause_named": {
+     "type": "noul",
+     "noul": 0.8
+    },
+    "case9_next_step_clear": {
+     "type": "noul",
+     "noul": 0.68
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.58
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.51
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.91
+    },
+    "case12_cause_named": {
+     "type": "noul",
+     "noul": 0.59
+    },
+    "case12_next_step_clear": {
+     "type": "noul",
+     "noul": 0.53
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 27141,
+    "output_tokens": 0,
+    "state_tokens": 910,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9363,
+     "confidence": 0.9363,
+     "answer_confidence": 0.9363,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9324,
+     "confidence": 0.9324,
+     "answer_confidence": 0.9324,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case2_cause_named": {
+     "type": "noul",
+     "noul": 0.9314,
+     "confidence": 0.9314,
+     "answer_confidence": 0.9314,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case2_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9486,
+     "confidence": 0.9486,
+     "answer_confidence": 0.9486,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9335,
+     "confidence": 0.9335,
+     "answer_confidence": 0.9335,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_cause_named": {
+     "type": "noul",
+     "noul": 0.9317,
+     "confidence": 0.9317,
+     "answer_confidence": 0.9317,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9485,
+     "confidence": 0.9485,
+     "answer_confidence": 0.9485,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.933,
+     "confidence": 0.933,
+     "answer_confidence": 0.933,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_cause_named": {
+     "type": "noul",
+     "noul": 0.9317,
+     "confidence": 0.9317,
+     "answer_confidence": 0.9317,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9499,
+     "confidence": 0.9499,
+     "answer_confidence": 0.9499,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9331,
+     "confidence": 0.9331,
+     "answer_confidence": 0.9331,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case5_cause_named": {
+     "type": "noul",
+     "noul": 0.9318,
+     "confidence": 0.9318,
+     "answer_confidence": 0.9318,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case5_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9494,
+     "confidence": 0.9494,
+     "answer_confidence": 0.9494,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9323,
+     "confidence": 0.9323,
+     "answer_confidence": 0.9323,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9348,
+     "confidence": 0.9348,
+     "answer_confidence": 0.9348,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_cause_named": {
+     "type": "noul",
+     "noul": 0.9331,
+     "confidence": 0.9331,
+     "answer_confidence": 0.9331,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9504,
+     "confidence": 0.9504,
+     "answer_confidence": 0.9504,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9331,
+     "confidence": 0.9331,
+     "answer_confidence": 0.9331,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case8_cause_named": {
+     "type": "noul",
+     "noul": 0.9314,
+     "confidence": 0.9314,
+     "answer_confidence": 0.9314,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case8_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9496,
+     "confidence": 0.9496,
+     "answer_confidence": 0.9496,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9345,
+     "confidence": 0.9345,
+     "answer_confidence": 0.9345,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case9_cause_named": {
+     "type": "noul",
+     "noul": 0.9326,
+     "confidence": 0.9326,
+     "answer_confidence": 0.9326,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case9_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9509,
+     "confidence": 0.9509,
+     "answer_confidence": 0.9509,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9319,
+     "confidence": 0.9319,
+     "answer_confidence": 0.9319,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9313,
+     "confidence": 0.9313,
+     "answer_confidence": 0.9313,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9331,
+     "confidence": 0.9331,
+     "answer_confidence": 0.9331,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_cause_named": {
+     "type": "noul",
+     "noul": 0.9301,
+     "confidence": 0.9301,
+     "answer_confidence": 0.9301,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9472,
+     "confidence": 0.9472,
+     "answer_confidence": 0.9472,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ },
+ "errors-2": {
+  "state": {
+   "what_this_is": "Outcomes of calling functions of GrapiX's dock model on a small workspace. Some outcomes come from the real code and some from a build with a fault put in on purpose; you are not told which. A tree is written [group: tabs, the tab marked * is showing] or {split side-by-side|stacked weights ...: children}. Judge each case only by its own call, its 'before' and its result.",
+   "cases": [
+    "Case 1. call: a saved layout whose first column has kind \"grid\"\n   result: REFUSED LAYOUT_VALIDATION_FAILED: \"this is not a layout GrapiX can read: root.children[0].kind must be tabs or split. The file may be damaged or made by something else. Nothing was changed.\"",
+    "Case 2. call: openPanel(\"rundown\") in the Editor\n   result: NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1, assets-1, rundown-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=left); the layout it was given is unchanged",
+    "Case 3. call: parseWorkspaceText(\"{ nope\")\n   result: REFUSED LAYOUT_VALIDATION_FAILED: \"this is not a layout file: its text could not be read at all (it is not JSON). Choose a layout that GrapiX exported. Nothing was changed.\"",
+    "Case 4. call: movePanel(\"viewport-1\", beside its own group \"viewport-group\", left); it is the only panel in that group\n   result: REFUSED INVALID_DOCK_TARGET: \"a panel that is alone in its group cannot be docked beside its own group\"; the layout it was given is unchanged",
+    "Case 5. call: registering a panel that is both a singleton and allows more than one\n   result: accepted",
+    "Case 6. call: registering panel type object-manager twice\n   result: REFUSED PANEL_REGISTRATION_INVALID: \"panel \"object-manager\" cannot be registered: that type is already registered\"",
+    "Case 7. call: openPanel(\"from-the-future\")\n   result: REFUSED PANEL_NOT_AVAILABLE: \"this build does not know a panel called from-the-future\"; the layout it was given is unchanged",
+    "Case 8. call: setSplitWeights(root, [1, 2]) on a split with 3 children\n   result: NOT REFUSED: it returned {root side-by-side weights 0.333 0.667: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}; the layout it was given is unchanged",
+    "Case 9. call: closePanelChecked(\"viewport-1\"), a panel registered as not closable\n   result: NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] [timeline-group: timeline-1*, curves-1] [right: inspector-1*, bindings-1]}; the layout it was given is unchanged",
+    "Case 10. call: moveGroup(\"left\" onto itself)\n   result: NOT REFUSED: it returned {root side-by-side weights 0.75 0.25: {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}; the layout it was given is unchanged",
+    "Case 11. call: openPanel(\"timeline\", a second one asked for) while one is open\n   result: REFUSED DUPLICATE_SINGLETON: \"Timeline can only be open once, and it is already open\"; the layout it was given is unchanged",
+    "Case 12. call: dragDivider(root, divider 0, by NaN)\n   result: REFUSED INVALID_DOCK_TARGET: \"a divider cannot be moved by an amount that is not a number\"; the layout it was given is unchanged",
+    "Case 13. call: a saved layout with schemaVersion 2 (this build reads up to 1)\n   result: REFUSED LAYOUT_SCHEMA_NEWER: \"this layout was saved by a newer GrapiX (layout version 2; this one reads up to 1). Nothing was changed. Open it with that version, or use a layout saved by this one.\"",
+    "Case 14. call: a saved layout whose root split has weights 0.9, 0.9, 0.9\n   result: NOT REFUSED: it returned {root side-by-side weights 0.9 0.9 0.9: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+    "Case 15. call: a saved layout with viewState {\"api\": {\"password\": \"x\"}}\n   result: NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+   ]
+  },
+  "questions": {
+   "case1_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 1: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case1_cause_named": {
+    "type": "noul",
+    "instructions": "Case 1: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case1_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 1: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case2_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 2: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 3: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_cause_named": {
+    "type": "noul",
+    "instructions": "Case 3: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 3: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 4: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_cause_named": {
+    "type": "noul",
+    "instructions": "Case 4: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 4: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case5_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 5: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case6_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 6: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case6_cause_named": {
+    "type": "noul",
+    "instructions": "Case 6: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case6_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 6: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 7: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_cause_named": {
+    "type": "noul",
+    "instructions": "Case 7: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 7: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case8_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 8: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case9_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 9: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case10_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 10: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case11_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 11: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case11_cause_named": {
+    "type": "noul",
+    "instructions": "Case 11: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case11_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 11: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 12: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_cause_named": {
+    "type": "noul",
+    "instructions": "Case 12: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 12: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case13_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 13: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case13_cause_named": {
+    "type": "noul",
+    "instructions": "Case 13: does the text in quotes say what is wrong in words that an author of broadcast graphics, who is not a programmer, would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No, it does not."
+    }
+   },
+   "case13_next_step_clear": {
+    "type": "noul",
+    "instructions": "Case 13: after reading the text in quotes, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No, it does not."
+    }
+   },
+   "case14_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 14: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case15_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 15: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   }
+  },
+  "labels": {
+   "case1_satisfies_rule": true,
+   "case1_cause_named": null,
+   "case1_next_step_clear": null,
+   "case2_satisfies_rule": false,
+   "case3_satisfies_rule": true,
+   "case3_cause_named": null,
+   "case3_next_step_clear": null,
+   "case4_satisfies_rule": true,
+   "case4_cause_named": null,
+   "case4_next_step_clear": null,
+   "case5_satisfies_rule": false,
+   "case6_satisfies_rule": true,
+   "case6_cause_named": null,
+   "case6_next_step_clear": null,
+   "case7_satisfies_rule": true,
+   "case7_cause_named": null,
+   "case7_next_step_clear": null,
+   "case8_satisfies_rule": false,
+   "case9_satisfies_rule": false,
+   "case10_satisfies_rule": false,
+   "case11_satisfies_rule": true,
+   "case11_cause_named": null,
+   "case11_next_step_clear": null,
+   "case12_satisfies_rule": true,
+   "case12_cause_named": null,
+   "case12_next_step_clear": null,
+   "case13_satisfies_rule": true,
+   "case13_cause_named": null,
+   "case13_next_step_clear": null,
+   "case14_satisfies_rule": false,
+   "case15_satisfies_rule": false
+  },
+  "origin": {
+   "case1_satisfies_rule": {
+    "fact": "E16",
+    "source": "real"
+   },
+   "case1_cause_named": {
+    "fact": "E16",
+    "source": "real"
+   },
+   "case1_next_step_clear": {
+    "fact": "E16",
+    "source": "real"
+   },
+   "case2_satisfies_rule": {
+    "fact": "E7",
+    "source": "unavailable-app-ignored"
+   },
+   "case3_satisfies_rule": {
+    "fact": "E10",
+    "source": "real"
+   },
+   "case3_cause_named": {
+    "fact": "E10",
+    "source": "real"
+   },
+   "case3_next_step_clear": {
+    "fact": "E10",
+    "source": "real"
+   },
+   "case4_satisfies_rule": {
+    "fact": "E2",
+    "source": "real"
+   },
+   "case4_cause_named": {
+    "fact": "E2",
+    "source": "real"
+   },
+   "case4_next_step_clear": {
+    "fact": "E2",
+    "source": "real"
+   },
+   "case5_satisfies_rule": {
+    "fact": "E15",
+    "source": "registry-single-and-many-allowed"
+   },
+   "case6_satisfies_rule": {
+    "fact": "E14",
+    "source": "real"
+   },
+   "case6_cause_named": {
+    "fact": "E14",
+    "source": "real"
+   },
+   "case6_next_step_clear": {
+    "fact": "E14",
+    "source": "real"
+   },
+   "case7_satisfies_rule": {
+    "fact": "E6",
+    "source": "real"
+   },
+   "case7_cause_named": {
+    "fact": "E6",
+    "source": "real"
+   },
+   "case7_next_step_clear": {
+    "fact": "E6",
+    "source": "real"
+   },
+   "case8_satisfies_rule": {
+    "fact": "E5",
+    "source": "weights-length-unchecked"
+   },
+   "case9_satisfies_rule": {
+    "fact": "E9",
+    "source": "close-unclosable-allowed"
+   },
+   "case10_satisfies_rule": {
+    "fact": "E3",
+    "source": "group-onto-itself-allowed"
+   },
+   "case11_satisfies_rule": {
+    "fact": "E8",
+    "source": "real"
+   },
+   "case11_cause_named": {
+    "fact": "E8",
+    "source": "real"
+   },
+   "case11_next_step_clear": {
+    "fact": "E8",
+    "source": "real"
+   },
+   "case12_satisfies_rule": {
+    "fact": "E4",
+    "source": "real"
+   },
+   "case12_cause_named": {
+    "fact": "E4",
+    "source": "real"
+   },
+   "case12_next_step_clear": {
+    "fact": "E4",
+    "source": "real"
+   },
+   "case13_satisfies_rule": {
+    "fact": "E12",
+    "source": "real"
+   },
+   "case13_cause_named": {
+    "fact": "E12",
+    "source": "real"
+   },
+   "case13_next_step_clear": {
+    "fact": "E12",
+    "source": "real"
+   },
+   "case14_satisfies_rule": {
+    "fact": "E11",
+    "source": "rule4-sum-unchecked"
+   },
+   "case15_satisfies_rule": {
+    "fact": "E13",
+    "source": "rule9-key-ignored"
+   }
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.94
+    },
+    "case1_cause_named": {
+     "type": "noul",
+     "noul": 0.27
+    },
+    "case1_next_step_clear": {
+     "type": "noul",
+     "noul": 0.6
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.41
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case3_cause_named": {
+     "type": "noul",
+     "noul": 0.39
+    },
+    "case3_next_step_clear": {
+     "type": "noul",
+     "noul": 0.8
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "case4_cause_named": {
+     "type": "noul",
+     "noul": 0.58
+    },
+    "case4_next_step_clear": {
+     "type": "noul",
+     "noul": 0.58
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.46
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8
+    },
+    "case6_cause_named": {
+     "type": "noul",
+     "noul": 0.45
+    },
+    "case6_next_step_clear": {
+     "type": "noul",
+     "noul": 0.61
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case7_cause_named": {
+     "type": "noul",
+     "noul": 0.6
+    },
+    "case7_next_step_clear": {
+     "type": "noul",
+     "noul": 0.67
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.4
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.26
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.45
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case11_cause_named": {
+     "type": "noul",
+     "noul": 0.84
+    },
+    "case11_next_step_clear": {
+     "type": "noul",
+     "noul": 0.67
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "case12_cause_named": {
+     "type": "noul",
+     "noul": 0.42
+    },
+    "case12_next_step_clear": {
+     "type": "noul",
+     "noul": 0.71
+    },
+    "case13_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case13_cause_named": {
+     "type": "noul",
+     "noul": 0.68
+    },
+    "case13_next_step_clear": {
+     "type": "noul",
+     "noul": 0.92
+    },
+    "case14_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.44
+    },
+    "case15_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.58
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 43251,
+    "output_tokens": 0,
+    "state_tokens": 1335,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9671,
+     "confidence": 0.9671,
+     "answer_confidence": 0.9671,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case1_cause_named": {
+     "type": "noul",
+     "noul": 0.9624,
+     "confidence": 0.9624,
+     "answer_confidence": 0.9624,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case1_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9563,
+     "confidence": 0.9563,
+     "answer_confidence": 0.9563,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9664,
+     "confidence": 0.9664,
+     "answer_confidence": 0.9664,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9665,
+     "confidence": 0.9665,
+     "answer_confidence": 0.9665,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_cause_named": {
+     "type": "noul",
+     "noul": 0.9614,
+     "confidence": 0.9614,
+     "answer_confidence": 0.9614,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9551,
+     "confidence": 0.9551,
+     "answer_confidence": 0.9551,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9665,
+     "confidence": 0.9665,
+     "answer_confidence": 0.9665,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_cause_named": {
+     "type": "noul",
+     "noul": 0.9621,
+     "confidence": 0.9621,
+     "answer_confidence": 0.9621,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9553,
+     "confidence": 0.9553,
+     "answer_confidence": 0.9553,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9665,
+     "confidence": 0.9665,
+     "answer_confidence": 0.9665,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9659,
+     "confidence": 0.9659,
+     "answer_confidence": 0.9659,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case6_cause_named": {
+     "type": "noul",
+     "noul": 0.9615,
+     "confidence": 0.9615,
+     "answer_confidence": 0.9615,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case6_next_step_clear": {
+     "type": "noul",
+     "noul": 0.954,
+     "confidence": 0.954,
+     "answer_confidence": 0.954,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.966,
+     "confidence": 0.966,
+     "answer_confidence": 0.966,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_cause_named": {
+     "type": "noul",
+     "noul": 0.962,
+     "confidence": 0.962,
+     "answer_confidence": 0.962,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9541,
+     "confidence": 0.9541,
+     "answer_confidence": 0.9541,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9663,
+     "confidence": 0.9663,
+     "answer_confidence": 0.9663,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9668,
+     "confidence": 0.9668,
+     "answer_confidence": 0.9668,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9667,
+     "confidence": 0.9667,
+     "answer_confidence": 0.9667,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9663,
+     "confidence": 0.9663,
+     "answer_confidence": 0.9663,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case11_cause_named": {
+     "type": "noul",
+     "noul": 0.9623,
+     "confidence": 0.9623,
+     "answer_confidence": 0.9623,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case11_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9559,
+     "confidence": 0.9559,
+     "answer_confidence": 0.9559,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9664,
+     "confidence": 0.9664,
+     "answer_confidence": 0.9664,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_cause_named": {
+     "type": "noul",
+     "noul": 0.9626,
+     "confidence": 0.9626,
+     "answer_confidence": 0.9626,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9572,
+     "confidence": 0.9572,
+     "answer_confidence": 0.9572,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case13_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9663,
+     "confidence": 0.9663,
+     "answer_confidence": 0.9663,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case13_cause_named": {
+     "type": "noul",
+     "noul": 0.9616,
+     "confidence": 0.9616,
+     "answer_confidence": 0.9616,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case13_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9557,
+     "confidence": 0.9557,
+     "answer_confidence": 0.9557,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case14_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9661,
+     "confidence": 0.9661,
+     "answer_confidence": 0.9661,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case15_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9664,
+     "confidence": 0.9664,
+     "answer_confidence": 0.9664,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ },
+ "accuracy-1": {
+  "state": {
+   "what_this_is": "Outcomes of calling functions of GrapiX's dock model on a small workspace. Some outcomes come from the real code and some from a build with a fault put in on purpose; you are not told which. A tree is written [group: tabs, the tab marked * is showing] or {split side-by-side|stacked weights ...: children}. Judge each case only by its own call, its 'before' and its result.",
+   "cases": [
+    "Case 1. call: movePanel(\"objects-1\" to the centre of \"timeline-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: assets-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1, objects-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group)",
+    "Case 2. call: closePanel on viewport-1, timeline-1 and curves-1\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.5 0.5: [left: objects-1*, assets-1] [right: inspector-1*, bindings-1]}",
+    "Case 3. call: openPanel(\"asset-browser\") after it was closed\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1, asset-browser-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=left) (new instance asset-browser-1, created true)",
+    "Case 4. call: SavedWorkspace has optional maximizedGroupId and activeGroupId\n   result: Both are optional fields; validateWorkspace checks they name a group that exists; normalising drops one whose group is gone; neither changes the tree or any weight; a baseline saved by the author can omit them.",
+    "Case 5. call: closePanel(\"viewport-1\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 1: [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+    "Case 6. call: workspaceFromLayout(the shipped four-region layout)\n   before: old layout panels: 18 (left 7, centre 1, right 9, bottom 1; groups delivery-group, inspector-group, library-group)\n   result: {root stacked weights 0.66 0.34: {top-row side-by-side weights 0.19 0.6 0.21: {left-column stacked weights 0.25 0.25 0.25 0.25: [scene-manager-group: scene-manager-1*] [object-manager-group: object-manager-1*] [assets-group: assets-1*] [delivery-group: take-page-1*, control-contract-1, bindings-1, publish-1]} [viewport-group: viewport-1*] {right-column stacked weights 0.25 0.25 0.25 0.25: [preview-group: preview-1*] [unsupported-group: unsupported-1*] [inspector-group: inspector-1*, animation-1, effect-controls-1, text-styles-1, fonts-1] [library-group: effects-1*, materials-1]}} [timeline-group: timeline-1*]}\npanels in the new layout: 18; unique: 18; rule problems: 0",
+    "Case 7. call: unavailableInstances(layout from a newer build)\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: [{\"instanceId\":\"assets-1\",\"panelType\":\"from-the-future\",\"reason\":\"this build does not know a panel called from-the-future\"}]; layout rule problems: 0",
+    "Case 8. call: validateWorkspace(layout)\n   before: a layout with viewState {\"token\": \"x\"} and a maximised group that does not exist\n   result: rule 9: viewState.token looks like a password, token or secret, which a layout never keeps",
+    "Case 9. call: movePanel(\"assets-1\" above \"timeline-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.16 0.16: [viewport-group: viewport-1*] [asset-browser-group: assets-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)",
+    "Case 10. call: dragDivider(root, divider 0, by +5)\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.76 0.04 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+    "Case 11. call: focusPanel(\"curves-1\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1*]} [right: inspector-1*, bindings-1]}",
+    "Case 12. call: openPanel(\"curve-editor\") while it is open behind another tab\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1, curve-editor-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group) (instance curve-editor-1, created true; instances now 8, before 7)",
+    "Case 13. call: migrateWorkspace(layout, aliases {\"object-manager\": \"objects\"})\n   before: instances objects-1 has panelType \"object-manager\"\n   result: objects-1 is now \"object-manager\", renamed [\"object-manager -> objects\"], {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+    "Case 14. call: movePanel(\"assets-1\" to the right of \"viewport-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: {split side-by-side weights 0.5 0.5: [asset-browser-group: assets-1*] [viewport-group: viewport-1*]} [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)"
+   ]
+  },
+  "questions": {
+   "case1_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 1: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case2_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 2: does the result satisfy this rule? RULE: Closing every panel of two groups leaves the remaining groups sharing the room, weights adding up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 3: does the result satisfy this rule? RULE: Reopening a closed panel puts it back in the group its registration names, and shows it.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 4: does the result satisfy this rule? RULE: UI state that is only about now (which group is maximised, which has focus) may be kept in the saved workspace if it is optional, validated and never changes the arrangement.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case5_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 5: does the result satisfy this rule? RULE: Closing the last panel of a group removes the group, and a split left with one child is replaced by that child; weights add up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case6_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 6: does the result satisfy this rule? RULE: An author's older four-region layout is migrated as the old page showed it: the left dock, the centre and the right dock side by side with the left dock at 0.19 of the width and the right dock at 0.21 (the centre takes the rest), and the timeline under all three across the whole width; every panel kept exactly once and each tab group keeping its tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 7: does the result satisfy this rule? RULE: A layout from a build that had more panels is not damaged: panels this build cannot show stay where they are and are named, with the reason.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case8_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 8: does the result satisfy this rule? RULE: A layout that breaks rules is reported with every broken rule named, by number and in words.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case9_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 9: does the result satisfy this rule? RULE: Dropping a panel above a group whose parent already runs the same way adds one more child to that parent and takes half of the target's share; the parent's other shares do not change.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case10_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 10: does the result satisfy this rule? RULE: Dragging a divider far past the end stops where the neighbour reaches its smallest share (0.04), and the two shares still add up to what they did.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case11_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 11: does the result satisfy this rule? RULE: Showing a panel that is behind another tab brings its tab forward and gives its group focus.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 12: does the result satisfy this rule? RULE: Opening a panel that is already open shows it instead of making a second copy.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case13_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 13: does the result satisfy this rule? RULE: A panel kind renamed since the layout was saved keeps its place under its new name, and the rename is reported.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case14_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 14: does the result satisfy this rule? RULE: Dropping a panel on the right side of a group whose parent runs the other way makes a new side-by-side split in the target's place, sharing its room equally.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   }
+  },
+  "labels": {
+   "case1_satisfies_rule": true,
+   "case2_satisfies_rule": true,
+   "case3_satisfies_rule": true,
+   "case4_satisfies_rule": true,
+   "case5_satisfies_rule": false,
+   "case6_satisfies_rule": true,
+   "case7_satisfies_rule": true,
+   "case8_satisfies_rule": false,
+   "case9_satisfies_rule": true,
+   "case10_satisfies_rule": true,
+   "case11_satisfies_rule": false,
+   "case12_satisfies_rule": false,
+   "case13_satisfies_rule": false,
+   "case14_satisfies_rule": false
+  },
+  "origin": {
+   "case1_satisfies_rule": {
+    "fact": "A1",
+    "source": "real"
+   },
+   "case2_satisfies_rule": {
+    "fact": "A5",
+    "source": "real"
+   },
+   "case3_satisfies_rule": {
+    "fact": "A9",
+    "source": "real"
+   },
+   "case4_satisfies_rule": {
+    "fact": "D1",
+    "source": "real"
+   },
+   "case5_satisfies_rule": {
+    "fact": "A4",
+    "source": "one-child-split-kept"
+   },
+   "case6_satisfies_rule": {
+    "fact": "A11",
+    "source": "real"
+   },
+   "case7_satisfies_rule": {
+    "fact": "A13",
+    "source": "real"
+   },
+   "case8_satisfies_rule": {
+    "fact": "A14",
+    "source": "rule3-maximised-unchecked"
+   },
+   "case9_satisfies_rule": {
+    "fact": "A3",
+    "source": "real"
+   },
+   "case10_satisfies_rule": {
+    "fact": "A7",
+    "source": "real"
+   },
+   "case11_satisfies_rule": {
+    "fact": "A8",
+    "source": "focus-active-group-lost"
+   },
+   "case12_satisfies_rule": {
+    "fact": "A10",
+    "source": "open-duplicates-open-panel"
+   },
+   "case13_satisfies_rule": {
+    "fact": "A12",
+    "source": "alias-not-applied"
+   },
+   "case14_satisfies_rule": {
+    "fact": "A2",
+    "source": "wrap-order-swapped"
+   }
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.92
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.88
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.89
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.82
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.73
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.7
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.41
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.43
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.93
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.64
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.15
+    },
+    "case13_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.6
+    },
+    "case14_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.89
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 37938,
+    "output_tokens": 0,
+    "state_tokens": 2637,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8969,
+     "confidence": 0.8969,
+     "answer_confidence": 0.8969,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8908,
+     "confidence": 0.8908,
+     "answer_confidence": 0.8908,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.896,
+     "confidence": 0.896,
+     "answer_confidence": 0.896,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8868,
+     "confidence": 0.8868,
+     "answer_confidence": 0.8868,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8945,
+     "confidence": 0.8945,
+     "answer_confidence": 0.8945,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8962,
+     "confidence": 0.8962,
+     "answer_confidence": 0.8962,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8866,
+     "confidence": 0.8866,
+     "answer_confidence": 0.8866,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8888,
+     "confidence": 0.8888,
+     "answer_confidence": 0.8888,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.91,
+     "confidence": 0.91,
+     "answer_confidence": 0.91,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.898,
+     "confidence": 0.898,
+     "answer_confidence": 0.898,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9077,
+     "confidence": 0.9077,
+     "answer_confidence": 0.9077,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9022,
+     "confidence": 0.9022,
+     "answer_confidence": 0.9022,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case13_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8809,
+     "confidence": 0.8809,
+     "answer_confidence": 0.8809,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case14_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.8804,
+     "confidence": 0.8804,
+     "answer_confidence": 0.8804,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ },
+ "accuracy-2": {
+  "state": {
+   "what_this_is": "Outcomes of calling functions of GrapiX's dock model on a small workspace. Some outcomes come from the real code and some from a build with a fault put in on purpose; you are not told which. A tree is written [group: tabs, the tab marked * is showing] or {split side-by-side|stacked weights ...: children}. Judge each case only by its own call, its 'before' and its result.",
+   "cases": [
+    "Case 1. call: migrateWorkspace(layout, aliases {\"object-manager\": \"objects\"})\n   before: instances objects-1 has panelType \"object-manager\"\n   result: objects-1 is now \"objects\", renamed [\"object-manager -> objects\"], {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+    "Case 2. call: closePanel(\"viewport-1\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] [timeline-group: timeline-1*, curves-1] [right: inspector-1*, bindings-1]}",
+    "Case 3. call: movePanel(\"objects-1\" to the centre of \"timeline-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: assets-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1, objects-1]} [right: inspector-1*, bindings-1]} (focus=timeline-group)",
+    "Case 4. call: focusPanel(\"curves-1\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group)",
+    "Case 5. call: closePanel on viewport-1, timeline-1 and curves-1\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.2: [left: objects-1*, assets-1] [right: inspector-1*, bindings-1]}",
+    "Case 6. call: openPanel(\"asset-browser\") after it was closed\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, asset-browser-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=left) (new instance asset-browser-1, created true)",
+    "Case 7. call: workspaceFromLayout(the shipped four-region layout)\n   before: old layout panels: 18 (left 7, centre 1, right 9, bottom 1; groups delivery-group, inspector-group, library-group)\n   result: {root stacked weights 0.66 0.34: {top-row side-by-side weights 0.2 0.579 0.221: {left-column stacked weights 0.25 0.25 0.25 0.25: [scene-manager-group: scene-manager-1*] [object-manager-group: object-manager-1*] [assets-group: assets-1*] [delivery-group: take-page-1*, control-contract-1, bindings-1, publish-1]} [viewport-group: viewport-1*] {right-column stacked weights 0.25 0.25 0.25 0.25: [preview-group: preview-1*] [unsupported-group: unsupported-1*] [inspector-group: inspector-1*, animation-1, effect-controls-1, text-styles-1, fonts-1] [library-group: effects-1*, materials-1]}} [timeline-group: timeline-1*]}\npanels in the new layout: 18; unique: 18; rule problems: 0",
+    "Case 8. call: dragDivider(root, divider 0, by +5)\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.487 0.385 0.128: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+    "Case 9. call: openPanel(\"curve-editor\") while it is open behind another tab\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group) (instance curves-1, created false; instances now 7, before 7)",
+    "Case 10. call: maximizeGroup(\"viewport-group\") then restoreGroup(\"viewport-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: after maximise: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (maximised=viewport-group focus=viewport-group)\nafter restore: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=viewport-group)\nthe tree is identical to the start",
+    "Case 11. call: movePanel(\"assets-1\" above \"timeline-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.761 0.119 0.119: [viewport-group: viewport-1*] [asset-browser-group: assets-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)",
+    "Case 12. call: validateWorkspace(layout)\n   before: a layout with viewState {\"token\": \"x\"} and a maximised group that does not exist\n   result: rule 3: the maximised group ghost does not exist; rule 9: viewState.token looks like a password, token or secret, which a layout never keeps",
+    "Case 13. call: unavailableInstances(layout from a newer build)\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: []; layout rule problems: 0",
+    "Case 14. call: movePanel(\"assets-1\" to the right of \"viewport-group\")\n   before: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}\n   result: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: {split side-by-side weights 0.5 0.5: [viewport-group: viewport-1*] [asset-browser-group: assets-1*]} [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)"
+   ]
+  },
+  "questions": {
+   "case1_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 1: does the result satisfy this rule? RULE: A panel kind renamed since the layout was saved keeps its place under its new name, and the rename is reported.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case2_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 2: does the result satisfy this rule? RULE: Closing the last panel of a group removes the group, and a split left with one child is replaced by that child; weights add up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case3_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 3: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case4_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 4: does the result satisfy this rule? RULE: Showing a panel that is behind another tab brings its tab forward and gives its group focus.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case5_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 5: does the result satisfy this rule? RULE: Closing every panel of two groups leaves the remaining groups sharing the room, weights adding up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case6_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 6: does the result satisfy this rule? RULE: Reopening a closed panel puts it back in the group its registration names, and shows it.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case7_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 7: does the result satisfy this rule? RULE: An author's older four-region layout is migrated as the old page showed it: the left dock, the centre and the right dock side by side with the left dock at 0.19 of the width and the right dock at 0.21 (the centre takes the rest), and the timeline under all three across the whole width; every panel kept exactly once and each tab group keeping its tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case8_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 8: does the result satisfy this rule? RULE: Dragging a divider far past the end stops where the neighbour reaches its smallest share (0.04), and the two shares still add up to what they did.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case9_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 9: does the result satisfy this rule? RULE: Opening a panel that is already open shows it instead of making a second copy.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case10_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 10: does the result satisfy this rule? RULE: Maximising a group does not change the arrangement, so restoring brings back exactly the same proportions.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case11_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 11: does the result satisfy this rule? RULE: Dropping a panel above a group whose parent already runs the same way adds one more child to that parent and takes half of the target's share; the parent's other shares do not change.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case12_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 12: does the result satisfy this rule? RULE: A layout that breaks rules is reported with every broken rule named, by number and in words.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case13_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 13: does the result satisfy this rule? RULE: A layout from a build that had more panels is not damaged: panels this build cannot show stay where they are and are named, with the reason.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   },
+   "case14_satisfies_rule": {
+    "type": "noul",
+    "instructions": "Case 14: does the result satisfy this rule? RULE: Dropping a panel on the right side of a group whose parent runs the other way makes a new side-by-side split in the target's place, sharing its room equally.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No, it does not."
+    }
+   }
+  },
+  "labels": {
+   "case1_satisfies_rule": true,
+   "case2_satisfies_rule": true,
+   "case3_satisfies_rule": false,
+   "case4_satisfies_rule": true,
+   "case5_satisfies_rule": false,
+   "case6_satisfies_rule": false,
+   "case7_satisfies_rule": false,
+   "case8_satisfies_rule": false,
+   "case9_satisfies_rule": true,
+   "case10_satisfies_rule": true,
+   "case11_satisfies_rule": false,
+   "case12_satisfies_rule": true,
+   "case13_satisfies_rule": false,
+   "case14_satisfies_rule": true
+  },
+  "origin": {
+   "case1_satisfies_rule": {
+    "fact": "A12",
+    "source": "real"
+   },
+   "case2_satisfies_rule": {
+    "fact": "A4",
+    "source": "real"
+   },
+   "case3_satisfies_rule": {
+    "fact": "A1",
+    "source": "center-not-activated"
+   },
+   "case4_satisfies_rule": {
+    "fact": "A8",
+    "source": "real"
+   },
+   "case5_satisfies_rule": {
+    "fact": "A5",
+    "source": "weights-not-normalised"
+   },
+   "case6_satisfies_rule": {
+    "fact": "A9",
+    "source": "open-not-activated"
+   },
+   "case7_satisfies_rule": {
+    "fact": "A11",
+    "source": "fix6-centre-uses-stored-size"
+   },
+   "case8_satisfies_rule": {
+    "fact": "A7",
+    "source": "divider-pair-sum-lost"
+   },
+   "case9_satisfies_rule": {
+    "fact": "A10",
+    "source": "real"
+   },
+   "case10_satisfies_rule": {
+    "fact": "A6",
+    "source": "real"
+   },
+   "case11_satisfies_rule": {
+    "fact": "A3",
+    "source": "side-drop-half-wrong"
+   },
+   "case12_satisfies_rule": {
+    "fact": "A14",
+    "source": "real"
+   },
+   "case13_satisfies_rule": {
+    "fact": "A13",
+    "source": "unavailable-list-empty"
+   },
+   "case14_satisfies_rule": {
+    "fact": "A2",
+    "source": "real"
+   }
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.74
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.5
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.82
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.91
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.27
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.44
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.97
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.22
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.79
+    },
+    "case13_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.38
+    },
+    "case14_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.94
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 41014,
+    "output_tokens": 0,
+    "state_tokens": 2858,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "case1_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9205,
+     "confidence": 0.9205,
+     "answer_confidence": 0.9205,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case2_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.936,
+     "confidence": 0.936,
+     "answer_confidence": 0.936,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case3_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9338,
+     "confidence": 0.9338,
+     "answer_confidence": 0.9338,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case4_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9404,
+     "confidence": 0.9404,
+     "answer_confidence": 0.9404,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case5_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9336,
+     "confidence": 0.9336,
+     "answer_confidence": 0.9336,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case6_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9341,
+     "confidence": 0.9341,
+     "answer_confidence": 0.9341,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case7_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.946,
+     "confidence": 0.946,
+     "answer_confidence": 0.946,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case8_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9398,
+     "confidence": 0.9398,
+     "answer_confidence": 0.9398,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case9_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9398,
+     "confidence": 0.9398,
+     "answer_confidence": 0.9398,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case10_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9352,
+     "confidence": 0.9352,
+     "answer_confidence": 0.9352,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case11_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9475,
+     "confidence": 0.9475,
+     "answer_confidence": 0.9475,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case12_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9338,
+     "confidence": 0.9338,
+     "answer_confidence": 0.9338,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case13_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9215,
+     "confidence": 0.9215,
+     "answer_confidence": 0.9215,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "case14_satisfies_rule": {
+     "type": "noul",
+     "noul": 0.9338,
+     "confidence": 0.9338,
+     "answer_confidence": 0.9338,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ }
+}

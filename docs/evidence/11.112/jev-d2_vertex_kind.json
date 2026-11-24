@@ -1,0 +1,1 @@
+{"model":"jev-1.14.0","answers":{"best_storage":{"type":"choice","choice":"A","confidence":1,"probabilities":{"A":1,"B":0,"C":0}},"derive_in_one_place":{"type":"noul","noul":0.84},"auto_never_overwrites_hand_edits":{"type":"noul","noul":0.92}}}

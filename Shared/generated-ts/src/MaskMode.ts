@@ -3,4 +3,4 @@
 /**
  * How a mask combines with the masks above it (3.19), After Effects' modes.
  */
-export type MaskMode = "none" | "add" | "subtract" | "intersect" | "difference";
+export type MaskMode = "none" | "add" | "subtract" | "intersect" | "difference" | "lighten" | "darken";

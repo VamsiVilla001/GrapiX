@@ -92,6 +92,17 @@ pub fn service_data_root() -> Result<PathBuf, Refusal> {
         })
 }
 
+/// Where this computer's own settings live (2.28): the local, non-roaming data folder, so a
+/// setting that belongs to this machine (GPU adapter, caches, ports) does not follow a user to
+/// another one. User settings are under [`service_data_root`], which roams.
+pub fn machine_settings_root() -> Result<PathBuf, Refusal> {
+    directories::ProjectDirs::from("com", "GrapiX", "GrapiX")
+        .map(|dirs| dirs.data_local_dir().to_path_buf())
+        .ok_or_else(|| Refusal::PlatformDirectoryUnavailable {
+            detail: "the OS could not name a per-machine data directory".into(),
+        })
+}
+
 /// The cache/asset-store root (separate from data: caches are expendable).
 pub fn cache_root() -> Result<PathBuf, Refusal> {
     directories::ProjectDirs::from("com", "GrapiX", "GrapiX")

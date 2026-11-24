@@ -1,0 +1,101 @@
+{
+ "controls": {
+  "E2": {
+   "mutant": "alone-beside-self-allowed",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [scene-viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=scene-viewport-group); the layout it was given is unchanged"
+  },
+  "E3": {
+   "mutant": "group-onto-itself-allowed",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.75 0.25: {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}; the layout it was given is unchanged"
+  },
+  "E5": {
+   "mutant": "weights-length-unchecked",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.333 0.667: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}; the layout it was given is unchanged"
+  },
+  "E6": {
+   "mutant": "open-ignores-unavailable",
+   "outcome": "THREW TypeError: Cannot read properties of undefined (reading 'singleton')"
+  },
+  "E7": {
+   "mutant": "unavailable-app-ignored",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1, assets-1, rundown-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=left); the layout it was given is unchanged"
+  },
+  "E8": {
+   "mutant": "open-singleton-second-allowed",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=timeline-group); the layout it was given is unchanged"
+  },
+  "E9": {
+   "mutant": "close-unclosable-allowed",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] [timeline-group: timeline-1*, curves-1] [right: inspector-1*, bindings-1]}; the layout it was given is unchanged"
+  },
+  "E11": {
+   "mutant": "rule4-sum-unchecked",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.9 0.9 0.9: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+  },
+  "E13": {
+   "mutant": "rule9-key-ignored",
+   "outcome": "NOT REFUSED: it returned {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+  },
+  "E14": {
+   "mutant": "registry-duplicate-allowed",
+   "outcome": "accepted"
+  },
+  "E15": {
+   "mutant": "registry-single-and-many-allowed",
+   "outcome": "accepted"
+  },
+  "A1": {
+   "mutant": "center-not-activated",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: assets-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1, objects-1]} [right: inspector-1*, bindings-1]} (focus=timeline-group)"
+  },
+  "A2": {
+   "mutant": "wrap-order-swapped",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: {split side-by-side weights 0.5 0.5: [asset-browser-group: assets-1*] [viewport-group: viewport-1*]} [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)"
+  },
+  "A3": {
+   "mutant": "side-drop-half-wrong",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.761 0.119 0.119: [viewport-group: viewport-1*] [asset-browser-group: assets-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)"
+  },
+  "A4": {
+   "mutant": "one-child-split-kept",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 1: [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+  },
+  "A5": {
+   "mutant": "weights-not-normalised",
+   "outcome": "{root side-by-side weights 0.2 0.2: [left: objects-1*, assets-1] [right: inspector-1*, bindings-1]}"
+  },
+  "A7": {
+   "mutant": "divider-pair-sum-lost",
+   "outcome": "{root side-by-side weights 0.487 0.385 0.128: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+  },
+  "A8": {
+   "mutant": "focus-active-group-lost",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1*]} [right: inspector-1*, bindings-1]}"
+  },
+  "A9": {
+   "mutant": "open-not-activated",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, asset-browser-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=left) (new instance asset-browser-1, created true)"
+  },
+  "A10": {
+   "mutant": "open-duplicates-open-panel",
+   "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1, curve-editor-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group) (instance curve-editor-1, created true; instances now 8, before 7)"
+  },
+  "A11": {
+   "mutant": "fix6-centre-uses-stored-size",
+   "outcome": "{root stacked weights 0.66 0.34: {top-row side-by-side weights 0.2 0.579 0.221: {left-column stacked weights 0.25 0.25 0.25 0.25: [scene-manager-group: scene-manager-1*] [object-manager-group: object-manager-1*] [assets-group: assets-1*] [delivery-group: take-page-1*, control-contract-1, bindings-1, publish-1]} [viewport-group: viewport-1*] {right-column stacked weights 0.25 0.25 0.25 0.25: [preview-group: preview-1*] [unsupported-group: unsupported-1*] [inspector-group: inspector-1*, animation-1, effect-controls-1, text-styles-1, fonts-1] [library-group: effects-1*, materials-1]}} [timeline-group: timeline-1*]}\npanels in the new layout: 18; unique: 18; rule problems: 0"
+  },
+  "A12": {
+   "mutant": "alias-not-applied",
+   "outcome": "objects-1 is now \"object-manager\", renamed [\"object-manager -> objects\"], {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+  },
+  "A13": {
+   "mutant": "unavailable-list-empty",
+   "outcome": "[]; layout rule problems: 0"
+  },
+  "A14": {
+   "mutant": "rule3-maximised-unchecked",
+   "outcome": "rule 9: viewState.token looks like a password, token or secret, which a layout never keeps"
+  }
+ },
+ "dropped": []
+}

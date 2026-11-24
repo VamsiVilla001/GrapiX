@@ -36,7 +36,7 @@ function scene(
     id: "s",
     name: "S",
     version: 1,
-    workingColorSpace: "srgb",
+    workingColorSpace: "srgb", colorDepth: "32",
     canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
     timeline: {
       durationFrames: durationFrames as unknown as bigint,
@@ -49,14 +49,14 @@ function scene(
           easing: "linear" as const,
         })),
       })),
-      phases: [],
+      phases: [], pathChannels: [],
     },
     dataContext: {},
     assets: [],
     fonts: [],
     materials: [],
     controls: [],
-    textStyles: [],
+    textStyles: [], pathLinks: [], guides: [],
     objects,
   } as SceneDocument;
 }

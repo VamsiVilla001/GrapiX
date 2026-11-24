@@ -1,0 +1,87 @@
+{
+  "cases": [
+    {
+      "accepted": true,
+      "input": "Open"
+    },
+    {
+      "accepted": true,
+      "input": "intro_1"
+    },
+    {
+      "accepted": true,
+      "input": "L3-left.2"
+    },
+    {
+      "accepted": true,
+      "input": "ସ୍ବାଗତ"
+    },
+    {
+      "accepted": true,
+      "input": "नमस्ते"
+    },
+    {
+      "accepted": true,
+      "input": "1"
+    },
+    {
+      "accepted": true,
+      "input": "a"
+    },
+    {
+      "accepted": true,
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "accepted": true,
+      "input": "  padded  ",
+      "trimmedTo": "padded"
+    },
+    {
+      "accepted": false,
+      "fault": "empty",
+      "input": ""
+    },
+    {
+      "accepted": false,
+      "fault": "empty",
+      "input": "   "
+    },
+    {
+      "accepted": false,
+      "fault": "tooLong",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "accepted": false,
+      "fault": "badCharacter",
+      "input": "two words"
+    },
+    {
+      "accepted": false,
+      "fault": "badCharacter",
+      "input": "tab\tid"
+    },
+    {
+      "accepted": false,
+      "fault": "badCharacter",
+      "input": "a/b"
+    },
+    {
+      "accepted": false,
+      "fault": "badStart",
+      "input": "-lead"
+    },
+    {
+      "accepted": false,
+      "fault": "badStart",
+      "input": "_lead"
+    },
+    {
+      "accepted": false,
+      "fault": "badStart",
+      "input": ".lead"
+    }
+  ],
+  "maxChars": 64
+}

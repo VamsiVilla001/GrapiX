@@ -61,7 +61,8 @@ pub struct EditorTools {
 /// operator scopes. Every registered read and write uses the same store.
 pub fn server(projects: Projects) -> gx_mcp_server::Server {
     use gx_contracts::command::{
-        ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportScene,
+        ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportAsset,
+        ImportFigma, ImportScene,
     };
     let mut server = gx_mcp_server::Server::new(vec![gx_contracts::auth::Scope::Author]);
     server.register("project.list", Box::new(ProjectList(projects.clone())));
@@ -86,6 +87,14 @@ pub fn server(projects: Projects) -> gx_mcp_server::Server {
     server.register(
         "scenes.import",
         Box::new(CommandTool::<ImportScene>::new(projects.clone())),
+    );
+    server.register(
+        "assets.import",
+        Box::new(CommandTool::<ImportAsset>::new(projects.clone())),
+    );
+    server.register(
+        "scenes.ingest_figma",
+        Box::new(CommandTool::<ImportFigma>::new(projects.clone())),
     );
     server.register(
         "objects.hierarchy",

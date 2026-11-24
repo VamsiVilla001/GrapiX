@@ -117,6 +117,9 @@ pub struct Server<P: EnginePeer> {
     limits: ServerLimits,
     /// Connections held now, against `limits.max_connections`.
     connections: Arc<AtomicUsize>,
+    /// The as-run record (12.11), when this server writes one: every Program command it
+    /// hands the engine is recorded, synced, before the reply leaves.
+    as_run: Option<Arc<Mutex<crate::as_run::AsRunLog>>>,
 }
 
 /// What a connection has proved. A protected connection's claims are checked
@@ -168,7 +171,15 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
             secret: secret.map(str::to_owned),
             limits: ServerLimits::default(),
             connections: Arc::new(AtomicUsize::new(0)),
+            as_run: None,
         })
+    }
+
+    /// Write the as-run record (12.11) of every Program command to `log`.
+    #[must_use]
+    pub fn with_as_run(mut self, log: crate::as_run::AsRunLog) -> Self {
+        self.as_run = Some(Arc::new(Mutex::new(log)));
+        self
     }
 
     /// Hold every connection to `limits` instead of the defaults.
@@ -225,9 +236,10 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
                     let peer = Arc::clone(&self.peer);
                     let secret = self.secret.clone();
                     let limits = self.limits;
+                    let as_run = self.as_run.clone();
                     thread::spawn(move || {
                         let _permit = permit;
-                        serve_connection(stream, peer, secret, limits);
+                        serve_connection_with(stream, peer, secret, limits, as_run);
                     });
                 }
                 Err(error) if is_transient(&error) => {
@@ -394,25 +406,28 @@ fn peer_name(stream: &ControlStream) -> String {
 /// error's own text: an unknown prefix quotes what was presented, and a
 /// credential, even a wrong one, is never written to a log (invariant 54).
 fn token_fault(error: &crate::TokenError) -> &'static str {
-    match error {
-        crate::TokenError::UnknownPrefix { .. } => "unknownPrefix",
-        crate::TokenError::MalformedToken => "malformedToken",
-        crate::TokenError::InvalidPayloadEncoding => "invalidPayloadEncoding",
-        crate::TokenError::InvalidPayload => "invalidPayload",
-        crate::TokenError::InvalidClaims(_) => "invalidClaims",
-        crate::TokenError::WrongMacLength { .. } => "wrongMacLength",
-        crate::TokenError::InvalidMacEncoding => "invalidMacEncoding",
-        crate::TokenError::MacMismatch => "macMismatch",
-    }
+    error.fault_name()
 }
 
 /// Serve one connection from accept to close, with both ends of its life on
 /// record (2.12, ADR-0004): who connected, and when and why it ended.
+/// A connection with no as-run record, as the tests serve one.
+#[cfg(test)]
 fn serve_connection<P: EnginePeer>(
     stream: ControlStream,
     peer: Arc<Mutex<P>>,
     secret: Option<String>,
     limits: ServerLimits,
+) {
+    serve_connection_with(stream, peer, secret, limits, None);
+}
+
+fn serve_connection_with<P: EnginePeer>(
+    stream: ControlStream,
+    peer: Arc<Mutex<P>>,
+    secret: Option<String>,
+    limits: ServerLimits,
+    as_run: Option<Arc<Mutex<crate::as_run::AsRunLog>>>,
 ) {
     let from = peer_name(&stream);
     tracing::info!(
@@ -428,7 +443,7 @@ fn serve_connection<P: EnginePeer>(
         );
     }
     let mut requests = 0u64;
-    match handle_connection(stream, peer, secret, limits, &mut requests) {
+    match handle_connection(stream, peer, secret, limits, as_run, &mut requests) {
         Ok(()) => tracing::info!(
             event = "control.disconnected",
             peer = from.as_str(),
@@ -492,11 +507,182 @@ fn log_stop_request(authentication: Option<&ConnectionAuthorization>) {
     );
 }
 
+/// 2.15: a Program command that reached the engine, on record with the person and the
+/// credential that sent it and what the engine answered. The operator was checked against
+/// the naming rules before this is written, so it cannot hold a line break or a markup
+/// character; the credential is its subject, never the credential itself (2.10). The
+/// as-run record (12.11) is built on this line.
+fn log_program_command(
+    request: &'static str,
+    operator: &str,
+    authentication: Option<&ConnectionAuthorization>,
+    reply: &EngineReply,
+) {
+    let (subject, role) = match authentication {
+        Some(ConnectionAuthorization::Authenticated(claims)) => {
+            (claims.subject.as_str(), Some(format!("{:?}", claims.role)))
+        }
+        _ => ("unprotected", None),
+    };
+    let (result, refusal) = match reply {
+        EngineReply::Refused(refusal) => ("refused", Some(refusal.code_name())),
+        _ => ("accepted", None),
+    };
+    tracing::info!(
+        event = "control.program_command",
+        request,
+        operator,
+        subject,
+        role = role.as_deref(),
+        result,
+        refusal,
+    );
+}
+
+/// What a Program command names, for the as-run record (12.11): the page and its pin, or the
+/// phase. Read before the request is handed to the engine.
+#[derive(Debug, Clone, Default)]
+struct Named {
+    layer: String,
+    page: Option<String>,
+    revision: Option<u64>,
+    content_hash: Option<String>,
+    phase: Option<String>,
+}
+
+fn named_by(
+    request: &ClientRequest,
+    target: Option<&gx_control_plane::message::OutputTarget>,
+) -> Named {
+    let layer = target
+        .map(|target| target.layer.clone())
+        .unwrap_or_else(|| gx_control_plane::message::MAIN_LAYER.to_owned());
+    Named {
+        layer,
+        ..named_page(request)
+    }
+}
+
+fn named_page(request: &ClientRequest) -> Named {
+    match request {
+        ClientRequest::Cue(cue) => Named {
+            layer: String::new(),
+            page: Some(cue.take_id.0.clone()),
+            revision: Some(cue.revision.0),
+            content_hash: cue.content_hash.as_ref().map(|hash| hash.0.clone()),
+            phase: None,
+        },
+        ClientRequest::Take(take) => Named {
+            layer: String::new(),
+            page: Some(take.take_id.0.clone()),
+            revision: Some(take.revision.0),
+            content_hash: take.content_hash.as_ref().map(|hash| hash.0.clone()),
+            phase: None,
+        },
+        ClientRequest::Phase(phase) => Named {
+            phase: Some(phase.phase.clone()),
+            ..Named::default()
+        },
+        _ => Named::default(),
+    }
+}
+
+/// The frame the engine committed a reply to, when it committed one.
+fn committed_frame(reply: &EngineReply) -> Option<u64> {
+    match reply {
+        EngineReply::Cued(committed)
+        | EngineReply::Taken(committed)
+        | EngineReply::Cleared(committed) => Some(committed.frame),
+        EngineReply::PhaseCommitted(phase) => Some(phase.committed.frame),
+        _ => None,
+    }
+}
+
+/// 12.11: one as-run record for a Program command, written and synced before the reply is
+/// sent. A record that cannot be written is on the log as an error and counted; the command is
+/// not undone and the next one is still accepted (ADR-0004).
+fn record_as_run(
+    log: &Mutex<crate::as_run::AsRunLog>,
+    request: &'static str,
+    operator: &str,
+    named: &Named,
+    authentication: Option<&ConnectionAuthorization>,
+    reply: &EngineReply,
+) {
+    let (subject, role) = match authentication {
+        Some(ConnectionAuthorization::Authenticated(claims)) => {
+            (claims.subject.clone(), Some(format!("{:?}", claims.role)))
+        }
+        _ => ("unprotected".to_owned(), None),
+    };
+    let (result, refusal) = match reply {
+        EngineReply::Refused(refusal) => ("refused", Some(refusal.code_name())),
+        _ => ("accepted", None),
+    };
+    let entry = crate::as_run::AsRunEntry {
+        request,
+        operator: operator.to_owned(),
+        subject,
+        role,
+        result,
+        refusal,
+        layer: named.layer.clone(),
+        page: named.page.clone(),
+        revision: named.revision,
+        content_hash: named.content_hash.clone(),
+        phase: named.phase.clone(),
+        committed_frame: committed_frame(reply),
+    };
+    let written = match log.lock() {
+        Ok(mut held) => held.record(&entry),
+        Err(_) => Err(io::Error::other("the as-run log's lock is poisoned")),
+    };
+    if let Err(error) = written {
+        tracing::error!(
+            event = "asrun.write_failed",
+            request,
+            operator,
+            detail = error.to_string().as_str(),
+            reason = "the command was still handled; this one is missing from the as-run record",
+        );
+    }
+}
+
+/// 12.10: the verdict on the channel and layer a targeted command is aimed at. No target is the
+/// Program channel's main layer.
+fn target_refusal(
+    request: &ClientRequest,
+    target: Option<&gx_control_plane::message::OutputTarget>,
+) -> Option<Refusal> {
+    if !request.is_targeted() {
+        return None;
+    }
+    target.and_then(|target| target.refusal(request.name()))
+}
+
+/// 2.15: the verdict on the operator a Program command carries.
+fn operator_refusal(request: &ClientRequest, operator: Option<&str>) -> Option<Refusal> {
+    if !request.is_program_command() {
+        return None;
+    }
+    match operator.map(gx_contracts::auth::OperatorName::parse) {
+        None => Some(Refusal::OperatorRequired {
+            request: request.name().to_owned(),
+        }),
+        Some(Err(fault)) => Some(Refusal::OperatorNameInvalid {
+            request: request.name().to_owned(),
+            fault,
+        }),
+        Some(Ok(_)) => None,
+    }
+}
+
 fn handle_connection<P: EnginePeer>(
     mut stream: ControlStream,
     peer: Arc<Mutex<P>>,
     secret: Option<String>,
     limits: ServerLimits,
+    as_run: Option<Arc<Mutex<crate::as_run::AsRunLog>>>,
     requests: &mut u64,
 ) -> io::Result<()> {
     let accepted = Instant::now();
@@ -630,10 +816,34 @@ fn handle_connection<P: EnginePeer>(
                 log_refusal(request.name(), &refusal, authentication.as_ref());
                 (EngineReply::Refused(refusal), Vec::new())
             }
+            // 2.15: a Program command names the person who sent it. Checked after the
+            // credential and its scope, so a caller who may not send it learns that first,
+            // and before the engine, so a command with no operator never reaches it.
+            request if operator_refusal(&request, envelope.operator.as_deref()).is_some() => {
+                let refusal = operator_refusal(&request, envelope.operator.as_deref())
+                    .expect("the guard saw a refusal");
+                log_refusal(request.name(), &refusal, authentication.as_ref());
+                (EngineReply::Refused(refusal), Vec::new())
+            }
+            // 12.10: a command aimed at a channel or a layer the engine does not have is
+            // refused by name, before the engine sees it.
+            request if target_refusal(&request, envelope.target.as_ref()).is_some() => {
+                let refusal = target_refusal(&request, envelope.target.as_ref())
+                    .expect("the guard saw a refusal");
+                log_refusal(request.name(), &refusal, authentication.as_ref());
+                (EngineReply::Refused(refusal), Vec::new())
+            }
             request => {
                 if matches!(request, ClientRequest::Stop) {
                     log_stop_request(authentication.as_ref());
                 }
+                let program = request.is_program_command().then(|| {
+                    (
+                        request.name(),
+                        envelope.operator.clone(),
+                        named_by(&request, envelope.target.as_ref()),
+                    )
+                });
                 // The engine is held only to validate and to drain events. A
                 // render's work runs after the lock is released, so Program's
                 // render loop is never queued behind it (invariant 14).
@@ -641,7 +851,14 @@ fn handle_connection<P: EnginePeer>(
                 let handled = engine.handle_detached(request);
                 let events = engine.drain_events();
                 drop(engine);
-                (handled.finish(), events)
+                let reply = handled.finish();
+                if let Some((name, Some(operator), named)) = &program {
+                    log_program_command(name, operator, authentication.as_ref(), &reply);
+                    if let Some(log) = &as_run {
+                        record_as_run(log, name, operator, named, authentication.as_ref(), &reply);
+                    }
+                }
+                (reply, events)
             }
         };
 
@@ -707,6 +924,117 @@ mod log_tests {
             content_hash: Some(ContentHash("a".repeat(64))),
             at: TakeAt::NextOpportunity,
         })
+    }
+
+    /// 2.15: a Program command is on record with the person and the credential that sent it
+    /// and what the engine answered; a command with no operator is on record as refused; the
+    /// credential itself is in neither.
+    #[test]
+    fn a_program_command_is_on_record_with_the_person_and_the_credential() {
+        let _alone = crate::server::SERVER_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
+        engine.publish(TakeId("t".into()), Revision(1), ContentHash("a".repeat(64)));
+        let server = Server::bind(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            Some(SECRET),
+            engine,
+        )
+        .expect("bind loopback");
+        let addr = server.local_addr().expect("local addr");
+        let desk = Token::mint(
+            "desk-1",
+            Role::Playout,
+            vec![Scope::Take, Scope::Cue],
+            SECRET,
+        )
+        .expect("mint");
+        let desk_text = desk.as_str().to_owned();
+
+        let clients = std::thread::spawn(move || {
+            let mut client = Client::connect_with_token(addr, desk).expect("authenticated");
+            // No one signed in.
+            assert!(matches!(
+                client.handle(take()),
+                EngineReply::Refused(Refusal::OperatorRequired { .. })
+            ));
+            client.set_operator(Some(
+                &gx_contracts::auth::OperatorName::parse("Ada Lovelace").unwrap(),
+            ));
+            // One the engine accepts, and one it refuses by name (an unknown scene).
+            assert!(matches!(client.handle(take()), EngineReply::Taken(_)));
+            let unknown = ClientRequest::Take(TakeRequest {
+                take_id: TakeId("nothing-here".into()),
+                revision: Revision(1),
+                content_hash: Some(ContentHash("b".repeat(64))),
+                at: TakeAt::NextOpportunity,
+            });
+            assert!(matches!(client.handle(unknown), EngineReply::Refused(_)));
+        });
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("gx-operator-log-{}-{nanos}", std::process::id()));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("engine", "worker", &dir))
+                .unwrap();
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(guard.layer()));
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tracing::dispatcher::with_default(&dispatch, || {
+                let stream = server.listener.accept().expect("accept");
+                serve_connection(
+                    stream,
+                    Arc::clone(&server.peer),
+                    server.secret.clone(),
+                    server.limits,
+                );
+            });
+            let _ = done.send(());
+        });
+        clients.join().expect("the client ran");
+        finished
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the connection did not end at the server");
+        guard.finish().unwrap();
+
+        let mut text = String::new();
+        let mut records: Vec<serde_json::Value> = Vec::new();
+        for entry in std::fs::read_dir(dir.join("engine")).unwrap().flatten() {
+            let file = std::fs::read_to_string(entry.path()).unwrap();
+            records.extend(file.lines().map(|line| serde_json::from_str(line).unwrap()));
+            text.push_str(&file);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let of = |event: &str| -> Vec<&serde_json::Value> {
+            records.iter().filter(|r| r["event"] == event).collect()
+        };
+
+        let commands = of("control.program_command");
+        assert_eq!(commands.len(), 2, "{records:#?}");
+        for command in &commands {
+            assert_eq!(command["fields"]["request"], "take");
+            assert_eq!(command["fields"]["operator"], "Ada Lovelace");
+            assert_eq!(command["fields"]["subject"], "desk-1");
+            assert_eq!(command["fields"]["role"], "Playout");
+        }
+        assert_eq!(commands[0]["fields"]["result"], "accepted");
+        assert!(commands[0]["refusal"].is_null());
+        assert_eq!(commands[1]["fields"]["result"], "refused");
+        assert!(commands[1]["refusal"].is_string(), "{:#?}", commands[1]);
+        // The command with no operator never reached the engine, and says why.
+        let held = of("control.refused");
+        let held = held
+            .iter()
+            .find(|r| r["refusal"] == "operatorRequired")
+            .unwrap_or_else(|| panic!("no operatorRequired refusal in {records:#?}"));
+        assert_eq!(held["fields"]["request"], "take");
+        assert_eq!(held["fields"]["subject"], "desk-1");
+        assert!(!text.contains(&desk_text), "the credential reached the log");
     }
 
     #[test]

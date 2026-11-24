@@ -14,9 +14,10 @@
 // keeps repaint off the O(keys) path. `sourceKeys` is a borrowed reference to
 // the authored array, never a copy.
 
-import type { RationalRate, SceneDocument, SceneKeyframe } from "@grapix/contracts";
+import type { PathKey, PathTarget, RationalRate, SceneDocument, SceneKeyframe } from "@grapix/contracts";
 
 import { propertyLabel } from "../keyframe-editor";
+import { targetField } from "../path-anim";
 import { buildKeyIndex, type KeyIndex } from "./key-index";
 
 export interface TimelineTrack {
@@ -31,6 +32,17 @@ export interface TimelineTrack {
   /// not carry, and copying would reintroduce the per-key cost the index
   /// exists to remove.
   readonly sourceKeys: readonly SceneKeyframe[];
+  /// 11.112: set when this track is a path channel. Its `sourceKeys` then carry the key's place in the channel as `value`, so the
+  /// speed graph draws the easing between whole paths (progress from key to key); the paths themselves are `pathKeys`.
+  readonly pathTarget?: PathTarget;
+  readonly pathKeys?: readonly PathKey[];
+}
+
+/// The row label of a path track: "Path", "Path 2" for a subpath, "Mask 1 path".
+export function pathTrackLabel(target: PathTarget): string {
+  if (target.kind === "mask") return `Mask ${target.index + 1} path`;
+  const subpath = target.subpath ?? 0;
+  return subpath === 0 ? "Path" : `Path ${subpath + 1}`;
 }
 
 /// A displayed row: either an object's collapsible group header, or one of its
@@ -100,6 +112,27 @@ export function timelineModel(
       label: propertyLabel(channel.property),
       keys: buildKeyIndex(channel.keys),
       sourceKeys: channel.keys,
+    });
+  }
+
+  // 11.112: a path channel is a track too, its keys the paths at their frames.
+  for (const channel of document.timeline.pathChannels ?? []) {
+    if (selected.length > 0 && !selected.includes(channel.objectId)) continue;
+    keyCount += channel.keys.length;
+    tracks.push({
+      objectId: channel.objectId,
+      objectName: names.get(channel.objectId) ?? channel.objectId,
+      property: targetField(channel.target),
+      label: pathTrackLabel(channel.target),
+      keys: buildKeyIndex(channel.keys),
+      sourceKeys: channel.keys.map((key, index) => ({
+        frame: key.frame,
+        value: index,
+        easing: key.easing,
+        ...(key.bezier === undefined ? {} : { bezier: key.bezier }),
+      })),
+      pathTarget: channel.target,
+      pathKeys: channel.keys,
     });
   }
 

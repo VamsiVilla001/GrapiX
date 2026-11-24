@@ -223,7 +223,7 @@ describe("tab groups in the default layout", () => {
 
   it("puts the right column's panels into two groups and leaves Preview on its own", () => {
     expect(right.groups.map((g) => g.id)).toEqual(["inspector-group", "library-group"]);
-    expect(right.groups[0]!.panels).toEqual(["inspector", "animation", "effect-controls", "text-styles", "fonts"]);
+    expect(right.groups[0]!.panels).toEqual(["inspector", "pivot", "masks", "animation", "effect-controls", "text-styles", "fonts"]);
     expect(right.groups[1]!.panels).toEqual(["effects", "materials"]);
     expect(groupOf(CARD_SORT_LAYOUT, "preview")).toBeUndefined();
     expect(groupOf(CARD_SORT_LAYOUT, "unsupported")).toBeUndefined();

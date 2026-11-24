@@ -1,0 +1,253 @@
+{
+ "date": "2026-11-24",
+ "note": "Confidences are model confidences, not versions. Laya is uncalibrated (flat about 0.95 on yes/no questions); both are second opinions, not verifiers.",
+ "input": {
+  "state": {
+   "decision": "How the GrapiX Editor's modules (design, animation, effects, data, text, publish, diagnostics) should be arranged and switched, and how its menus, Project panel and Publish flow should be laid out, so a designer can use Design, Animation and Data panels at the same time.",
+   "product": "GrapiX Editor is a Tauri desktop app for authoring real-time broadcast graphics. It is built on EffectCraft, an open-source clean-room reimplementation of After Effects. A separate Playout app is the only thing that can cue, take or clear Program; the Editor can never put anything on air.",
+   "user_requirement": "The owner said: Design, Animation and Data panels are needed at once; this is NOT about pop-out windows. It must not be one module at a time.",
+   "what_effectcraft_does": "EffectCraft keeps After Effects' model: named workspaces (Default, Standard, Small Screen, Animation, Effects, Motion Tracking, Paint, Text, Minimal, Review, Essential Graphics) are saved dock arrangements chosen from a row at the right end of the tool row; one is active at a time, but every panel can be dragged, tabbed, floated and shown or hidden from the Window menu, and the layout can be saved. Its default layout has Project and Effect Controls on the left, the Composition viewer in the centre, Timeline below, and a full-height right column with Preview over Properties. Its menu bar is File, Edit, Composition, Layer, Effect, Animation, View, Window, Help.",
+   "what_grapix_has_today": "A panel registry where each panel declares its application, whether it is a singleton, its default placement and its capability. A dock model with tab groups, splits and floating panels. One shipped workspace (Design). More shipped workspaces (Animation, Data and automation, 3D and render, Diagnostics) are planned. The Editor menu bar is File, Edit, Project, Motion, Panels, Layout, Utilities, Help.",
+   "measured_problems_in_the_current_app": "From saved screenshots of the real window. At about 1440 px wide the top bar wraps into two rows and the Scene id and Name labels overlap the button stack. New, Open and Save appear in three places (top bar, Scenes panel, File menu). The Inspector's seven tabs wrap to two lines in a 360 px dock. The Timeline's Keys, Presets and Phases toolbar scrolls sideways at 1440 px. The engine-unreachable message shows a raw OS error as its main text.",
+   "proposal_a": "Keep exclusive workspaces: a tab row where exactly one module is active and switching replaces the layout.",
+   "proposal_b": "Modules are multi-select toggles. Each module owns panels from the registry that join the dock layout when it is on and leave it when off. Several can be on together (for example Design plus Animation plus Data), selection, playhead and scene are shared across all panels, and a Layout menu stores named combinations (Default, Animation, Effects, Data, Text, Publish, Diagnostics, Design + Animation + Data, Small Screen). Dragging panels still works as in EffectCraft.",
+   "proposal_c": "Each module opens as its own window.",
+   "project_panel": "EffectCraft puts scenes (compositions), footage, images, fonts and folders in one Project panel with a type filter. GrapiX today has separate Scene Manager, Assets, Project files and Materials panels.",
+   "publish": "EffectCraft has a Render Queue tab beside the Timeline. GrapiX publishes a scene as an immutable revision to the engine's package folder; the engine replies with how it was delivered (local path or chunked upload) or a named refusal. Preflight checks (fonts embedded, materials ready, every data record fits, data not stale) are known before publishing.",
+   "constraints": "Both apps are dark only. The Editor shows no live telemetry (owner decision). Agents must never reach Program. Menu items must not use XPression's names. The menu row and panel names are for motion designers who know After Effects."
+  },
+  "questions": {
+   "module_model": {
+    "type": "choice",
+    "instructions": "Which arrangement best meets the requirement that Design, Animation and Data panels are available at once without pop-out windows, while staying close to the After Effects behaviour that EffectCraft reproduces?",
+    "criteria": {
+     "A": "Proposal A: exclusive workspaces, one module active at a time.",
+     "B": "Proposal B: multi-select module toggles whose panels combine in one layout, with a Layout menu of saved combinations.",
+     "C": "Proposal C: each module in its own window."
+    }
+   },
+   "shared_state_across_panels": {
+    "type": "noul",
+    "instructions": "When several modules are on at once, should selection, playhead and current scene be shared by all their panels so that a change in one panel shows immediately in the others?",
+    "criteria": {
+     "true": "Yes: one shared selection, playhead and scene; panels are views of the same project.",
+     "false": "No: each module keeps its own selection and playhead."
+    }
+   },
+   "menu_order": {
+    "type": "choice",
+    "instructions": "Which Editor menu row should GrapiX use?",
+    "criteria": {
+     "A": "After Effects order as EffectCraft has it, renamed only where GrapiX differs: File, Edit, Scene, Layer, Effect, Motion, Data, View, Window, Help.",
+     "B": "The current plain-word row: File, Edit, Project, Motion, Panels, Layout, Utilities, Help."
+    }
+   },
+   "project_panel_merge": {
+    "type": "noul",
+    "instructions": "Should scenes, footage, images, fonts and materials be one Project panel with a type filter, replacing the separate Scene Manager, Assets and Project files panels?",
+    "criteria": {
+     "true": "Yes: one filtered list, as EffectCraft and After Effects do.",
+     "false": "No: keep the separate panels."
+    }
+   },
+   "publish_queue": {
+    "type": "choice",
+    "instructions": "How should publishing to Playout be presented?",
+    "criteria": {
+     "A": "A Publish queue tab beside the Timeline with a preflight list, per-scene engine reply and named refusals.",
+     "B": "A one-shot Publish dialog only.",
+     "C": "Publish only from the File menu with a message in the activity log."
+    }
+   },
+   "hide_unused_panels": {
+    "type": "noul",
+    "instructions": "Should Tracker, Paint, Brushes, Roto, Puppet, VR and Content-Aware Fill stay available under Window but be left out of every default layout, to keep a broadcast-graphics Editor lean?",
+    "criteria": {
+     "true": "Yes: available on demand, not in default layouts.",
+     "false": "No: show them in default layouts like After Effects."
+    }
+   },
+   "scene_id_name_in_top_bar": {
+    "type": "noul",
+    "instructions": "Should the scene id and name text fields leave the top bar, with renaming done in the Project panel and Properties, given that the top bar wraps at 1440 px?",
+    "criteria": {
+     "true": "Yes: remove them from the top bar.",
+     "false": "No: keep them in the top bar."
+    }
+   },
+   "raw_error_wording": {
+    "type": "noul",
+    "instructions": "Should an engine-unreachable message lead with a plain sentence that names the condition and the next step, with the raw operating-system error behind a details line?",
+    "criteria": {
+     "true": "Yes: plain sentence first, raw error behind details.",
+     "false": "No: show the raw error as the message."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "module_model": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 1,
+    "probabilities": {
+     "A": 0,
+     "B": 1,
+     "C": 0
+    }
+   },
+   "shared_state_across_panels": {
+    "type": "noul",
+    "noul": 0.94
+   },
+   "menu_order": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.34,
+    "probabilities": {
+     "A": 0.67,
+     "B": 0.33
+    }
+   },
+   "project_panel_merge": {
+    "type": "noul",
+    "noul": 0.84
+   },
+   "publish_queue": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.98,
+    "probabilities": {
+     "A": 0.99,
+     "B": 0.01,
+     "C": 0
+    }
+   },
+   "hide_unused_panels": {
+    "type": "noul",
+    "noul": 0.85
+   },
+   "scene_id_name_in_top_bar": {
+    "type": "noul",
+    "noul": 0.74
+   },
+   "raw_error_wording": {
+    "type": "noul",
+    "noul": 0.95
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 7564,
+   "output_tokens": 0,
+   "state_tokens": 869,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "seconds": 77.7,
+  "answers": {
+   "module_model": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5441,
+     "B": 0.0984,
+     "C": 0.3575
+    },
+    "confidence": 0.1562,
+    "answer_confidence": 0.5441,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "shared_state_across_panels": {
+    "type": "noul",
+    "noul": 0.9671,
+    "confidence": 0.9671,
+    "answer_confidence": 0.9671,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "menu_order": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.2736,
+     "B": 0.7264
+    },
+    "confidence": 0.1535,
+    "answer_confidence": 0.7264,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "project_panel_merge": {
+    "type": "noul",
+    "noul": 0.9587,
+    "confidence": 0.9587,
+    "answer_confidence": 0.9587,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "publish_queue": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3477,
+     "B": 0.2513,
+     "C": 0.4011
+    },
+    "confidence": 0.0162,
+    "answer_confidence": 0.4011,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "hide_unused_panels": {
+    "type": "noul",
+    "noul": 0.933,
+    "confidence": 0.933,
+    "answer_confidence": 0.933,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "scene_id_name_in_top_bar": {
+    "type": "noul",
+    "noul": 0.9675,
+    "confidence": 0.9675,
+    "answer_confidence": 0.9675,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "raw_error_wording": {
+    "type": "noul",
+    "noul": 0.9638,
+    "confidence": 0.9638,
+    "answer_confidence": 0.9638,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ },
+ "reading": {
+  "module_model": "Jev B (confidence 1.00); Laya A (0.54, B only 0.10). Disagree. Decided B by hand: the owner's stated requirement is panels from several modules at once without pop-out windows, which A cannot meet.",
+  "shared_state_across_panels": "Jev yes 0.94; Laya yes 0.97. Agree. Adopted.",
+  "menu_order": "Jev A with confidence 0.34; Laya B 0.73. Disagree and Jev is unsure. Left to the owner (decision 1 on the wireframe page).",
+  "project_panel_merge": "Jev yes 0.84; Laya yes 0.96. Agree. Adopted.",
+  "publish_queue": "Jev A 0.98; Laya C 0.40 (A 0.35). Disagree; Laya is flat. Adopted A (matches EffectCraft's Render Queue and the engine's per-scene reply), flagged to the owner.",
+  "hide_unused_panels": "Jev yes 0.85; Laya yes 0.93. Agree. Adopted.",
+  "scene_id_name_in_top_bar": "Jev yes 0.74; Laya yes 0.97. Agree. Adopted.",
+  "raw_error_wording": "Jev yes 0.95; Laya yes 0.96. Agree. Adopted."
+ }
+}

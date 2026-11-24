@@ -36,6 +36,22 @@
     <header class="bar" id="connectionBar">
       <h1 class="bar__mark">GrapiX <strong>Playout</strong></h1>
 
+      <!-- 2.15: the person operating, not only the credential. Every Program command
+           carries this name to the engine; without one the transport is held. -->
+      <div class="field field--operator">
+        <label class="field__label" for="operatorInput">Operator <span class="field__hint" id="operatorHint">signed out</span></label>
+        <input
+          class="field__input"
+          id="operatorInput"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          maxlength="64"
+          placeholder="your name"
+        />
+      </div>
+      <button class="btn" id="signInButton" type="button">Sign in</button>
+
       <div class="field field--grow">
         <label class="field__label" for="endpointInput">Control endpoint</label>
         <input

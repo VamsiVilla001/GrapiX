@@ -526,6 +526,9 @@ fn vector_fixture() -> SceneDocument {
                 vertices: vec![v(0.0, 0.0), v(70.0, 10.0), v(10.0, 50.0), v(80.0, 70.0)],
                 in_tangents: vec![v(0.0, 0.0); 4],
                 out_tangents: vec![v(0.0, 0.0); 4],
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             compound_paths: None,
             fill_enabled: false,
@@ -534,6 +537,7 @@ fn vector_fixture() -> SceneDocument {
             trim_start: None,
             trim_end: None,
             trim_offset: None,
+            contour_ids: None,
         })
     };
     let joins = [StrokeJoin::Miter, StrokeJoin::Round, StrokeJoin::Bevel];
@@ -579,6 +583,9 @@ fn vector_fixture() -> SceneDocument {
                 vertices: star.clone(),
                 in_tangents: vec![v(0.0, 0.0); 5],
                 out_tangents: vec![v(0.0, 0.0); 5],
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             compound_paths: None,
             fill_enabled: true,
@@ -587,6 +594,7 @@ fn vector_fixture() -> SceneDocument {
             trim_start: None,
             trim_end: None,
             trim_offset: None,
+            contour_ids: None,
         })
         .pipe(|o| doc.objects.push(o));
     }
@@ -1172,6 +1180,9 @@ fn mask_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) 
         vertices: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)],
         in_tangents: vec![v(0.0, 0.0); 4],
         out_tangents: vec![v(0.0, 0.0); 4],
+        vertex_ids: None,
+        vertex_kinds: None,
+        auto_tension: None,
     };
     let ellipse_path = |cx: f64, cy: f64, rx: f64, ry: f64| {
         const K: f64 = 0.552_284_75;
@@ -1195,12 +1206,19 @@ fn mask_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) 
                 v(0.0, -K * ry),
                 v(K * rx, 0.0),
             ],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         }
     };
     let mask = |path, mode, feather, expansion, opacity, inverted| Mask {
+        id: None,
         path,
         mode,
         feather,
+        feather_y: None,
+        falloff: Default::default(),
+        feather_points: None,
         expansion,
         opacity,
         inverted,
@@ -1302,6 +1320,7 @@ fn mask_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) 
         trim_start: None,
         trim_end: None,
         trim_offset: None,
+        contour_ids: None,
     }));
     // The text: only its first 200 pixels show, grown by 3 and feathered.
     let mut base = ObjectBase::new("caption", "caption");
@@ -1338,6 +1357,125 @@ fn mask_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) 
         paragraph_spacing: 0.0,
         text_indent: 0.0,
     }));
+    // 3.26: lighten and darken fold on the GPU as on the CPU. `blend`: an add,
+    // a half-opacity lighten and an 80% darken; `first`: a darken alone sets
+    // its own area (a first darken or intersect acts as an add).
+    let plain_shape = |base: ObjectBase, path| {
+        SceneObject::Shape(ShapeObject {
+            base,
+            path,
+            compound_paths: None,
+            fill_enabled: true,
+            stroke_enabled: false,
+            fill_rule: FillRule::Nonzero,
+            trim_start: None,
+            trim_end: None,
+            trim_offset: None,
+            contour_ids: None,
+        })
+    };
+    let mut base = ObjectBase::new("blend", "blend");
+    base.x = 700.0;
+    base.y = 300.0;
+    base.fill = Some(solid(0.9, 0.9, 0.2, 1.0));
+    base.masks = Some(vec![
+        mask(
+            rect_path(0.0, 0.0, 120.0, 100.0),
+            MaskMode::Add,
+            0.0,
+            0.0,
+            1.0,
+            false,
+        ),
+        mask(
+            ellipse_path(100.0, 50.0, 50.0, 40.0),
+            MaskMode::Lighten,
+            4.0,
+            0.0,
+            0.5,
+            false,
+        ),
+        mask(
+            rect_path(60.0, 0.0, 200.0, 100.0),
+            MaskMode::Darken,
+            0.0,
+            0.0,
+            0.8,
+            false,
+        ),
+    ]);
+    doc.objects
+        .push(plain_shape(base, rect_path(0.0, 0.0, 200.0, 100.0)));
+    let mut base = ObjectBase::new("first", "first");
+    base.x = 700.0;
+    base.y = 420.0;
+    base.fill = Some(solid(0.2, 0.9, 0.9, 1.0));
+    base.masks = Some(vec![mask(
+        ellipse_path(100.0, 50.0, 60.0, 40.0),
+        MaskMode::Darken,
+        0.0,
+        0.0,
+        0.5,
+        false,
+    )]);
+    doc.objects
+        .push(plain_shape(base, rect_path(0.0, 0.0, 200.0, 100.0)));
+    // 3.28: an effect limited by a mask reference. The mask is in mode none, so it
+    // clips nothing: it only says where the effect acts (the left 120 px).
+    let reference = |id: &str| {
+        let mut m = mask(rect_path(0.0, 0.0, 120.0, 80.0), MaskMode::None, 0.0, 0.0, 1.0, false);
+        m.id = Some(id.into());
+        m
+    };
+    let mut base = ObjectBase::new("refd", "refd");
+    (base.x, base.y, base.width, base.height) = (40.0, 320.0, 240.0, 80.0);
+    base.fill = Some(solid(1.0, 1.0, 1.0, 1.0));
+    base.masks = Some(vec![reference("left")]);
+    let mut red = gx_contracts::effect::EffectInstance::new(
+        "red",
+        gx_contracts::effect::Effect::Fill(gx_contracts::effect::Fill {
+            color: Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+            opacity: 1.0,
+        }),
+    );
+    red.mask_ids = Some(vec!["left".into()]);
+    base.effects = Some(vec![red]);
+    doc.objects.push(SceneObject::Rect(RectObject { base, radius: 0.0 }));
+    // The same through a Glow, whose own passes use the third target.
+    let mut base = ObjectBase::new("refglow", "refglow");
+    (base.x, base.y, base.width, base.height) = (320.0, 320.0, 240.0, 80.0);
+    base.fill = Some(solid(0.9, 0.9, 0.9, 1.0));
+    base.masks = Some(vec![reference("left")]);
+    let mut glow = gx_contracts::effect::EffectInstance::new(
+        "glow",
+        gx_contracts::effect::Effect::Glow(gx_contracts::effect::Glow {
+            threshold: 0.3,
+            radius: 10.0,
+            intensity: 2.0,
+            dimensions: Default::default(),
+        }),
+    );
+    glow.mask_ids = Some(vec!["left".into()]);
+    base.effects = Some(vec![glow]);
+    doc.objects.push(SceneObject::Rect(RectObject { base, radius: 0.0 }));
+    // 3.27: a feather along x only, with a linear falloff.
+    let mut soft = mask(
+        rect_path(40.0, 0.0, 160.0, 100.0),
+        MaskMode::Add,
+        12.0,
+        0.0,
+        1.0,
+        false,
+    );
+    soft.feather_y = Some(0.0);
+    soft.falloff = Some(gx_contracts::scene::MaskFalloff::Linear);
+    let mut base = ObjectBase::new("soft", "soft");
+    base.x = 950.0;
+    base.y = 300.0;
+    base.fill = Some(solid(0.9, 0.4, 0.9, 1.0));
+    base.masks = Some(vec![soft]);
+    doc.objects
+        .push(plain_shape(base, rect_path(0.0, 0.0, 200.0, 100.0)));
     let png_hash = gx_asset_plane::content_hash(&png);
     (doc, vec![(png_hash, png), (inter, INTER.to_vec())])
 }
@@ -1365,13 +1503,18 @@ fn gpu_engine_draws_masked_layers_within_one_code_of_the_cpu_reference() {
         // A masked object is drawn in its own layer space; the CPU reference
         // builds those four layers on the CPU, the GPU sources take the GPU
         // routes below.
-        assert_eq!(prepare.cpu_source_rasterizations, 4);
+        assert_eq!(prepare.cpu_source_rasterizations, 9);
         let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
         let routes: Vec<_> = sources.iter().map(|s| s.route).collect();
         assert_eq!(
             routes,
             [
                 "gpu-image-fit-at-prepare",
+                "gpu-vello-coverage-at-prepare",
+                "gpu-vello-coverage-at-prepare",
+                "gpu-vello-coverage-at-prepare",
+                "gpu-vello-coverage-at-prepare",
+                "gpu-vello-coverage-at-prepare",
                 "gpu-vello-coverage-at-prepare",
                 "gpu-vello-coverage-at-prepare",
                 "gpu-vello-coverage-at-prepare"
@@ -1403,6 +1546,48 @@ fn gpu_engine_draws_masked_layers_within_one_code_of_the_cpu_reference() {
             "{space:?}: shape, the 70% ellipse differenced back: {}",
             alpha(400, 100)
         );
+        // 3.27: the feather is along x only: the left edge (x 990) is soft, the
+        // top row (y 300) is not.
+        assert!(
+            (1..=254).contains(&alpha(990, 350)),
+            "{space:?}: soft, the edge is feathered along x: {}",
+            alpha(990, 350)
+        );
+        assert!(
+            alpha(1050, 300) >= 254,
+            "{space:?}: soft, the top edge stays hard"
+        );
+        assert_eq!(
+            alpha(1050, 399),
+            255,
+            "{space:?}: soft, and so does the bottom row"
+        );
+        // 3.28: the Fill is red where the reference covers (the left 120 px of 40..280) and the
+        // layer is whole and white outside it, because the mask clips nothing.
+        let colour = |x: u32, y: u32| {
+            let i = ((y * preview.width + x) * 4) as usize;
+            [preview.pixels[i], preview.pixels[i + 1], preview.pixels[i + 2], preview.pixels[i + 3]]
+        };
+        assert_eq!(colour(100, 360), [255, 0, 0, 255], "{space:?}: refd, red inside the reference");
+        assert_eq!(colour(220, 360), [255, 255, 255, 255], "{space:?}: refd, white outside it");
+        assert_eq!(colour(500, 360)[3], 255, "{space:?}: refglow, the layer is whole outside the reference");
+        assert_eq!(alpha(730, 350), 0, "{space:?}: blend, outside the darken");
+        assert!(
+            (203..=205).contains(&alpha(790, 350)),
+            "{space:?}: blend, add then lighten then an 80% darken: {}",
+            alpha(790, 350)
+        );
+        assert_eq!(
+            alpha(870, 350),
+            0,
+            "{space:?}: blend, outside the add and the lighten"
+        );
+        assert!(
+            (127..=129).contains(&alpha(800, 470)),
+            "{space:?}: a first darken sets its own area at 50%: {}",
+            alpha(800, 470)
+        );
+        assert_eq!(alpha(700, 420), 0, "{space:?}: first, outside its ellipse");
         assert!(alpha(680, 100) > 200, "{space:?}: image centre");
         assert_eq!(alpha(605, 45), 0, "{space:?}: image corner, masked off");
         let lit = |x0: u32, x1: u32| {
@@ -1509,14 +1694,21 @@ fn clip_fixture() -> SceneDocument {
     let mut inner_fill = rect("inner-fill", 0.0, 0.0, 700.0, 400.0, solid(0.1, 0.8, 0.3));
     let v = |x: f64, y: f64| Vec2 { x, y };
     inner_fill.base_mut().masks = Some(vec![Mask {
+        id: None,
         path: BezierPath {
             closed: true,
             vertices: vec![v(0.0, 0.0), v(170.0, 0.0), v(170.0, 400.0), v(0.0, 400.0)],
             in_tangents: vec![v(0.0, 0.0); 4],
             out_tangents: vec![v(0.0, 0.0); 4],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         },
         mode: MaskMode::Add,
         feather: 0.0,
+        feather_y: None,
+        falloff: Default::default(),
+        feather_points: None,
         expansion: 0.0,
         opacity: 1.0,
         inverted: false,
@@ -1717,6 +1909,9 @@ fn matte_fixture() -> SceneDocument {
     let mut base = ObjectBase::new("spot", "spot");
     (base.x, base.y, base.width, base.height) = (200.0, 50.0, 300.0, 700.0);
     base.opacity = 0.9;
+    // 3.30: a source is drawn too unless it is hidden, as After Effects turns
+    // the eye off when a layer becomes a matte.
+    base.visible = false;
     base.fill = Some(ColorValue::LinearGradient {
         angle: 0.0,
         start_x: 0.0,
@@ -1794,14 +1989,9 @@ fn matte_fixture() -> SceneDocument {
         200.0,
         solid(1.0, 1.0, 1.0),
     ));
-    doc.objects.push(rect(
-        "box-src",
-        1000.0,
-        100.0,
-        200.0,
-        100.0,
-        solid(1.0, 1.0, 1.0),
-    ));
+    let mut box_src = rect("box-src", 1000.0, 100.0, 200.0, 100.0, solid(1.0, 1.0, 1.0));
+    box_src.base_mut().visible = false;
+    doc.objects.push(box_src);
     doc.objects.push(matted(
         rect(
             "box-consumer",
@@ -1814,6 +2004,36 @@ fn matte_fixture() -> SceneDocument {
         "box-src",
         TrackMatteMode::Alpha,
     ));
+    // 3.30: a visible source is drawn as well as matting: the source alone
+    // at x 1000..1200, the consumer 1100..1400, both at y 400..500.
+    doc.objects.push(rect(
+        "seen-src",
+        1000.0,
+        400.0,
+        200.0,
+        100.0,
+        solid(1.0, 1.0, 1.0),
+    ));
+    doc.objects.push(matted(
+        rect(
+            "seen-consumer",
+            1100.0,
+            400.0,
+            300.0,
+            100.0,
+            solid(0.9, 0.3, 0.2),
+        ),
+        "seen-src",
+        TrackMatteMode::Alpha,
+    ));
+    // 3.28: Preserve Underlying Transparency: a half-opaque rect below, and a
+    // full opaque layer above that shows only over it (x 1100..1200).
+    let mut under = rect("pres-below", 1000.0, 600.0, 200.0, 100.0, solid(0.2, 0.4, 0.9));
+    under.base_mut().opacity = 0.5;
+    doc.objects.push(under);
+    let mut above = rect("pres-above", 1100.0, 600.0, 200.0, 100.0, solid(1.0, 1.0, 1.0));
+    above.base_mut().preserve_underlying_transparency = Some(true);
+    doc.objects.push(above);
     // The source moves 60 px right over ten frames.
     doc.timeline.channels.push(KeyframeChannel {
         object_id: "spot".into(),
@@ -1836,6 +2056,63 @@ fn matte_fixture() -> SceneDocument {
     doc
 }
 
+/// 3.29: three stacked backgrounds, a stencil or silhouette layer above them, and a layer above that.
+fn stencil_fixture(mode: gx_contracts::material::BlendMode) -> SceneDocument {
+    let solid = |r: f64, g: f64, b: f64| ColorValue::Solid {
+        color: Rgba::srgb(r, g, b, 1.0),
+    };
+    let rect = |id: &str, x: f64, y: f64, w: f64, h: f64, fill: ColorValue| {
+        let mut base = ObjectBase::new(id, id);
+        (base.x, base.y, base.width, base.height) = (x, y, w, h);
+        base.fill = Some(fill);
+        SceneObject::Rect(RectObject { base, radius: 0.0 })
+    };
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    doc.objects.push(rect("bg-red", 0.0, 0.0, 400.0, 200.0, solid(0.9, 0.1, 0.1)));
+    doc.objects.push(rect("bg-green", 200.0, 100.0, 400.0, 200.0, solid(0.1, 0.9, 0.1)));
+    doc.objects.push(rect("bg-blue", 400.0, 0.0, 400.0, 200.0, solid(0.1, 0.1, 0.9)));
+    let mut cut = rect("cut", 150.0, 50.0, 300.0, 200.0, solid(1.0, 1.0, 1.0));
+    cut.base_mut().blend_mode = Some(mode);
+    doc.objects.push(cut);
+    doc.objects.push(rect("top", 0.0, 320.0, 800.0, 40.0, solid(0.9, 0.9, 0.2)));
+    doc
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.29 stencil and silhouette gate"]
+fn gpu_engine_stencil_and_silhouette_cut_the_whole_stack_below_not_one_layer() {
+    use gx_contracts::material::BlendMode;
+    for mode in [BlendMode::AlphaMask, BlendMode::InverseAlphaMask] {
+        let (mut engine, ticks) = hardware_engine();
+        let pin = publish(&mut engine, stencil_fixture(mode));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        let reference = cpu.frame_at(0, OutputTransform::Rec709).unwrap();
+        assert_within_one_code(&program, &reference, &format!("{mode:?} Program"));
+        let alpha = |x: u32, y: u32| preview.pixels[((y * preview.width + x) * 4 + 3) as usize];
+        let stencil = mode == BlendMode::AlphaMask;
+        // Inside the cut box (150..450 x 50..250), where the red, the green and
+        // the blue each were: the stack below is kept by a stencil, removed by a silhouette.
+        for (x, y, what) in [(180, 80, "red"), (300, 150, "red and green"), (420, 120, "green and blue")] {
+            assert_eq!(alpha(x, y) == 255, stencil, "{mode:?}: inside the box over {what}");
+        }
+        // Outside the box, over a background: removed by a stencil, kept by a silhouette; every
+        // layer below is changed, not only the one next to it.
+        for (x, y, what) in [(50, 100, "red"), (500, 50, "blue"), (550, 250, "green")] {
+            assert_eq!(alpha(x, y) == 255, !stencil, "{mode:?}: outside the box over {what}");
+        }
+        // The layer above the cut is not below it, so it is whole.
+        assert_eq!(alpha(700, 340), 255, "{mode:?}: the layer above is untouched");
+    }
+}
+
 #[test]
 #[ignore = "requires hardware GPU; explicit 3.19 matte gate"]
 fn gpu_engine_draws_track_mattes_in_every_mode_within_one_code_of_the_cpu_reference() {
@@ -1845,7 +2122,7 @@ fn gpu_engine_draws_track_mattes_in_every_mode_within_one_code_of_the_cpu_refere
         doc.working_color_space = space;
         let pin = publish(&mut engine, doc);
         let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
-        assert_eq!(sources.len(), 10, "every drawing object, mattes too");
+        assert_eq!(sources.len(), 14, "every drawing object, mattes too");
         assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
         let mut seen = Vec::new();
         let mut strict = Vec::new();
@@ -1892,6 +2169,24 @@ fn gpu_engine_draws_track_mattes_in_every_mode_within_one_code_of_the_cpu_refere
             );
         };
         let first = at(0);
+        near(alpha(first, 1050, 650), 0.5, "preserve: the layer below, alone");
+        near(alpha(first, 1150, 650), 0.75, "preserve: the layer over the half-opaque one");
+        near(alpha(first, 1250, 650), 0.0, "preserve: over nothing it shows nothing");
+        near(
+            alpha(first, 1050, 450),
+            1.0,
+            "a visible source is drawn alone",
+        );
+        near(
+            alpha(first, 1150, 450),
+            1.0,
+            "and the consumer shows where they overlap",
+        );
+        near(
+            alpha(first, 1350, 450),
+            0.0,
+            "and nothing shows outside the source",
+        );
         // The source's own 90%, not 50% x 90%.
         near(alpha(first, 350, 90), 0.9, "alpha band inside the source");
         near(alpha(first, 700, 90), 0.0, "alpha band outside the source");
@@ -1975,6 +2270,9 @@ fn trim_fixture() -> SceneDocument {
                 vertices,
                 in_tangents: in_t,
                 out_tangents: out_t,
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             compound_paths: None,
             fill_enabled: false,
@@ -1983,6 +2281,7 @@ fn trim_fixture() -> SceneDocument {
             trim_start: trim.map(|t| t.0),
             trim_end: trim.map(|t| t.1),
             trim_offset: trim.map(|t| t.2),
+            contour_ids: None,
         })
     };
     let straight = |n: usize| (vec![v(0.0, 0.0); n], vec![v(0.0, 0.0); n]);
@@ -2074,6 +2373,7 @@ fn trim_fixture() -> SceneDocument {
         Some((0.0, 80.0, 0.0)),
     );
     masked.base_mut().masks = Some(vec![Mask {
+        id: None,
         path: BezierPath {
             closed: true,
             vertices: vec![
@@ -2084,9 +2384,15 @@ fn trim_fixture() -> SceneDocument {
             ],
             in_tangents: vec![v(0.0, 0.0); 4],
             out_tangents: vec![v(0.0, 0.0); 4],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         },
         mode: MaskMode::Add,
         feather: 2.0,
+        feather_y: None,
+        falloff: Default::default(),
+        feather_points: None,
         expansion: 0.0,
         opacity: 1.0,
         inverted: false,
@@ -2198,3 +2504,245 @@ fn gpu_engine_honours_trim_paths_within_one_code_of_the_cpu_reference() {
         );
     }
 }
+
+/// 11.112's fixture: a shape whose closed path bulges and travels between two keys, with a
+/// fill and a stroke, and a layer whose clip mask is still while a reference mask (mode
+/// none) that an effect follows travels. Both are animated by vertex id.
+fn animated_path_fixture() -> SceneDocument {
+    use gx_contracts::animation::SceneEasing;
+    use gx_contracts::effect::{Effect, EffectInstance, Fill};
+    use gx_contracts::path_anim::{PathChannel, PathKey};
+    use gx_contracts::path_geometry::PathTarget;
+    use gx_contracts::scene::{BezierPath, FillRule, Mask, MaskMode, ShapeObject, Vec2};
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let colour = |r: f64, g: f64, b: f64| ColorValue::Solid { color: Rgba::srgb(r, g, b, 1.0) };
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    doc.timeline.duration_frames = 100;
+    let square = |x0: f64, y0: f64, side: f64, out: Vec2| BezierPath {
+        closed: true,
+        vertices: vec![v(x0, y0), v(x0 + side, y0), v(x0 + side, y0 + side), v(x0, y0 + side)],
+        in_tangents: vec![v(0.0, 0.0); 4],
+        out_tangents: vec![out, v(0.0, 0.0), v(0.0, 0.0), v(0.0, 0.0)],
+        vertex_ids: Some(vec![0, 1, 2, 3]),
+        vertex_kinds: None,
+        auto_tension: None,
+    };
+    let mut base = ObjectBase::new("morph", "morph");
+    base.x = 100.0;
+    base.y = 100.0;
+    base.fill = Some(colour(0.9, 0.3, 0.1));
+    base.stroke = Some(colour(1.0, 1.0, 1.0));
+    base.stroke_width = 6.0;
+    let first = square(0.0, 0.0, 120.0, v(0.0, 0.0));
+    let last = square(260.0, 40.0, 120.0, v(70.0, -90.0));
+    doc.objects.push(SceneObject::Shape(ShapeObject {
+        base,
+        path: first.clone(),
+        compound_paths: None,
+        fill_enabled: true,
+        stroke_enabled: true,
+        fill_rule: FillRule::Nonzero,
+        trim_start: None,
+        trim_end: None,
+        trim_offset: None,
+        contour_ids: None,
+    }));
+    let strip = |x0: f64, x1: f64, ids: bool| BezierPath {
+        closed: true,
+        vertices: vec![v(x0, 0.0), v(x1, 0.0), v(x1, 120.0), v(x0, 120.0)],
+        in_tangents: vec![v(0.0, 0.0); 4],
+        out_tangents: vec![v(0.0, 0.0); 4],
+        vertex_ids: ids.then(|| vec![0, 1, 2, 3]),
+        vertex_kinds: None,
+        auto_tension: None,
+    };
+    let mut layer = ObjectBase::new("masked", "masked");
+    (layer.x, layer.y, layer.width, layer.height) = (700.0, 100.0, 200.0, 120.0);
+    layer.fill = Some(colour(1.0, 1.0, 1.0));
+    let mask = |id: &str, mode: MaskMode, path: BezierPath| Mask {
+        id: Some(id.into()),
+        path,
+        mode,
+        feather: 0.0,
+        feather_y: None,
+        falloff: None,
+        feather_points: None,
+        expansion: 0.0,
+        opacity: 1.0,
+        inverted: false,
+    };
+    layer.masks = Some(vec![
+        mask("clip", MaskMode::Add, strip(0.0, 170.0, false)),
+        mask("ref", MaskMode::None, strip(0.0, 60.0, true)),
+    ]);
+    let mut red = EffectInstance::new(
+        "red",
+        Effect::Fill(Fill { color: Rgba::srgb(1.0, 0.0, 0.0, 1.0), opacity: 1.0 }),
+    );
+    red.mask_ids = Some(vec!["ref".into()]);
+    layer.effects = Some(vec![red]);
+    doc.objects.push(SceneObject::Rect(RectObject { base: layer, radius: 0.0 }));
+    let key = |frame: u64, path: BezierPath| PathKey { frame, path, easing: SceneEasing::Linear, bezier: None };
+    doc.timeline.path_channels = vec![
+        PathChannel {
+            object_id: "morph".into(),
+            target: PathTarget::Shape { subpath: 0 },
+            keys: vec![key(0, first), key(40, last)],
+        },
+        PathChannel {
+            object_id: "masked".into(),
+            target: PathTarget::Mask { index: 1 },
+            keys: vec![key(0, strip(0.0, 60.0, true)), key(40, strip(140.0, 200.0, true))],
+        },
+    ];
+    doc
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 11.112 animated path gate"]
+fn gpu_engine_draws_animated_paths_each_frame_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let mut doc = animated_path_fixture();
+        doc.working_color_space = space;
+        let pin = publish(&mut engine, doc);
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 2);
+        assert!(sources.iter().all(|s| s.route == "gpu-vello-coverage-at-prepare"));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        assert!(engine.prepared_scene(&pin.0, pin.1).unwrap().has_animation());
+        let mut seen = Vec::new();
+        for tick in [1, 11, 21, 41] {
+            ticks.store(tick, Ordering::Relaxed);
+            let program = engine.emit_frame_settled().unwrap().frame;
+            let scene_frame = engine.program_frame_trace().unwrap().scene_frame;
+            let preview = engine.take_preview().unwrap();
+            let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+            let reference = cpu.frame_at(scene_frame, OutputTransform::Rec709).unwrap();
+            assert_within_one_code(&program, &reference, &format!("{space:?} frame {scene_frame}"));
+            let preview_reference = cpu.frame_at(scene_frame, OutputTransform::Srgb).unwrap();
+            assert_within_one_code(&preview, &preview_reference, &format!("{space:?} Preview frame {scene_frame}"));
+            seen.push((scene_frame, preview));
+        }
+        let at = |frame: u64| &seen.iter().find(|(f, _)| *f == frame).expect("frame seen").1;
+        let px = |f: &Frame, x: u32, y: u32| {
+            let i = ((y * f.width + x) * 4) as usize;
+            [f.pixels[i], f.pixels[i + 1], f.pixels[i + 2], f.pixels[i + 3]]
+        };
+        // The shape: at rest under (160, 160); at the end moved to (360..480, 140..260).
+        assert_eq!(px(at(0), 160, 160)[3], 255, "the shape at its first key");
+        assert_eq!(px(at(0), 420, 200)[3], 0, "and not yet where it will be");
+        assert_eq!(px(at(40), 160, 160)[3], 0, "the shape has left");
+        assert_eq!(px(at(40), 420, 200)[3], 255, "the shape at its last key");
+        assert_ne!(at(10).pixels, at(20).pixels, "halfway frames differ from each other");
+        // The redraw keeps no state: any order of frames, backwards and the same frame twice (a scrub),
+        // gives the reference's picture each time.
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        let references: Vec<(u64, Frame, Frame)> = [40, 0, 20, 10, 10, 30, 5]
+            .into_iter()
+            .map(|f| (f, cpu.frame_at(f, OutputTransform::Rec709).unwrap(), cpu.frame_at(f, OutputTransform::Srgb).unwrap()))
+            .collect();
+        let gpu_scene = engine.gpu_prepared.get_mut(&(pin.0.clone(), pin.1)).expect("prepared for the GPU");
+        for (frame, program_reference, preview_reference) in &references {
+            let (program, preview) = gpu_scene.render(*frame).unwrap();
+            assert_within_one_code(&program, program_reference, &format!("{space:?} scrubbed to frame {frame}"));
+            assert_within_one_code(&preview, preview_reference, &format!("{space:?} Preview scrubbed to frame {frame}"));
+        }
+        // The layer: red where the moving reference mask covers, white where the static clip does.
+        let red = |p: [u8; 4]| p[0] > 240 && p[1] < 20 && p[2] < 20 && p[3] == 255;
+        let white = |p: [u8; 4]| p[0] > 240 && p[1] > 240 && p[2] > 240 && p[3] == 255;
+        assert!(red(px(at(0), 730, 150)) && white(px(at(0), 800, 150)), "reference mask at its first key");
+        assert!(white(px(at(40), 730, 150)) && red(px(at(40), 855, 150)), "the reference mask has travelled");
+        assert_eq!(px(at(40), 885, 150)[3], 0, "the clip mask did not move");
+        // What the per-frame redraw costs: 40 settled frames of the animated scene, and the same frame 40 times for comparison.
+        let timed = {
+            let scene = engine.gpu_prepared.get_mut(&(pin.0.clone(), pin.1)).expect("prepared for the GPU");
+            let start = std::time::Instant::now();
+            for f in 0..40 {
+                scene.render(f).unwrap();
+            }
+            let moving = start.elapsed().as_secs_f64() * 1000.0 / 40.0;
+            let start = std::time::Instant::now();
+            for _ in 0..40 {
+                scene.render(0).unwrap();
+            }
+            (moving, start.elapsed().as_secs_f64() * 1000.0 / 40.0)
+        };
+        // The same scene with its path channels taken off: what a settled frame costs with no redraw.
+        let baseline = {
+            let (mut still_engine, _) = hardware_engine();
+            let mut still = animated_path_fixture();
+            still.working_color_space = space;
+            still.timeline.path_channels.clear();
+            let still_pin = publish(&mut still_engine, still);
+            let scene = still_engine.gpu_prepared.get_mut(&(still_pin.0.clone(), still_pin.1)).expect("prepared for the GPU");
+            scene.render(0).unwrap();
+            let start = std::time::Instant::now();
+            for _ in 0..40 {
+                scene.render(0).unwrap();
+            }
+            start.elapsed().as_secs_f64() * 1000.0 / 40.0
+        };
+        println!("11.112 {space:?}: animated shape, mask and effect-reference weights match the reference; settled frame {:.2} ms animated, {:.2} ms the same frame again, {:.2} ms with no path animation", timed.0, timed.1, baseline);
+        evidence(
+            &format!("animated-paths-{}.json", space.as_str()),
+            &json!({"frames": seen.iter().map(|(f, _)| f).collect::<Vec<_>>(), "sources": sources, "adapter": engine.gpu_description()}),
+        );
+    }
+}
+
+/// 3.30's fixture: two layers that matte each other, and a chain in which a hidden source is itself matted by another hidden layer.
+fn matte_chain_fixture() -> SceneDocument {
+    use gx_contracts::scene::{TrackMatte, TrackMatteMode};
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    let rect_at = |id: &str, x: f64, y: f64, source: Option<&str>, visible: bool| {
+        let mut base = ObjectBase::new(id, id);
+        (base.x, base.y, base.width, base.height) = (x, y, 100.0, 40.0);
+        base.visible = visible;
+        base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 0.5, 0.1, 1.0) });
+        base.track_matte = source.map(|s| TrackMatte { source_id: s.into(), mode: TrackMatteMode::Alpha });
+        SceneObject::Rect(RectObject { base, radius: 0.0 })
+    };
+    // Row one: each of two layers is the other's matte. Row two: a chain, c by a, a by b, a and b hidden.
+    doc.objects.extend([
+        rect_at("m1", 100.0, 100.0, Some("m2"), true),
+        rect_at("m2", 150.0, 100.0, Some("m1"), true),
+        rect_at("a", 100.0, 200.0, Some("b"), false),
+        rect_at("b", 150.0, 200.0, None, false),
+        rect_at("c", 120.0, 200.0, Some("a"), true),
+    ]);
+    doc
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.30 matte gate"]
+fn gpu_engine_mattes_each_other_and_chains_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let mut doc = matte_chain_fixture();
+        doc.working_color_space = space;
+        let pin = publish(&mut engine, doc);
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        assert_within_one_code(&program, &cpu.frame_at(0, OutputTransform::Rec709).unwrap(), &format!("{space:?} Program"));
+        let reference = cpu.frame_at(0, OutputTransform::Srgb).unwrap();
+        assert_within_one_code(&preview, &reference, &format!("{space:?} Preview"));
+        let alpha = |x: u32, y: u32| i32::from(preview.pixels[((y * preview.width + x) * 4 + 3) as usize]);
+        // Mutual: only where both are, 150..200.
+        assert_eq!([alpha(125, 120), alpha(175, 120), alpha(225, 120)], [0, 255, 0], "{space:?} mutual");
+        // The chain: c (120..220) shows over a's own pixels (100..200), not over a-after-b (150..200).
+        assert_eq!([alpha(130, 220), alpha(190, 220), alpha(210, 220)], [255, 255, 0], "{space:?} chain");
+    }
+}
+

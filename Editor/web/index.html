@@ -25,28 +25,7 @@
     </div>
     <header class="bar">
       <nav class="app-menubar" aria-label="Editor menu">
-        <details class="app-menu"><summary>File</summary><div class="menu-items">
-          <button data-invoke="project-create" type="button">New project…</button>
-          <button data-invoke="new-scene" type="button">New scene…</button>
-          <button data-invoke="open-scene" type="button">Open scene file…</button>
-          <button data-invoke="import-svg" type="button">Import SVG…</button>
-          <button data-invoke="save-scene" type="button">Save scene file…</button>
-        </div></details>
-        <details class="app-menu"><summary>Edit</summary><div class="menu-items">
-          <button data-invoke="undo" type="button">Undo <kbd>Ctrl Z</kbd></button>
-          <button data-invoke="redo" type="button">Redo <kbd>Ctrl Shift Z</kbd></button>
-        </div></details>
-        <details class="app-menu"><summary>Layer</summary><div class="menu-items">
-          <button data-create-kind="rect" type="button">New rectangle</button>
-          <button data-create-kind="ellipse" type="button">New ellipse</button>
-          <button data-create-kind="text" type="button">New text</button>
-          <button data-invoke="object-duplicate" type="button">Duplicate selected</button>
-        </div></details>
-        <details class="app-menu"><summary>Window</summary><div id="window-panel-menu" class="menu-items"></div></details>
-        <details class="app-menu"><summary>Help</summary><div class="menu-items">
-          <button id="export-diagnostics-all" type="button">Export diagnostic bundle (all modules)</button>
-          <button id="export-diagnostics-editor" type="button">Export diagnostic bundle (editor only)</button>
-        </div></details>
+        <!-- The menus are drawn from Editor/src/app-menu.ts (11.32): the eight of Ross XPression's menu bar. -->
         <span class="workspace-title">GrapiX · Authoring workspace</span>
       </nav>
       <div class="brand">
@@ -72,13 +51,49 @@
         <button id="save-scene" type="button">Save…</button>
         <button id="undo" type="button" disabled>Undo</button>
         <button id="redo" type="button" disabled>Redo</button>
+        <button id="history-open" type="button" title="List every change to this scene, and go back or forward to any of them">History…</button>
         <button id="workspace-reset" type="button">Reset layout</button>
       </div>
-      <div class="creation-tools" role="toolbar" aria-label="Layer tools">
-        <button id="tool-selection" type="button" title="Selection tool" aria-label="Selection tool" data-icon="cursor" aria-pressed="true"></button>
-        <button type="button" title="Create rectangle layer" aria-label="Create rectangle layer" data-create-kind="rect" data-icon="rectangle"></button>
-        <button type="button" title="Create ellipse layer" aria-label="Create ellipse layer" data-create-kind="ellipse" data-icon="circle"></button>
-        <button type="button" title="Create text layer" aria-label="Create text layer" data-create-kind="text" data-icon="text-t"></button>
+      <!-- The tool ribbon (11.102). Every button is a command of the registry (data-menu-item): it greys with its
+           reason like the menu item of the same name, and a key does the same job. -->
+      <div class="creation-tools" role="toolbar" aria-label="Tools">
+        <div class="tool-group" role="group" aria-label="Tools">
+          <button id="tool-selection" type="button" title="Select (V)" aria-label="Select tool" data-icon="cursor" data-tool="select" data-menu-item="edit.pointer" aria-pressed="true"></button>
+          <button id="tool-move" type="button" title="Move (W)" aria-label="Move tool" data-icon="tool-move" data-tool="move" data-menu-item="edit.move" aria-pressed="false"></button>
+          <button id="tool-rotate" type="button" title="Rotate (E)" aria-label="Rotate tool" data-icon="tool-rotate" data-tool="rotate" data-menu-item="edit.rotate" aria-pressed="false"></button>
+          <button id="tool-scale" type="button" title="Resize (R)" aria-label="Resize tool" data-icon="tool-scale" data-tool="scale" data-menu-item="edit.resize" aria-pressed="false"></button>
+          <button id="tool-pivot" type="button" title="Pivot (Y)" aria-label="Pivot tool" data-icon="tool-pivot" data-tool="pivot" data-menu-item="edit.centre" aria-pressed="false"></button>
+          <button id="tool-pen" type="button" title="Pen (G)" aria-label="Pen tool" data-icon="tool-pen" data-tool="pen" data-menu-item="edit.pen" aria-pressed="false"></button>
+          <select id="pen-creates" class="pen-creates" title="What the Pen makes: Auto draws a mask on the selected layer and a shape otherwise" aria-label="Pen creates">
+            <option value="auto">Pen: Auto</option>
+            <option value="shape">Pen: Shape</option>
+            <option value="mask">Pen: Mask</option>
+          </select>
+          <span id="pen-creates-note" class="pen-creates-note" aria-live="polite"></span>
+          <button id="tool-path" type="button" title="Edit path (A): drag a vertex, a handle or a curve; Alt breaks a handle; Delete takes the selected vertices out" aria-label="Edit path tool" data-icon="tool-path" data-tool="path" data-menu-item="edit.path" aria-pressed="false"></button>
+          <button id="tool-vertex-add" type="button" title="Add vertex (=): click on a curve" aria-label="Add vertex tool" data-icon="tool-vertex-add" data-tool="vertex-add" data-menu-item="edit.vertex-add" aria-pressed="false"></button>
+          <button id="tool-vertex-delete" type="button" title="Delete vertex (-): click on a vertex" aria-label="Delete vertex tool" data-icon="tool-vertex-delete" data-tool="vertex-delete" data-menu-item="edit.vertex-delete" aria-pressed="false"></button>
+          <button id="tool-vertex-convert" type="button" title="Convert vertex (C): click on a vertex to swap corner and smooth" aria-label="Convert vertex tool" data-icon="tool-vertex-convert" data-tool="vertex-convert" data-menu-item="edit.vertex-convert" aria-pressed="false"></button>
+          <button id="tool-hand" type="button" title="Hand (H): drag to move the view; the middle mouse button does it with any tool" aria-label="Hand tool" data-icon="tool-hand" data-tool="hand" data-menu-item="edit.hand" aria-pressed="false"></button>
+          <button id="tool-zoom" type="button" title="Zoom (Z): click to zoom in, Alt-click to zoom out; the wheel zooms with any tool" aria-label="Zoom tool" data-icon="tool-zoom" data-tool="zoom" data-menu-item="edit.zoom" aria-pressed="false"></button>
+        </div>
+        <span class="tool-sep" role="separator"></span>
+        <div class="tool-group" role="group" aria-label="Create">
+          <button type="button" title="Create rectangle layer" aria-label="Create rectangle layer" data-create-kind="rect" data-menu-item="edit.add-object.rect" data-icon="rectangle"></button>
+          <button type="button" title="Create ellipse layer" aria-label="Create ellipse layer" data-create-kind="ellipse" data-menu-item="edit.add-object.ellipse" data-icon="circle"></button>
+          <button type="button" title="Create text layer" aria-label="Create text layer" data-create-kind="text" data-menu-item="edit.add-object.text" data-icon="text-t"></button>
+        </div>
+        <span class="tool-sep" role="separator"></span>
+        <div class="tool-group" role="group" aria-label="Line up and spread">
+          <button type="button" title="Line up left edges" aria-label="Line up left edges" data-native="arrange-line-left" data-menu-item="edit.line-up.left" data-icon="align-left"></button>
+          <button type="button" title="Line up centres across" aria-label="Line up centres across" data-native="arrange-line-centre" data-menu-item="edit.line-up.centre" data-icon="align-centre"></button>
+          <button type="button" title="Line up right edges" aria-label="Line up right edges" data-native="arrange-line-right" data-menu-item="edit.line-up.right" data-icon="align-right"></button>
+          <button type="button" title="Line up top edges" aria-label="Line up top edges" data-native="arrange-line-top" data-menu-item="edit.line-up.top" data-icon="align-top"></button>
+          <button type="button" title="Line up middles down" aria-label="Line up middles down" data-native="arrange-line-middle" data-menu-item="edit.line-up.middle" data-icon="align-middle"></button>
+          <button type="button" title="Line up bottom edges" aria-label="Line up bottom edges" data-native="arrange-line-bottom" data-menu-item="edit.line-up.bottom" data-icon="align-bottom"></button>
+          <button type="button" title="Spread evenly across" aria-label="Spread evenly across" data-native="arrange-spread-across" data-menu-item="edit.line-up.spread-across" data-icon="spread-across"></button>
+          <button type="button" title="Spread evenly down" aria-label="Spread evenly down" data-native="arrange-spread-down" data-menu-item="edit.line-up.spread-down" data-icon="spread-down"></button>
+        </div>
         <span class="tool-description">Scene tools</span>
       </div>
 
@@ -106,7 +121,31 @@
       <section class="viewport-pane" data-panel="viewport">
         <div class="pane-head">
           <h2>Composition <span id="composition-name">Untitled</span></h2>
-          <span class="chip-draft" title="The fast editing view. Effects, shaped text and masks are drawn only in the Engine preview.">Draft</span>
+          <span id="viewport-chip" class="chip-draft" title="The fast editing view. Effects, shaped text and masks are drawn only in the Engine view.">Draft</span>
+          <label class="frame-control viewport-view-control">
+            <span>View</span>
+            <select id="viewport-view" aria-label="Viewport picture: Auto, Draft or Engine">
+              <option value="auto">Auto</option>
+              <option value="draft">Draft</option>
+              <option value="engine">Engine</option>
+            </select>
+          </label>
+          <!-- After Effects' transparency grid toggle and the solid background colour (black until changed). -->
+          <button id="viewport-grid" class="icon-button viewport-grid-toggle" type="button" aria-pressed="false" aria-label="Transparency grid">
+            <span class="viewport-grid-swatch" aria-hidden="true"></span>
+          </button>
+          <input id="viewport-bg" class="viewport-bg" type="color" value="#000000" aria-label="Viewport background colour" />
+          <!-- Explicit guides (11.44): lines a point snaps to before any other line; they are kept with the scene. -->
+          <span class="guide-tools" role="group" aria-label="Guides">
+            <select id="guide-axis" aria-label="Guide direction"><option value="x">Vertical</option><option value="y">Horizontal</option></select>
+            <input id="guide-position" type="number" step="1" value="960" aria-label="Guide position in pixels" />
+            <button id="guide-add" type="button" title="Put a guide at this position">Add guide</button>
+            <select id="guide-list" aria-label="Guides in this scene"></select>
+            <button id="guide-move" type="button" title="Move the chosen guide to this position">Move</button>
+            <button id="guide-remove" type="button" title="Take the chosen guide away">Remove</button>
+            <label class="frame-control"><input id="guide-show" type="checkbox" checked /> <span>Show</span></label>
+          </span>
+          <span id="viewport-note" class="meta viewport-note" role="status" aria-live="polite"></span>
           <span id="canvas-size" class="meta"></span>
           <!-- The graphic's rational frame rate (11.43). A change is one
                setCanvas edit; frames are canonical, so keys keep their frame. -->
@@ -117,7 +156,12 @@
         </div>
         <div class="viewport-stage">
           <div class="viewport-surface">
+            <!-- Behind the composition only, sized to it by main.ts: the grid or the solid colour. -->
+            <div id="viewport-backdrop" class="viewport-backdrop" aria-hidden="true"></div>
             <canvas id="viewport"></canvas>
+            <!-- The engine's frame of the scene (effects included), drawn under the
+                 selection overlay when the View chooses it (see viewport-source.ts). -->
+            <img id="viewport-engine" class="viewport-engine" alt="The engine's render of the scene" hidden />
             <!-- Interaction stays in this SVG, never in the raster canvas.
                  The render engine can replace the canvas without replacing
                  selection, guides, handles or marquee behavior (11.7). -->
@@ -129,7 +173,11 @@
           </div>
         </div>
         <div class="viewer-footer">
-          <span class="viewer-fit">Fit</span>
+          <!-- The view (11.105): commands of the registry, like every other button. Not saved in the scene. -->
+          <button id="viewer-fit" class="viewer-fit" type="button" title="Fit to window (Ctrl 0)" data-menu-item="layout.fit" data-native="view-fit">Fit</button>
+          <button id="viewer-zoom-out" type="button" title="Zoom out (Ctrl -)" aria-label="Zoom out" data-menu-item="layout.zoom-out" data-native="view-zoom-out">&minus;</button>
+          <button id="viewer-zoom-readout" class="viewer-zoom-readout" type="button" title="Actual size: one canvas pixel to one screen pixel (Ctrl 1)" data-menu-item="layout.zoom-100" data-native="view-zoom-100">100%</button>
+          <button id="viewer-zoom-in" type="button" title="Zoom in (Ctrl =)" aria-label="Zoom in" data-menu-item="layout.zoom-in" data-native="view-zoom-in">+</button>
           <button id="viewer-transparency" type="button" data-icon="squares-four" aria-label="Toggle transparency grid" aria-pressed="false" title="Transparency grid"></button>
           <span id="viewer-timecode" class="timecode">0:00:00:00</span>
           <span id="viewer-rate" class="meta"></span>
@@ -174,20 +222,17 @@
         </section>
         <section data-panel="scene-manager" class="panel">
           <div class="panel-title-row">
-            <h2>Scene Manager</h2>
+            <h2>Scenes</h2>
             <button id="scene-view-toggle" type="button" aria-pressed="true" title="List view: one row per scene. Turn off for thumbnail cards.">List</button>
             <button id="project-refresh" type="button">Refresh</button>
           </div>
           <div class="project-tools">
-            <label class="frame-control">
-              <span>Project</span>
-              <select id="project-select" aria-label="Current project"></select>
-            </label>
-            <button id="project-create" type="button">New project</button>
+            <button id="project-save-as" type="button" title="Save a copy of this project, with the work you have not saved, under a new name. The original stays as it was last saved.">Save as</button>
+            <button id="project-close" type="button">Close project</button>
             <button id="graphic-create" type="button">New scene</button>
             <button id="project-save-scene" type="button">Save to project</button>
           </div>
-          <p class="scene-manager-summary">One project · many scenes</p>
+          <p id="project-summary" class="scene-manager-summary">No project open</p>
           <input id="graphic-search" class="graphic-search" type="search" placeholder="Search scenes…" aria-label="Search scenes by name or id" />
           <!-- Scene/template CRUD (11.18), projected from scene-manager.ts so
                the human controls and agent snapshot have one description. -->
@@ -210,6 +255,28 @@
             <button id="object-duplicate" type="button">Duplicate</button>
             <button id="object-rename" type="button">Rename</button>
             <button id="object-delete" type="button">Delete</button>
+            <button id="object-join" type="button" title="Join the two selected open shapes end to end (Ctrl J)">Join</button>
+            <button id="object-copy-svg" type="button" title="Copy the selected shape's path as SVG path data">Copy SVG</button>
+          </div>
+          <!-- Animated paths and vertex kinds (11.112, 11.113): a path is keyed at the playhead like any property; a vertex is a corner,
+               smooth, symmetric or auto (its handles derived from its neighbours). -->
+          <div class="object-tools path-tools" role="group" aria-label="Path animation and vertex kinds">
+            <label class="frame-control" title="Edits of a path set a path key at the playhead; a path that already has keys always does">
+              <input id="path-keying" type="checkbox" />
+              <span>Key path edits</span>
+            </label>
+            <button id="path-key-set" type="button" title="Put a key on the selected path at the playhead, as it is there">Key path</button>
+            <button id="path-key-remove" type="button" title="Take the selected path's key at the playhead away">Remove path key</button>
+            <button id="path-subpath-remove" type="button" title="Take the subpath of the selected vertex out of the compound shape">Remove subpath</button>
+            <button id="path-unlink" type="button" title="Make the path being edited independent of the shapes and masks it is linked to">Unlink path</button>
+            <button type="button" data-vertex-kind="corner" title="Selected vertices: handles move on their own">Corner</button>
+            <button type="button" data-vertex-kind="smooth" title="Selected vertices: handles stay in line, each its own length">Smooth</button>
+            <button type="button" data-vertex-kind="symmetric" title="Selected vertices: handles stay in line and of equal length">Symmetric</button>
+            <button type="button" data-vertex-kind="auto" title="Selected vertices: handles follow the neighbours">Auto</button>
+            <label class="frame-control" title="How far the handles of auto vertices reach, 0 to 1">
+              <span>Auto tension</span>
+              <input id="auto-tension" type="range" min="0" max="1" step="0.05" value="0.5" />
+            </label>
           </div>
           <!-- The object manager treegrid (11.8). Built by `object-manager.ts`
                as a node tree and rendered here, so the ARIA a screen reader
@@ -223,6 +290,11 @@
           <h2>Properties</h2>
           <!-- Type-aware, and Mixed across a multi-selection (11.9). -->
           <div id="inspector-mount" class="panel-mount"></div>
+        </section>
+        <!-- Masks and the track matte of the selected layer (11.117): built by `renderMasks` from `mask-edit.ts`. -->
+        <section data-panel="masks" class="panel masks-panel">
+          <h2>Masks</h2>
+          <div id="masks-mount" class="panel-mount masks-mount"></div>
         </section>
         <section data-panel="fonts" class="panel">
           <h2>Fonts</h2>
@@ -244,6 +316,58 @@
           </div>
           <div id="font-mount" class="asset-manager-mount"></div>
           <p id="font-empty" class="empty">No fonts in this scene.</p>
+        </section>
+
+        <!-- The pivot of the selected objects (11.103): nine places on the box, an offset, a typed point, a nudge. -->
+        <section data-panel="pivot" class="panel pivot-panel">
+          <h2>Pivot</h2>
+          <p id="pivot-empty" class="empty">Select an object to place its pivot.</p>
+          <div id="pivot-body" hidden>
+            <p id="pivot-summary" class="scene-manager-summary"></p>
+            <div class="pivot-grid" role="group" aria-label="Put the pivot on a place of the box">
+              <button type="button" data-pivot-place="top-left" title="Top left" aria-label="Top left"><span aria-hidden="true">&#8598;</span></button>
+              <button type="button" data-pivot-place="top" title="Top" aria-label="Top"><span aria-hidden="true">&#8593;</span></button>
+              <button type="button" data-pivot-place="top-right" title="Top right" aria-label="Top right"><span aria-hidden="true">&#8599;</span></button>
+              <button type="button" data-pivot-place="left" title="Left" aria-label="Left"><span aria-hidden="true">&#8592;</span></button>
+              <button type="button" data-pivot-place="centre" title="Centre" aria-label="Centre"><svg class="pivot-target" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
+              <button type="button" data-pivot-place="right" title="Right" aria-label="Right"><span aria-hidden="true">&#8594;</span></button>
+              <button type="button" data-pivot-place="bottom-left" title="Bottom left" aria-label="Bottom left"><span aria-hidden="true">&#8601;</span></button>
+              <button type="button" data-pivot-place="bottom" title="Bottom" aria-label="Bottom"><span aria-hidden="true">&#8595;</span></button>
+              <button type="button" data-pivot-place="bottom-right" title="Bottom right" aria-label="Bottom right"><span aria-hidden="true">&#8600;</span></button>
+            </div>
+            <fieldset class="pivot-keyed">
+              <legend>If keyframed:</legend>
+              <label><input type="radio" name="pivot-keyed" id="pivot-keyed-insert" value="insert" checked /> Insert keyframe to playhead</label>
+              <label><input type="radio" name="pivot-keyed" id="pivot-keyed-modify" value="modify" /> Modify existing keyframes</label>
+            </fieldset>
+            <details class="pivot-more">
+            <summary>More</summary>
+            <label class="field pivot-scope"><span class="label">Place on</span>
+              <select id="pivot-scope" aria-label="Place the pivot on each object's own box, or on the box around the whole selection">
+                <option value="each">Each object's box</option>
+                <option value="selection">The selection's box</option>
+              </select>
+            </label>
+            <div class="pivot-row">
+              <label class="field"><span class="label">Offset X</span><input id="pivot-offset-x" type="number" step="1" value="0" aria-label="Offset the place by this many pixels across" /></label>
+              <label class="field"><span class="label">Offset Y</span><input id="pivot-offset-y" type="number" step="1" value="0" aria-label="Offset the place by this many pixels down" /></label>
+            </div>
+            <div class="pivot-row">
+              <label class="field"><span class="label">Pivot X</span><input id="pivot-x" type="number" step="1" aria-label="Pivot across, in the object's own pixels" /></label>
+              <label class="field"><span class="label">Pivot Y</span><input id="pivot-y" type="number" step="1" aria-label="Pivot down, in the object's own pixels" /></label>
+            </div>
+            <div class="pivot-row pivot-nudge" role="group" aria-label="Nudge the pivot">
+              <button type="button" data-pivot-nudge="-1,0" title="Nudge left" aria-label="Nudge the pivot left">&larr;</button>
+              <button type="button" data-pivot-nudge="0,-1" title="Nudge up" aria-label="Nudge the pivot up">&uarr;</button>
+              <button type="button" data-pivot-nudge="0,1" title="Nudge down" aria-label="Nudge the pivot down">&darr;</button>
+              <button type="button" data-pivot-nudge="1,0" title="Nudge right" aria-label="Nudge the pivot right">&rarr;</button>
+              <label class="field"><span class="label">By</span><input id="pivot-step" type="number" min="0.1" step="0.1" value="1" aria-label="Nudge by this many pixels" /></label>
+            </div>
+            <label class="pivot-keep"><input id="pivot-keep" type="checkbox" checked /> Keep the picture in place</label>
+            <button id="pivot-reset" type="button" title="Put the pivot back at the object's origin">Reset to origin</button>
+            </details>
+            <p id="pivot-error" class="field-error" role="alert" hidden></p>
+          </div>
         </section>
 
         <section data-panel="text-styles" class="panel">
@@ -514,6 +638,69 @@
       <ul id="log" class="log"></ul>
     </footer>
 
+    <!-- Start (11.43): a project is created at a path you choose, or opened, before any work
+         starts, as in XPression, Viz and After Effects. It cannot be dismissed until one is open. -->
+    <dialog id="start-dialog" aria-labelledby="start-title">
+      <div id="start-home">
+        <h2 id="start-title">GrapiX by SKWAD</h2>
+        <p class="start-lead">Create a project and choose where to save it, or open one, before you start work.</p>
+        <div class="start-actions">
+          <button id="start-new" type="button">New project…</button>
+          <button id="start-open" type="button">Open project…</button>
+        </div>
+        <h3 class="start-heading">Recent</h3>
+        <ul id="start-list" class="start-list"></ul>
+        <p id="start-empty" class="empty" hidden>No project has been opened yet.</p>
+        <p id="start-error" class="start-error" role="alert"></p>
+        <div class="dialog-actions"><button id="start-dismiss" type="button" hidden>Cancel</button></div>
+      </div>
+      <form id="start-new-form" hidden>
+        <h2 id="start-form-title">New project</h2>
+        <label class="field"><span>Project name</span><input id="start-name" type="text" required maxlength="120" autocomplete="off" /></label>
+        <label class="field" id="start-depth-field"><span>Color depth</span>
+          <select id="start-depth">
+            <option value="8">8 bits per channel</option>
+            <option value="16" selected>16 bits per channel</option>
+            <option value="32">32 bits per channel (float, over-bright kept)</option>
+          </select>
+        </label>
+        <div class="field">
+          <span>Save in</span>
+          <div class="start-location">
+            <input id="start-parent" type="text" readonly placeholder="Choose a folder…" aria-label="Folder the project is saved in" />
+            <button id="start-choose" type="button">Choose folder…</button>
+          </div>
+        </div>
+        <p id="start-preview" class="start-preview"></p>
+        <p id="start-new-error" class="start-error" role="alert"></p>
+        <div class="dialog-actions"><button id="start-back" type="button">Back</button><button id="start-create" type="submit" disabled>Create</button></div>
+      </form>
+    </dialog>
+    <!-- Settings (11.81): the settings service's two files in one window; each change is saved as it is made. -->
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <form id="settings-form" method="dialog">
+        <h2 id="settings-title">Settings</h2>
+        <p class="settings-lead">Changes are saved as you make them. <strong>Yours</strong> follows you to another computer; <strong>This computer</strong> stays here. What changes how a graphic looks is not here: that belongs to the project.</p>
+        <div id="settings-body"></div>
+        <p id="settings-error" class="start-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="settings-reset-user" type="button">Reset my settings</button>
+          <button id="settings-reset-machine" type="button">Reset this computer's settings</button>
+          <button id="settings-close" type="submit">Close</button>
+        </div>
+      </form>
+    </dialog>
+    <!-- Change history (11.82): the steps of the scene's command log. It is not modal, so it stays open
+         beside the work; a click on a line takes the scene to the state just after it. -->
+    <dialog id="history-dialog" aria-labelledby="history-title">
+      <div class="history-head">
+        <h2 id="history-title">Change history</h2>
+        <button id="history-close" type="button" aria-label="Close the change history">Close</button>
+      </div>
+      <p id="history-lead" class="settings-lead"></p>
+      <ol id="history-list" aria-label="Changes to this scene, oldest first"></ol>
+      <p id="history-error" class="start-error" role="alert"></p>
+    </dialog>
     <dialog id="manager-create-dialog" aria-labelledby="manager-create-title" aria-describedby="manager-create-description">
       <form id="manager-create-form">
         <h2 id="manager-create-title">New project</h2>

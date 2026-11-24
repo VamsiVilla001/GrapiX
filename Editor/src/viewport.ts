@@ -49,7 +49,9 @@ export class SceneViewport {
     const space = { width: document.canvas.width, height: document.canvas.height };
 
     this.ownsRenderer = renderer === undefined;
-    this.renderer = renderer ?? new THREE.WebGLRenderer({ canvas, antialias: true });
+    // Transparent where nothing is drawn, so the backdrop (grid or colour) shows through.
+    this.renderer = renderer ?? new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    if (renderer === undefined) this.renderer.setClearColor(0x000000, 0);
     // Colour policy (B.1): working space linear, output transform explicit.
     // The adapter selects the transform, never the platform — the preview
     // surface is sRGB; broadcast output is a different adapter, not a flag here.

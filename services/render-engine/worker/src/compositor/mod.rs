@@ -77,6 +77,13 @@ pub struct LayerInput {
     /// 3.19: the layer index of this layer's track matte source, and what the
     /// matte lets through.
     pub track: Option<(usize, gx_contracts::scene::TrackMatteMode)>,
+    /// 3.28: Preserve Underlying Transparency: the layer's sample is scaled by
+    /// the alpha of what is already composited below it.
+    pub preserve: bool,
+    /// 3.28: each effect's mask weights (the coverage of the masks it
+    /// references, in the alpha channel) by its place in `effects`; `None` for
+    /// an effect that acts on the whole layer.
+    pub effect_weights: Vec<Option<wgpu::Texture>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,6 +154,8 @@ struct Layer {
     clip: Option<usize>,
     /// 3.19: the track matte's slot and the shader's code for its mode.
     track: Option<(usize, f32)>,
+    /// 3.28: scaled by the backdrop's alpha in the composite pass.
+    preserve: bool,
 }
 
 /// A layer's effect stack on the GPU, built at prepare (3.22): one step per
@@ -157,7 +166,9 @@ struct EffectChain {
     width: u32,
     height: u32,
     steps: Vec<EffectStep>,
-    _targets: [wgpu::Texture; 3],
+    _targets: [wgpu::Texture; 4],
+    /// 3.28: what a pass that reads no mask weights binds in their place.
+    _no_weights: wgpu::Texture,
     output: wgpu::TextureView,
 }
 
@@ -251,6 +262,8 @@ pub struct PreparedCompositor {
     queue: wgpu::Queue,
     stage: Stage,
     working_space: WorkingColorSpace,
+    /// The project's colour depth: each layer's blend result is stored at it.
+    depth: gx_contracts::color::ColorDepth,
     layers: Vec<Layer>,
     /// 3.19: the clip children's layer indices, each after the clip that
     /// clips it, so a nested matte reads an outer one already composited.
@@ -407,6 +420,11 @@ pub(crate) fn layer_region(
 }
 
 impl PreparedCompositor {
+    /// Store every blended layer at the project's colour depth.
+    pub fn set_depth(&mut self, depth: gx_contracts::color::ColorDepth) {
+        self.depth = depth;
+    }
+
     /// Prepare with the negotiated device limit. Source layer tiling belongs
     /// to its drawing backend; oversized source uploads refuse explicitly.
     pub fn prepare(
@@ -631,6 +649,7 @@ impl PreparedCompositor {
                     track: input
                         .track
                         .and_then(|(j, mode)| Some((slot(j)?, crate::clip::track_code(mode)))),
+                    preserve: input.preserve,
                 }
             })
             .collect();
@@ -848,6 +867,7 @@ impl PreparedCompositor {
             queue: queue.clone(),
             stage,
             working_space: space,
+            depth: gx_contracts::color::ColorDepth::Bits32,
             layers,
             mattes,
             matte_scratch,
@@ -945,11 +965,16 @@ impl PreparedCompositor {
                     uniforms(self.stage, tile.tile, *state).map_err(|(field, detail)| {
                         mapping(&layer.object_id, &layer.document_path, field, detail)
                     })?;
+                geometry[11] = self.depth.levels().map_or(0.0, |n| n as f32);
                 if layer.clip.is_some() {
                     geometry[9] = 1.0;
                 }
                 if let Some((_, code)) = layer.track {
                     geometry[10] = code;
+                }
+                // Row x's spare lane: Preserve Underlying Transparency (3.28).
+                if layer.preserve {
+                    geometry[3] = 1.0;
                 }
                 let footprint = layer_region(
                     self.stage,
@@ -1361,6 +1386,7 @@ fn effect_pipelines(device: &wgpu::Device) -> EffectPipelines {
                 count: None,
             },
             texture(4),
+            texture(5),
         ],
     });
     crate::render_work::gpu_build();
@@ -1400,7 +1426,7 @@ fn effect_chain(
     plan: &crate::effect_chain::EffectPlan,
     source: &wgpu::TextureView,
 ) -> EffectChain {
-    let targets: [wgpu::Texture; 3] = std::array::from_fn(|_| {
+    let targets: [wgpu::Texture; 4] = std::array::from_fn(|_| {
         float_texture(
             device,
             input.width,
@@ -1408,10 +1434,12 @@ fn effect_chain(
             wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
         )
     });
-    let views: [wgpu::TextureView; 3] = std::array::from_fn(|i| {
+    let views: [wgpu::TextureView; 4] = std::array::from_fn(|i| {
         crate::render_work::gpu_build();
         targets[i].create_view(&Default::default())
     });
+    let no_weights = float_texture(device, 1, 1, wgpu::TextureUsages::TEXTURE_BINDING);
+    let no_weights_view = no_weights.create_view(&Default::default());
     let mut curve_bytes = Vec::new();
     // The current input: None is the layer source, Some(i) a target.
     let mut current: Option<usize> = None;
@@ -1432,10 +1460,25 @@ fn effect_chain(
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
         let src = current.map_or(source, |i| &views[i]);
+        // The third target holds a glow's or shadow's input, the fourth the
+        // input of an effect with a mask reference (3.28).
         let (dst, aux) = if pass.writes_aux() {
             (2, src)
+        } else if pass.writes_pre() {
+            (3, src)
+        } else if pass.mixes() {
+            (if current == Some(0) { 1 } else { 0 }, &views[3])
         } else {
             (if current == Some(0) { 1 } else { 0 }, &views[2])
+        };
+        let weights_view = if pass.mixes() {
+            input
+                .effect_weights
+                .get(pass.effect)
+                .and_then(Option::as_ref)
+                .map(|texture| texture.create_view(&Default::default()))
+        } else {
+            None
         };
         crate::render_work::gpu_build();
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1462,9 +1505,15 @@ fn effect_chain(
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(aux),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(
+                        weights_view.as_ref().unwrap_or(&no_weights_view),
+                    ),
+                },
             ],
         });
-        if !pass.writes_aux() {
+        if !pass.writes_aux() && !pass.writes_pre() {
             current = Some(dst);
         }
         steps.push(EffectStep {
@@ -1482,6 +1531,7 @@ fn effect_chain(
         height: input.height,
         steps,
         _targets: targets,
+        _no_weights: no_weights,
         output,
     }
 }

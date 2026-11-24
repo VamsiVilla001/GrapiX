@@ -28,7 +28,7 @@ fn seeded(label: &str) -> std::path::PathBuf {
         "id": "scorebug",
         "name": "Scorebug",
         "version": 3,
-        "workingColorSpace": "srgb",
+        "workingColorSpace": "srgb", "colorDepth": "16",
         "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
         "dataContext": { "match": { "home": { "score": 2 } } },
         "objects": [
@@ -185,5 +185,91 @@ fn a_foreign_host_or_any_browser_origin_is_refused() {
     // The same request from a local agent is served.
     let agent = server.post(&list, &request);
     assert_eq!(agent.status, 200, "{agent:?}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+// ---- 2.23: HTTP is a port any local process can reach, so it needs a credential.
+
+fn run_refused(arguments: &[&str]) -> String {
+    let root = scratch("refused-start");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
+        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+        .arg("--root")
+        .arg(&root)
+        .args(arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the shipped server starts");
+    // A refused start ends at once. One that was accepted would serve for ever, so it is
+    // given a few seconds and then ended, and the test fails instead of hanging.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("the child can be polled") {
+            break Some(status);
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let mut said = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        std::io::Read::read_to_string(&mut stderr, &mut said).ok();
+    }
+    let _ = std::fs::remove_dir_all(root);
+    assert!(
+        status.is_some_and(|status| !status.success()),
+        "{arguments:?} was accepted: {said}"
+    );
+    said
+}
+
+#[test]
+fn the_shipped_server_will_not_serve_http_without_a_secret_or_take_one_it_cannot_use() {
+    let said = run_refused(&["--http", "0"]);
+    assert!(said.contains("--http needs --token"), "{said}");
+    let said = run_refused(&["--token", "a-secret-0123456789abcdefghijklmnopq"]);
+    assert!(said.contains("--token is for --http"), "{said}");
+    let said = run_refused(&["--http", "0", "--token", ""]);
+    assert!(said.contains("non-empty secret"), "{said}");
+}
+
+#[test]
+fn the_shipped_server_refuses_a_request_without_a_credential_and_one_made_with_another_secret() {
+    let root = seeded("credential");
+    let server = HttpProcess::launch(&root);
+    let request = stateless(call(
+        1,
+        "bindings.schema",
+        serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
+    ));
+    let owned = stateless_headers("bindings.schema");
+    let host = format!("127.0.0.1:{}", server.addr.port());
+    let anonymous = support::post_anonymous(server.addr, &host, &headers(&owned), &request);
+    assert_eq!(anonymous.status, 401, "{anonymous:?}");
+    assert_eq!(anonymous.header("www-authenticate"), Some("Bearer"));
+    assert_eq!(
+        anonymous.json()["error"]["code"]["refusal"],
+        "unauthenticated",
+        "{anonymous:?}"
+    );
+    let other = gx_credential::Token::mint(
+        "another-author",
+        gx_contracts::auth::Role::Editor,
+        vec![gx_contracts::auth::Scope::Author],
+        "another-secret-0123456789abcdefghi",
+    )
+    .expect("a credential mints");
+    let value = format!("Bearer {}", other.as_str());
+    let mut with = headers(&owned);
+    with.push(("Authorization", value.as_str()));
+    let wrong = support::post_anonymous(server.addr, &host, &with, &request);
+    assert_eq!(wrong.status, 401, "{wrong:?}");
+    // The right credential is served, as every other test here shows.
+    assert_eq!(server.post(&headers(&owned), &request).status, 200);
     let _ = std::fs::remove_dir_all(root);
 }

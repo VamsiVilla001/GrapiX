@@ -87,6 +87,36 @@ impl ClientRequest {
         }
     }
 
+    /// Whether this request changes what Program shows or where it goes, and so must carry
+    /// the operator who sent it (2.15). One exhaustive match, so a new request cannot be
+    /// added without that decision. `Stop` ends the engine and is refused while a scene is
+    /// on Program (2.19): it is not a Program command, and it needs its own scope.
+    pub const fn is_program_command(&self) -> bool {
+        match self {
+            Self::Cue(_)
+            | Self::Take(_)
+            | Self::Clear(_)
+            | Self::Phase(_)
+            | Self::ConfigureOutput(_) => true,
+            Self::Authenticate { .. }
+            | Self::Capability { .. }
+            | Self::Status
+            | Self::Performance
+            | Self::Render(_)
+            | Self::Stop => false,
+        }
+    }
+
+    /// Whether this request is aimed at a channel and layer (12.10): the commands that put
+    /// something on Program or take it off, or move what is on it. The output configuration is
+    /// the channel's own and is not aimed at a layer.
+    pub const fn is_targeted(&self) -> bool {
+        matches!(
+            self,
+            Self::Cue(_) | Self::Take(_) | Self::Clear(_) | Self::Phase(_)
+        )
+    }
+
     /// The scope this request needs on the control port (5.7), beyond the
     /// Playout role every request but `Authenticate` needs. `None` is a read.
     ///
@@ -179,12 +209,102 @@ pub enum EngineEvent {
 pub struct Envelope<T> {
     pub id: MessageId,
     pub seq: Sequence,
+    /// The person operating the client that sent this request (2.15), as they signed in
+    /// (`gx_contracts::auth::OperatorName`). Absent on a reply and on a request that is
+    /// not a Program command. An engine that predates the field reads the envelope as
+    /// it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub operator: Option<String>,
+    /// Where on Program this command is aimed (12.10): the channel and the layer. Absent is
+    /// the Program channel's main layer, so a client that predates the field is unchanged.
+    /// Only the Program channel exists, and only its main layer is drawn until the engine
+    /// composes layers; anything else is refused by name before the engine sees it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub target: Option<OutputTarget>,
     pub payload: T,
+}
+
+/// The one output channel this engine has.
+pub const PROGRAM_CHANNEL: &str = "program";
+/// The layer a command with no target is aimed at.
+pub const MAIN_LAYER: &str = "main";
+
+/// A channel and a layer on it (12.10, decision Q8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutputTarget {
+    pub channel: String,
+    pub layer: String,
+}
+
+impl OutputTarget {
+    /// The main layer of the Program channel: what no target means.
+    pub fn main() -> Self {
+        Self {
+            channel: PROGRAM_CHANNEL.to_owned(),
+            layer: MAIN_LAYER.to_owned(),
+        }
+    }
+
+    /// The Program channel's layer `layer`.
+    pub fn program(layer: &str) -> Self {
+        Self {
+            channel: PROGRAM_CHANNEL.to_owned(),
+            layer: layer.to_owned(),
+        }
+    }
+
+    /// The refusal this target earns, if any: not the Program channel, or not a layer the
+    /// engine draws. The text is shown, never trusted: it is cut short and escaped, so a
+    /// hostile name cannot put a line break or a long string in a log.
+    pub fn refusal(&self, request: &str) -> Option<Refusal> {
+        let shown = |text: &str| -> String {
+            text.chars()
+                .take(32)
+                .flat_map(char::escape_default)
+                .collect()
+        };
+        if self.channel != PROGRAM_CHANNEL {
+            return Some(Refusal::ChannelNotSupported {
+                request: request.to_owned(),
+                channel: shown(&self.channel),
+            });
+        }
+        if self.layer != MAIN_LAYER {
+            return Some(Refusal::LayerNotSupported {
+                request: request.to_owned(),
+                layer: shown(&self.layer),
+            });
+        }
+        None
+    }
 }
 
 impl<T> Envelope<T> {
     pub fn new(id: MessageId, seq: Sequence, payload: T) -> Self {
-        Self { id, seq, payload }
+        Self {
+            id,
+            seq,
+            operator: None,
+            target: None,
+            payload,
+        }
+    }
+
+    /// The same envelope, aimed at `target`.
+    #[must_use]
+    pub fn with_target(mut self, target: Option<OutputTarget>) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// The same envelope, sent by `operator`.
+    #[must_use]
+    pub fn with_operator(mut self, operator: Option<String>) -> Self {
+        self.operator = operator;
+        self
     }
 }
 
@@ -320,6 +440,36 @@ mod tests {
             serde_json::to_string(&EngineReply::Stopping).unwrap(),
             r#"{"reply":"stopping"}"#
         );
+    }
+
+    /// 2.15: which requests are Program commands, and what the operator field does on the wire.
+    #[test]
+    fn program_commands_are_named_and_the_operator_rides_the_envelope_only_when_given() {
+        use crate::intent::{ClearRequest, TakeAt};
+        let clear = ClientRequest::Clear(ClearRequest {
+            at: TakeAt::NextOpportunity,
+        });
+        assert!(clear.is_program_command());
+        for request in [
+            ClientRequest::Status,
+            ClientRequest::Performance,
+            ClientRequest::Stop,
+        ] {
+            assert!(!request.is_program_command(), "{}", request.name());
+        }
+        let plain = Envelope::new(MessageId("req.1".into()), Sequence(1), clear.clone());
+        let plain_json = serde_json::to_string(&plain).unwrap();
+        assert!(!plain_json.contains("operator"), "{plain_json}");
+        let named = plain.clone().with_operator(Some("Ada Lovelace".into()));
+        let named_json = serde_json::to_string(&named).unwrap();
+        assert!(
+            named_json.contains(r#""operator":"Ada Lovelace""#),
+            "{named_json}"
+        );
+        let back: Envelope<ClientRequest> = serde_json::from_str(&named_json).unwrap();
+        assert_eq!(back.operator.as_deref(), Some("Ada Lovelace"));
+        let old: Envelope<ClientRequest> = serde_json::from_str(&plain_json).unwrap();
+        assert_eq!(old.operator, None);
     }
 
     #[test]

@@ -36,7 +36,13 @@ compoundPaths?: Array<BezierPath>, fillEnabled: boolean, strokeEnabled: boolean,
  * with the same window (After Effects' "simultaneously"). A value outside
  * its domain refuses `ShapeTrimInvalid`.
  */
-trimStart?: number, trimEnd?: number, trimOffset?: number, id: string, name: string, visible: boolean, locked: boolean,
+trimStart?: number, trimEnd?: number, trimOffset?: number,
+/**
+ * A stable id per subpath (11.112, the spec's `contourId`): `path` is the first, then `compound_paths` in order. Absent until
+ * something needs it (a path channel, a link, removing a subpath); ids survive edits, undo and save, and a subpath taken
+ * out takes its id with it.
+ */
+contourIds?: Array<number>, id: string, name: string, visible: boolean, locked: boolean,
 /**
  * 0–1.
  */
@@ -115,10 +121,17 @@ masks?: Array<Mask>,
 /**
  * The layer's track matte (3.19, user decisions 15 Nov 2026): another
  * object, named by id, whose alpha or luma shapes this layer each frame,
- * at the source's own opacity. The source is a matte only and is never
- * drawn itself, whatever its visible flag; several layers may share it.
+ * at the source's own opacity. The source always mattes, whatever its
+ * visible flag, and is also drawn when it is visible (3.30); several
+ * layers may share it.
  */
 trackMatte?: TrackMatte,
+/**
+ * Preserve Underlying Transparency (3.28): the layer is drawn only where
+ * what is already composited below it is opaque, in proportion to that
+ * alpha, as After Effects' switch does. Absent and false are the same.
+ */
+preserveUnderlyingTransparency?: boolean,
 /**
  * The layer's effect stack (3.22), applied in order to its own pixels
  * before it is transformed and blended. Read it through

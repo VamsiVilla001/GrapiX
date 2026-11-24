@@ -78,7 +78,7 @@
 | `16.1` | Video decoder tier: FFmpeg with NVDEC | Backend | — | unblocks 1 |
 | `16.3` | Transitions beyond cut, dual-target | Backend | 3.8 | unblocks 1 |
 | `18.1` | Figma reference corpus | Research | — | unblocks 1 |
-| `19.1` | ADR-0004: Data Server boundaries | Contracts | 1.9, 5.1 | unblocks 1 |
+| `19.1` | ADR-0005: Data Server boundaries | Contracts | 1.9, 5.1 | unblocks 1 |
 | `2.23` | MCP HTTP authentication, or loopback-only recorded as the decision | Backend | 2.21 |  |
 | `2.24` | Asset plane: authentication, resume, retry, and transport errors named as transport errors | Backend | 2.21 |  |
 | `11.66` | Glossary label lint | Interface | 11.63, 11.64 |  |

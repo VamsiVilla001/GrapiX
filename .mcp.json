@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "grapix": {
+      "command": "D:\\Project KK\\Personal projects\\GrapiX\\agent\\worktree\\target\\debug\\gx-editor-mcp.exe",
+      "args": [
+        "--root",
+        "D:\\Project KK\\Personal projects\\GrapiX\\store"
+      ]
+    },
+    "figma-desktop": {
+      "type": "http",
+      "url": "http://127.0.0.1:3845/mcp"
+    }
+  }
+}

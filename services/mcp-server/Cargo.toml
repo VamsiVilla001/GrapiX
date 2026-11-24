@@ -20,6 +20,8 @@ path = "src/lib.rs"
 gx-telemetry = { workspace = true }
 tracing = "0.1"
 gx-contracts = { workspace = true }
+# 2.23: the MCP HTTP transport verifies the control plane's gx1 credential (Shared/credential), not the client.
+gx-credential = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The MCP wire (build plan 8.14): the official Rust SDK carries the protocol
@@ -33,6 +35,9 @@ rmcp = { version = "3.9", default-features = false, features = [
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-std", "macros", "sync"] }
 tokio-util = { version = "0.7" }
 hyper = { version = "1", features = ["server", "http1"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 
 [dev-dependencies]

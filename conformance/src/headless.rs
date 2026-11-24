@@ -395,7 +395,7 @@ pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report
             return;
         }
     };
-    let Ok(peer) = gx_control_transport::Client::connect(control) else {
+    let Ok(mut peer) = gx_control_transport::Client::connect(control) else {
         report.record(
             PLANE,
             "render.preview connects to the engine",
@@ -403,6 +403,10 @@ pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report
         );
         return;
     };
+    // 2.15: a Program command is sent for a signed-in operator.
+    peer.set_operator(Some(
+        &gx_contracts::auth::OperatorName::parse("Conformance Operator").expect("a valid name"),
+    ));
     let tools = std::sync::Arc::new(gx_playout_mcp::ProgramTools {
         playout: parking_lot::Mutex::new(gx_playout::Playout::new(peer)),
         library: parking_lot::Mutex::new(gx_playout::PublishedLibrary::default()),

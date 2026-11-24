@@ -1,0 +1,171 @@
+{
+ "input": {
+  "state": {
+   "decision": "The user asked on 24 Nov 2026 to add to the LLM governance that two or more agents can work in parallel in the same worktree. Until now only one agent edited the shared worktree at a time and parallel agents were read-only. The rule must say how parallel agents edit, build, test and commit in one working tree without breaking each other's work.",
+   "facts": "One shared worktree on one branch; no other worktrees are allowed. Agents: Claude sessions, Codex, Kimi, OMP and others, coordinating on a Panchayati mission channel with LOCK and UNLOCK posts. Incident, 7 Nov 2026: two sessions ran the whole gate (npm run check) at once; each failed on the other's half-finished work and both had to re-run. Observed 24 Nov 2026: three running MCP server processes held files in the default cargo target folder, so a build there could not relink; builds in separate target folders outside the repository worked. Shared hot files every task touches: GrapiX-Build-Plan.md, progress.json, progress.html (generated), memory.md, docs/log/*.md, Cargo.lock, the generated TypeScript (rewritten whole by codegen), and the Refusal enum in Shared/contracts/src/lib.rs. Edits are made by exact-match replacement scripts. Commits happen only when the user says.",
+   "draft_rule": "1) Claim before editing: post CLAIM with the row and the paths or globs on the mission channel after reading the open claims; claims never overlap; everything outside your claim is read-only to you; RELEASE when the work is recorded. 2) Hot files have one writer at a time, under the existing commit-lock, re-read immediately before an exact-match edit, never rewritten whole. 3) Each agent builds in its own cargo target folder outside the repository; codegen and the whole gate run only under LOCK gate, one at a time. 4) Never revert, reset, stash, clean or reformat outside your claim; a failure in another agent's claim is reported to them. 5) Commit only your claimed paths by name, under the commit-lock, after the gate passes on the whole tree. 6) No branch switch, rebase or pull while another agent holds a claim."
+  },
+  "questions": {
+   "claims": {
+    "type": "choice",
+    "instructions": "How should parallel agents divide the work in one worktree?",
+    "criteria": {
+     "A": "A claim per agent naming the build-plan row and the paths or globs it will edit, posted before editing; claims never overlap; everything else is read-only to that agent.",
+     "B": "A claim per build-plan row only, without paths; agents trust each other not to touch the same files.",
+     "C": "No claims; agents edit freely and resolve clashes when they see them."
+    }
+   },
+   "hot_files": {
+    "type": "choice",
+    "instructions": "How should the shared hot files (plan, progress.json and progress.html, memory.md, the log, Cargo.lock, generated TypeScript, the Refusal enum) be edited when several agents work at once?",
+    "criteria": {
+     "A": "One writer at a time under the commit-lock; re-read just before an exact-match edit; never rewritten whole.",
+     "B": "Anyone may edit them at any time with exact-match edits; a failed match is retried.",
+     "C": "Only one designated agent ever edits them; others send it their changes."
+    }
+   },
+   "builds": {
+    "type": "noul",
+    "instructions": "Should each agent be required to build in its own cargo target folder outside the repository, with codegen and the whole gate run only under the one gate lock?",
+    "criteria": {
+     "true": "Yes: separate target folders, and codegen and the whole gate one at a time.",
+     "false": "No: one shared target folder is enough."
+    }
+   },
+   "commit": {
+    "type": "choice",
+    "instructions": "How should commits work when several agents have uncommitted work in the same tree?",
+    "criteria": {
+     "A": "Each agent commits only its claimed paths by name, under the commit-lock, after the whole gate passes on the tree as it is.",
+     "B": "One agent commits everything in the tree at once when the user says.",
+     "C": "Each agent commits whenever its own tests pass, whatever the rest of the tree does."
+    }
+   },
+   "sufficient": {
+    "type": "noul",
+    "instructions": "Do the six draft rules together prevent the 7 Nov incident (two gates at once failing on each other's half-finished work) and the 24 Nov one (locked files in a shared build folder)?",
+    "criteria": {
+     "true": "Yes: both incidents are prevented by the draft rules.",
+     "false": "No: at least one incident is not prevented."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "claims": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "hot_files": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "builds": {
+    "type": "noul",
+    "noul": 0.96
+   },
+   "commit": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "sufficient": {
+    "type": "noul",
+    "noul": 0.87
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 2992,
+   "output_tokens": 0,
+   "state_tokens": 505,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "claims": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.321,
+     "B": 0.1993,
+     "C": 0.4797
+    },
+    "confidence": 0.0546,
+    "answer_confidence": 0.4797,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "hot_files": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3709,
+     "B": 0.1911,
+     "C": 0.4379
+    },
+    "confidence": 0.0481,
+    "answer_confidence": 0.4379,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "builds": {
+    "type": "noul",
+    "noul": 0.9805,
+    "confidence": 0.9805,
+    "answer_confidence": 0.9805,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "commit": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.201,
+     "B": 0.4689,
+     "C": 0.3301
+    },
+    "confidence": 0.0501,
+    "answer_confidence": 0.4689,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "sufficient": {
+    "type": "noul",
+    "noul": 0.9747,
+    "confidence": 0.9747,
+    "answer_confidence": 0.9747,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

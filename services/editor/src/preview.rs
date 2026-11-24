@@ -63,6 +63,9 @@ pub fn preview_document(
         .map_err(|_| PreviewFailure::InvalidEndpoint {
             endpoint: endpoint.to_owned(),
         })?;
+    // 2.24: an engine started with a token verifies a credential on the asset plane. A process that
+    // holds one for it (`GX_ASSET_CREDENTIAL`, made with the engine's secret, Author scope) sends it.
+    let _credential = gx_asset_plane::auth::enter_from_environment();
     preview_scene(address, scene, frame).map_err(|error| match error {
         PreviewError::Refused(refusal) => PreviewFailure::EngineRefused(refusal),
         PreviewError::Client(
@@ -92,7 +95,7 @@ mod tests {
     fn scene() -> SceneDocument {
         serde_json::from_value(serde_json::json!({
             "version": gx_contracts::scene::SCENE_SCHEMA_VERSION,
-            "id": "draft", "name": "Draft", "workingColorSpace": "linear-srgb",
+            "id": "draft", "name": "Draft", "workingColorSpace": "linear-srgb", "colorDepth": "32",
             "canvas": { "width": 64, "height": 32, "frameRate": { "num": 50, "den": 1 } },
             "timeline": { "durationFrames": 10, "channels": [] },
             "objects": []

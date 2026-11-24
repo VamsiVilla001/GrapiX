@@ -14,10 +14,10 @@ function base(id: string): ObjectBase {
     rotation: 0, rotationX: 0, rotationY: 0, scaleX: 1, scaleY: 1, scaleZ: 1, strokeWidth: 0 };
 }
 function scene(objects: SceneObject[]): SceneDocument {
-  return { id: "ui", name: "UI", version: 3, workingColorSpace: "srgb",
+  return { id: "ui", name: "UI", version: 3, workingColorSpace: "srgb", colorDepth: "32",
     canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
-    timeline: { durationFrames: 100001n, channels: [], phases: [] }, dataContext: {},
-    assets: [], fonts: [], materials: [], controls: [], textStyles: [], objects };
+    timeline: { durationFrames: 100001n, channels: [], phases: [], pathChannels: [] }, dataContext: {},
+    assets: [], fonts: [], materials: [], controls: [], textStyles: [], pathLinks: [], guides: [], objects };
 }
 
 class Element {

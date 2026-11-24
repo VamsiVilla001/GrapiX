@@ -325,6 +325,20 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             if let Err(refusal) = bezier_arrays_match(id, &shape.path) {
                 found.push(refusal, at("path"), serde_json::Value::Null);
             }
+            if let Some(ids) = &shape.contour_ids {
+                let mut seen = std::collections::HashSet::new();
+                let count = 1 + shape.compound_paths.as_ref().map_or(0, Vec::len);
+                if ids.len() != count || !ids.iter().all(|id| seen.insert(*id)) {
+                    found.push(
+                        Refusal::VectorTessellationFailed {
+                            object: id.into(),
+                            detail: "contour ids are one unique id per subpath".into(),
+                        },
+                        at("contourIds"),
+                        serde_json::Value::Null,
+                    );
+                }
+            }
             for (path_index, path) in shape.compound_paths.iter().flatten().enumerate() {
                 if let Err(refusal) = bezier_arrays_match(id, path) {
                     found.push(
@@ -368,6 +382,36 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             );
         }
     }
+    if let Err(refusal) = crate::path_anim::validate_path_channels(document) {
+        found.push(refusal, "timeline.pathChannels", serde_json::Value::Null);
+    }
+    if let Some(label) = &document.scene_label {
+        if let Err(fault) = crate::ids::check_id(label) {
+            found.push(
+                Refusal::SceneLabelInvalid { label: label.chars().take(crate::ids::MOST_ID_CHARS).collect(), fault },
+                "sceneLabel",
+                serde_json::json!(label),
+            );
+        }
+    }
+    {
+        let mut seen = std::collections::HashSet::new();
+        for (index, guide) in document.guides.iter().enumerate() {
+            if !guide.position.is_finite() || !seen.insert(guide.id) {
+                found.push(
+                    Refusal::ObjectFieldValueInvalid {
+                        field: format!("guides[{index}]"),
+                        detail: "a guide has a finite position and an id of its own".into(),
+                    },
+                    format!("guides[{index}]"),
+                    serde_json::json!(guide.position.to_string()),
+                );
+            }
+        }
+    }
+    if let Err(refusal) = crate::path_link::validate_path_links(document) {
+        found.push(refusal, "pathLinks", serde_json::Value::Null);
+    }
     found.refusals
 }
 
@@ -382,6 +426,31 @@ pub fn bezier_arrays_match(object: &str, path: &BezierPath) -> Result<(), Refusa
             object: object.into(),
             detail: "Bezier vertices and tangent arrays differ in length".into(),
         });
+    }
+    let fail = |detail: &str| {
+        Err(Refusal::VectorTessellationFailed {
+            object: object.into(),
+            detail: detail.into(),
+        })
+    };
+    if let Some(ids) = &path.vertex_ids {
+        if ids.len() != path.vertices.len() {
+            return fail("Bezier vertex ids and vertices differ in length");
+        }
+        let mut seen = std::collections::HashSet::with_capacity(ids.len());
+        if !ids.iter().all(|id| seen.insert(*id)) {
+            return fail("Bezier vertex ids are not unique");
+        }
+    }
+    if let Some(kinds) = &path.vertex_kinds {
+        if kinds.len() != path.vertices.len() {
+            return fail("Bezier vertex kinds and vertices differ in length");
+        }
+    }
+    if let Some(tension) = path.auto_tension {
+        if !tension.is_finite() || !(0.0..=1.0).contains(&tension) {
+            return fail("Bezier auto tension is a number from 0 to 1");
+        }
     }
     Ok(())
 }
@@ -636,22 +705,17 @@ pub fn track_matte_problem(document: &SceneDocument, object: &SceneObject) -> Op
     if source == id {
         return Some("an object cannot be its own track matte".into());
     }
-    let Some(found) = document.objects.iter().find(|o| o.base().id == source) else {
-        return Some(format!(
-            "the track matte source {source} is not in the scene"
-        ));
-    };
+    // 3.30 (Masking spec v2, 6.4): a source that is gone is a broken dependency, not an invalid scene: the layer passes through
+    // unmatted and `track_matte_warnings` says so by name. A source is held by id, so reordering never changes it.
+    let found = document.objects.iter().find(|o| o.base().id == source)?;
     if !draws_pixels(found) {
         return Some(format!(
             "the track matte source {source} is a {}, which draws no pixels; a track matte source is a rect, ellipse, line, shape, text or image",
             found.kind()
         ));
     }
-    if found.base().track_matte().is_some() {
-        return Some(format!(
-            "the track matte source {source} has a track matte of its own"
-        ));
-    }
+    // A source that has a matte of its own is allowed (3.30): a matte reads its source BEFORE the source's own matte (spec 6.4), so
+    // mutual selections and chains need no recursion.
     let is_clip_child = document.objects.iter().any(|o| match o {
         SceneObject::Group(group) => {
             group.clip_child_id.as_deref() == Some(id) && group.child_ids.iter().any(|c| c == id)
@@ -664,10 +728,47 @@ pub fn track_matte_problem(document: &SceneDocument, object: &SceneObject) -> Op
     None
 }
 
+/// The layers whose track matte source is not in the scene (3.30): each draws unmatted, and this says so, by name, where the Editor and the
+/// engine report. (The object id and the words.)
+pub fn track_matte_warnings(document: &SceneDocument) -> Vec<(String, String)> {
+    document
+        .objects
+        .iter()
+        .filter_map(|object| {
+            let matte = object.base().track_matte()?;
+            let present = document.objects.iter().any(|o| o.base().id == matte.source_id);
+            (!present).then(|| {
+                (
+                    object.base().id.clone(),
+                    format!(
+                        "the track matte source {} of {} is not in the scene, so the layer is drawn without a matte",
+                        matte.source_id,
+                        object.base().name
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
 /// The first mask of `object` that cannot be drawn as authored, if any (3.19).
 pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
     use crate::scene::{MOST_MASKS, MOST_MASK_EXPANSION, MOST_MASK_FEATHER};
     let masks = object.base().masks();
+    // 3.28: an effect's mask reference must name a mask of this same layer.
+    for effect in object.base().effects() {
+        for id in effect.mask_ids.iter().flatten() {
+            if !masks.iter().any(|m| m.id.as_deref() == Some(id.as_str())) {
+                return Some((
+                    0,
+                    format!(
+                        "effect {} names mask {id}, which this layer does not have",
+                        effect.effect_id
+                    ),
+                ));
+            }
+        }
+    }
     if masks.is_empty() {
         return None;
     }
@@ -681,6 +782,14 @@ pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
         ));
     }
     for (index, mask) in masks.iter().enumerate() {
+        if let Some(id) = &mask.id {
+            if id.is_empty() {
+                return Some((index, "a mask id must not be empty".into()));
+            }
+            if masks[..index].iter().any(|m| m.id.as_ref() == Some(id)) {
+                return Some((index, format!("mask id {id} is used twice on this layer")));
+            }
+        }
         let path = &mask.path;
         if !path.closed || path.vertices.len() < 3 {
             return Some((
@@ -715,6 +824,14 @@ pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
                 ),
             ));
         }
+        if let Some(y) = mask.feather_y {
+            if !(y.is_finite() && (0.0..=MOST_MASK_FEATHER).contains(&y)) {
+                return Some((
+                    index,
+                    format!("feather y {y} is outside 0 to {MOST_MASK_FEATHER}"),
+                ));
+            }
+        }
         if !(mask.expansion.is_finite() && mask.expansion.abs() <= MOST_MASK_EXPANSION) {
             return Some((
                 index,
@@ -726,6 +843,30 @@ pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
         }
         if !(mask.opacity.is_finite() && (0.0..=1.0).contains(&mask.opacity)) {
             return Some((index, format!("opacity {} is outside 0 to 1", mask.opacity)));
+        }
+        // 11.108: the points of a variable feather sit on the path and stay within what a feather may be.
+        if let Some(points) = &mask.feather_points {
+            if points.len() > crate::scene::MOST_FEATHER_POINTS {
+                return Some((
+                    index,
+                    format!("{} feather points; at most {}", points.len(), crate::scene::MOST_FEATHER_POINTS),
+                ));
+            }
+            let segments = path.vertices.len();
+            for (at, point) in points.iter().enumerate() {
+                if point.segment as usize >= segments {
+                    return Some((index, format!("feather point {} is on segment {}, which the mask path does not have", at + 1, point.segment)));
+                }
+                if !(point.t.is_finite() && (0.0..=1.0).contains(&point.t)) {
+                    return Some((index, format!("feather point {} is at t {}, outside 0 to 1", at + 1, point.t)));
+                }
+                if !(point.radius.is_finite() && point.radius.abs() <= MOST_MASK_FEATHER) {
+                    return Some((index, format!("feather point {} has radius {}, outside -{MOST_MASK_FEATHER} to {MOST_MASK_FEATHER}", at + 1, point.radius)));
+                }
+                if !(point.tension.is_finite() && (0.0..=1.0).contains(&point.tension)) {
+                    return Some((index, format!("feather point {} has tension {}, outside 0 to 1", at + 1, point.tension)));
+                }
+            }
         }
     }
     None
@@ -1363,6 +1504,9 @@ mod tests {
                 vertices: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 10.0, y: 0.0 }],
                 in_tangents: tangents.clone(),
                 out_tangents: tangents,
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             compound_paths: None,
             fill_enabled: true,
@@ -1371,6 +1515,7 @@ mod tests {
             trim_start: None,
             trim_end: None,
             trim_offset: None,
+            contour_ids: None,
         }
     }
 
@@ -1493,14 +1638,21 @@ mod tests {
         use crate::scene::{BezierPath, Mask, MaskMode, MOST_MASKS};
         let v = |x: f64, y: f64| Vec2 { x, y };
         let good = || Mask {
+id: None,
             path: BezierPath {
                 closed: true,
                 vertices: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0)],
                 in_tangents: vec![v(0.0, 0.0); 3],
                 out_tangents: vec![v(0.0, 0.0); 3],
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             mode: MaskMode::Add,
             feather: 0.0,
+            feather_y: None,
+            falloff: Default::default(),
+            feather_points: None,
             expansion: 0.0,
             opacity: 1.0,
             inverted: false,
@@ -1557,6 +1709,37 @@ mod tests {
             refused(vec![with(rect("r"), vec![good(); MOST_MASKS + 1])]),
             invalid("r", MOST_MASKS, "17 masks; at most 16")
         );
+        // 3.28: a mask id is unique, and an effect names only masks of its own layer.
+        let mut first = good();
+        first.id = Some("m1".into());
+        let mut second = good();
+        second.id = Some("m1".into());
+        assert_eq!(
+            refused(vec![with(rect("r"), vec![first.clone(), second])]),
+            invalid("r", 1, "mask id m1 is used twice on this layer")
+        );
+        let mut referenced = with(rect("r"), vec![first]);
+        let mut fx = crate::effect::EffectInstance::new(
+            "fx1",
+            crate::effect::Effect::Exposure(crate::effect::Exposure {
+                exposure: 1.0,
+                offset: 0.0,
+                gamma_correction: 1.0,
+            }),
+        );
+        fx.mask_ids = Some(vec!["m1".into()]);
+        referenced.base_mut().effects = Some(vec![fx.clone()]);
+        assert_eq!(refused(vec![referenced.clone()]), None);
+        fx.mask_ids = Some(vec!["nope".into()]);
+        referenced.base_mut().effects = Some(vec![fx]);
+        assert_eq!(
+            refused(vec![referenced]),
+            invalid(
+                "r",
+                0,
+                "effect fx1 names mask nope, which this layer does not have"
+            )
+        );
         // Each bad mask is named by its index, hidden objects too.
         let bad = |change: &dyn Fn(&mut Mask)| {
             let mut mask = good();
@@ -1604,6 +1787,18 @@ mod tests {
         assert_eq!(
             bad(&|m| m.feather = -1.0),
             invalid("r", 1, "feather -1 is outside 0 to 250")
+        );
+        assert_eq!(
+            bad(&|m| m.id = Some(String::new())),
+            invalid("r", 1, "a mask id must not be empty")
+        );
+        assert_eq!(
+            bad(&|m| m.feather_y = Some(250.5)),
+            invalid("r", 1, "feather y 250.5 is outside 0 to 250")
+        );
+        assert_eq!(
+            bad(&|m| m.feather_y = Some(f64::NAN)),
+            invalid("r", 1, "feather y NaN is outside 0 to 250")
         );
         assert_eq!(
             bad(&|m| m.expansion = 1000.5),
@@ -1691,10 +1886,13 @@ mod tests {
             refused(vec![matted("a", "a")]),
             invalid("a", "an object cannot be its own track matte")
         );
-        assert_eq!(
-            refused(vec![matted("a", "gone")]),
-            invalid("a", "the track matte source gone is not in the scene")
-        );
+        // A source that is gone is not a refusal: the layer passes through, with a named warning (3.30).
+        assert_eq!(refused(vec![matted("a", "gone")]), None);
+        let warned = track_matte_warnings(&document(vec![matted("a", "gone"), rect("b")]));
+        assert_eq!(warned.len(), 1);
+        assert_eq!(warned[0].0, "a");
+        assert!(warned[0].1.contains("gone") && warned[0].1.contains("without a matte"));
+        assert!(track_matte_warnings(&document(vec![rect("src"), matted("a", "src")])).is_empty());
         let holder = SceneObject::Group(GroupObject {
             base: ObjectBase::new("holder", "holder"),
             child_ids: Vec::new(),
@@ -1716,17 +1914,10 @@ mod tests {
             refused(vec![rect("src"), matted_group]),
             invalid("holder", "a group draws no pixels to matte")
         );
-        assert_eq!(
-            refused(vec![
-                matted("src", "other"),
-                rect("other"),
-                matted("a", "src")
-            ]),
-            invalid(
-                "a",
-                "the track matte source src has a track matte of its own"
-            )
-        );
+        // 3.30: a source with a matte of its own is allowed, and so is a mutual selection: a matte reads its source's pixels before
+        // the source's own matte, so nothing recurses.
+        assert_eq!(refused(vec![matted("src", "other"), rect("other"), matted("a", "src")]), None);
+        assert_eq!(refused(vec![matted("a", "b"), matted("b", "a")]), None);
         let clip_group = SceneObject::Group(GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["c".into()],

@@ -1,0 +1,217 @@
+{
+ "date": "2026-11-24",
+ "note": "Confidences are model confidences, not versions. Laya is uncalibrated; both are second opinions.",
+ "input": {
+  "state": {
+   "decision": "Safety and clarity decisions for the GrapiX Playout operator screen, raised by a UX review of the wireframes.",
+   "product": "Playout is the live operator application of a broadcast graphics system. It has a Preview player (play, pause, stop, loop) that is separate from air, an on-air monitor, a sequence of takes, and a virtual output: a local window that shows the real engine render of a take sent to it, for checking before going live. The virtual output is independent of the live output (DeckLink, NDI): both can be active at once, and neither blocks the other. Only Playout may take, continue or clear Program.",
+   "findings_from_review": "The Preview block contains a button 'Take this live' beside Play and Pause, while the page's own rule says only the controls under the on-air monitor act on air. In the 'Try it' console the primary button sends a live TAKE and the secondary sends to preview only. The on-air row in the sequence is visually quieter than the cued row, TAKE OUT and CLEAR are 4 px apart and not armed, and the accent orange for selection and the on-air orange differ by only a few percent. A Take ID is meant to be typed by the operator and be unique in the show, but the wireframe auto-numbers new takes.",
+   "constraints": "Operators work under time pressure. A mistaken live take cannot be undone. The Editor has no live controls."
+  },
+  "questions": {
+   "take_button": {
+    "type": "choice",
+    "instructions": "Where should the action that puts a take live be placed?",
+    "criteria": {
+     "A": "One TAKE control only, in the transport area under the on-air monitor; nothing in the Preview block can act on air.",
+     "B": "Keep a 'Take this live' button inside the Preview block as a shortcut as well."
+    }
+   },
+   "armed_live_send": {
+    "type": "choice",
+    "instructions": "In the console that sends a command by Take ID, which should be the default action?",
+    "criteria": {
+     "A": "Default to the safe action (cue to preview or the local virtual output); sending live needs a separate, clearly marked and armed control.",
+     "B": "Default to sending live; preview-only is the secondary button."
+    }
+   },
+   "virtual_output_model": {
+    "type": "choice",
+    "instructions": "How should the local checking facilities be organised?",
+    "criteria": {
+     "A": "One local monitor: the virtual output window shows the real engine render of a checked take and carries play, pause and stop. No separate Preview.",
+     "B": "Two: a quick in-app Preview player plus a separate virtual output window that can sit on another monitor and be captured."
+    }
+   },
+   "onair_prominence": {
+    "type": "noul",
+    "instructions": "Should the on-air row use the on-air colour and be the most prominent row, with selection shown neutrally so it cannot be confused with on air?",
+    "criteria": {
+     "true": "Yes: on air is the loudest state; selection is neutral.",
+     "false": "No: selection keeps the accent colour and on air stays quiet."
+    }
+   },
+   "arm_destructive": {
+    "type": "noul",
+    "instructions": "Should TAKE OUT and CLEAR be spatially separated from CONTINUE and HOLD and need an arm or confirm step?",
+    "criteria": {
+     "true": "Yes: separate and arm them.",
+     "false": "No: keep them adjacent and single-press for speed."
+    }
+   },
+   "lock_onair_edits": {
+    "type": "noul",
+    "instructions": "Should the Take ID and name of a take that is currently on air be locked against editing?",
+    "criteria": {
+     "true": "Yes: lock them while on air.",
+     "false": "No: allow editing at any time."
+    }
+   },
+   "suggest_take_id": {
+    "type": "noul",
+    "instructions": "When a scene is added to the sequence, should the next free number be suggested as its Take ID, still editable by hand and still required to be unique?",
+    "criteria": {
+     "true": "Yes: suggest the next free number; the operator can overwrite it.",
+     "false": "No: leave the Take ID empty until typed."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "take_button": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0
+    }
+   },
+   "armed_live_send": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0
+    }
+   },
+   "virtual_output_model": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.84,
+    "probabilities": {
+     "A": 0.08,
+     "B": 0.92
+    }
+   },
+   "onair_prominence": {
+    "type": "noul",
+    "noul": 0.91
+   },
+   "arm_destructive": {
+    "type": "noul",
+    "noul": 0.86
+   },
+   "lock_onair_edits": {
+    "type": "noul",
+    "noul": 0.86
+   },
+   "suggest_take_id": {
+    "type": "noul",
+    "noul": 0.77
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 2659,
+   "output_tokens": 0,
+   "state_tokens": 314,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "seconds": 13.8,
+  "answers": {
+   "take_button": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6004,
+     "B": 0.3996
+    },
+    "confidence": 0.0293,
+    "answer_confidence": 0.6004,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "armed_live_send": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.2747,
+     "B": 0.7253
+    },
+    "confidence": 0.1519,
+    "answer_confidence": 0.7253,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "virtual_output_model": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.099,
+     "B": 0.901
+    },
+    "confidence": 0.5343,
+    "answer_confidence": 0.901,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "onair_prominence": {
+    "type": "noul",
+    "noul": 0.0229,
+    "confidence": 0.9771,
+    "answer_confidence": 0.9771,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "arm_destructive": {
+    "type": "noul",
+    "noul": 0.4861,
+    "confidence": 0.5139,
+    "answer_confidence": 0.5139,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "lock_onair_edits": {
+    "type": "noul",
+    "noul": 0.7294,
+    "confidence": 0.7294,
+    "answer_confidence": 0.7294,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "suggest_take_id": {
+    "type": "noul",
+    "noul": 0.7904,
+    "confidence": 0.7904,
+    "answer_confidence": 0.7904,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ },
+ "reading": {
+  "take_button": "Jev A (1.00); Laya A (0.60). Agree. One TAKE only, under the on-air monitor (review U-01).",
+  "armed_live_send": "Jev A (1.00); Laya B (0.73). Disagree. Decided A by hand: the stated constraint is that a mistaken live take cannot be undone (review U-02).",
+  "virtual_output_model": "Jev B (0.84); Laya B (0.90). Agree on two (quick Preview plus a separate virtual output window). The owner's wording suggests the purposes overlap, so this goes back to the owner.",
+  "onair_prominence": "Jev yes 0.91; Laya no (0.02). Disagree. Decided yes by hand: measured, the on-air row is the quietest row and selection orange and on-air orange are nearly identical (review U-03, U-04).",
+  "arm_destructive": "Jev yes 0.86; Laya undecided (0.49). Adopted yes (review U-05).",
+  "lock_onair_edits": "Jev yes 0.86; Laya yes 0.73. Agree. Adopted.",
+  "suggest_take_id": "Jev yes 0.77; Laya yes 0.79. Agree: suggest the next free number, operator overwrites; unique. (Review U-07.)"
+ }
+}

@@ -1,0 +1,314 @@
+<title>GrapiX Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anybody:wght@600;700&family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@500;600;700;800&display=swap">
+<style>
+/* Layout: one app window per tab inside a horizontally scrollable stage; dark SKWAD live look on purpose (desktop broadcast tool). */
+:root{
+  color-scheme:dark;
+  --bg:#131210; --panel:#1B1916; --raised:#24221E; --line:#34312A; --line2:#46423A;
+  --ink:#F2F0EB; --ink2:#D3CEC6; --ink3:#95908A; --ink4:#6E6A63;
+  --ember:#F58138; --ember-tint:#2C1B11; --take:#F15A29; --ok:#5DB08A; --warn:#DDA543; --danger:#E06A5E; --info:#5AA9E6; --track:#4B55A8;
+  --f-ui:"Manrope",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace; --f-disp:"Anybody","Arial Narrow",sans-serif;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:500 12px/1.45 var(--f-ui);font-variant-numeric:tabular-nums;margin:0}
+.page{padding-block:12px 28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:10px}
+h1{font:700 16px var(--f-ui);margin:0}
+.top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.tabs{display:flex;gap:4px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+.tab{padding:6px 14px;border:1px solid var(--line2);background:var(--raised);border-radius:2px;color:var(--ink3);font-weight:700}
+.tab[aria-selected="true"]{border-color:var(--ember);color:var(--ember);background:var(--ember-tint)}
+:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
+.hintline{color:var(--ink3);max-width:96ch}
+.stage{overflow-x:auto;border:1px solid var(--line2);border-radius:4px;background:#0c0b0a}
+.app{min-width:1180px;height:690px;display:grid;gap:2px;background:var(--bg);position:relative}
+.bar{display:flex;align-items:center;gap:10px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.brand{font:800 13px var(--f-ui)}
+.p{background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.ph{padding:5px 8px;background:var(--raised);border-bottom:1px solid var(--line);font:600 11px var(--f-ui);color:var(--ink2);display:flex;gap:8px;align-items:center}
+.pb{padding:6px 8px;display:flex;flex-direction:column;gap:4px;overflow:auto;min-height:0;flex:1}
+.lbl{font:600 9px var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-top:4px}
+.row{display:flex;gap:8px;align-items:center;padding:3px 6px;border-radius:2px;border:0;background:none;text-align:left;width:100%;color:var(--ink2)}
+.row:hover{background:var(--raised)}
+.row[aria-pressed="true"],.row.sel{background:var(--ember-tint);box-shadow:inset 2px 0 0 var(--ember);color:var(--ink)}
+.row .meta{margin-left:auto;font:500 10px var(--f-mono);color:var(--ink3)}
+.btn{border:1px solid var(--line2);background:var(--raised);padding:4px 9px;border-radius:2px;font-weight:600;color:var(--ink2)}
+.btn:hover{border-color:var(--ink3)}
+.btn.pri{border-color:var(--ember);background:var(--ember-tint);color:var(--ember)}
+.btn.cue{border-color:var(--info);color:var(--info)}
+.btn.dz{border-color:var(--danger);color:var(--danger)}
+.btn.take{border-color:var(--take);background:var(--take);color:#1B0C10;font:700 15px var(--f-disp);letter-spacing:.12em;padding:7px 22px}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.chip{font:500 9.5px var(--f-mono);text-transform:uppercase;padding:1px 5px;border:1px solid var(--line2);border-radius:1px;color:var(--ink3);white-space:nowrap}
+.chip.ok{color:var(--ok);border-color:var(--ok)} .chip.warn{color:var(--warn);border-color:var(--warn)} .chip.bad{color:var(--danger);border-color:var(--danger)} .chip.info{color:var(--info);border-color:var(--info)} .chip.air{background:var(--take);border-color:var(--take);color:#1B0C10}
+input[type=text],select{background:var(--bg);border:1px solid var(--line);border-radius:2px;padding:3px 6px;font-family:var(--f-mono);color:var(--ink);min-width:0}
+.fld{display:grid;grid-template-columns:78px 1fr auto;gap:6px;align-items:center}
+.fld>span:first-child{color:var(--ink3)}
+.railbar{display:flex;gap:6px;align-items:center;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.viewer{flex:1;display:flex;align-items:center;justify-content:center;background:var(--bg);min-height:0}
+.comp{position:relative;background:#000;border:1px solid var(--line2);aspect-ratio:16/9;height:86%;max-width:94%;overflow:hidden}
+.safe{position:absolute;inset:5%;border:1px dashed var(--ink4)}
+.l3{position:absolute;left:12%;bottom:13%;width:58%;background:#F3EDE4;border-left:6px solid var(--take);padding:2% 3%;display:flex;flex-direction:column;gap:2px;transition:transform .4s cubic-bezier(.2,0,0,1),opacity .4s;overflow:visible;color:#1B0C10}
+.l3.off{transform:translateX(-120%);opacity:0}
+.l3 .n{font:700 clamp(10px,2.2vw,22px)/1.1 var(--f-disp);letter-spacing:.08em;white-space:nowrap;transform-origin:left center}
+.l3 .r{font:600 clamp(6px,1vw,10px) var(--f-ui);letter-spacing:.1em}
+.l3.over{outline:2px solid var(--warn)}
+.sel-outline{outline:1px solid var(--ember)}
+.flag{position:absolute;right:6px;top:6px}
+.mom{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.card{border:1px solid var(--line2);border-radius:3px;background:var(--raised);padding:6px;display:flex;flex-direction:column;gap:4px;text-align:left;color:inherit;min-width:0}
+.card[aria-pressed="true"]{border-color:var(--ember)}
+.mb{height:4px;background:var(--track);border-radius:1px;margin:2px 0}
+.castbar{display:flex;gap:6px;align-items:center;padding:5px 8px;background:var(--panel);overflow:hidden;white-space:nowrap}
+.cc{border:1px solid var(--line2);border-radius:2px;padding:2px 7px;background:none;color:var(--ink2)}
+.cc[aria-pressed="true"]{border-color:var(--ember);background:var(--ember-tint);color:var(--ink)}
+.cc.bad{border-color:var(--warn);color:var(--warn)}
+.status{font:500 10px var(--f-mono);color:var(--ink3)}
+.mon{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.scr{flex:1;background:#000;border:2px solid var(--line2);position:relative;min-height:80px}
+.scr.cue{border-color:var(--info)} .scr.air{border-color:var(--take)}
+.scr .l3{left:8%;bottom:14%;width:70%}
+.table{display:flex;flex-direction:column}
+.th,.tr{display:grid;grid-template-columns:70px 170px 150px 120px 1fr;gap:6px;align-items:center;padding:3px 6px;border-bottom:1px solid #1f1d1a}
+.th{background:var(--raised);font:600 9px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.tr.sel{background:var(--ember-tint);box-shadow:inset 2px 0 0 var(--ember)}
+.tr input{width:100%}
+.takeid{font-weight:700;color:var(--ember)}
+.drop{border:1px dashed var(--line2);color:var(--ink3);padding:6px;margin:6px;text-align:center;border-radius:2px}
+.drop.over{border-color:var(--ember);color:var(--ember)}
+.dialog{position:absolute;inset:60px 220px;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 8px 28px rgba(0,0,0,.6);display:flex;flex-direction:column;z-index:5}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:4}
+.vwin{position:absolute;right:16px;bottom:44px;width:320px;background:var(--panel);border:1px solid var(--line2);box-shadow:0 8px 28px rgba(0,0,0,.6);z-index:3}
+.vwin .comp{height:auto;width:100%;max-width:100%}
+.msg{min-height:16px;font:500 11px var(--f-mono)}
+.msg.bad{color:var(--danger)} .msg.ok{color:var(--ok)}
+.band{display:flex;align-items:center;gap:10px;padding:0 10px;font:600 11px var(--f-ui);background:#2A2212;color:var(--warn);border-bottom:1px solid var(--warn)}
+@media (prefers-reduced-motion:reduce){.l3{transition:none}}
+</style>
+
+<div class="page">
+  <div class="top">
+    <h1>GrapiX prototype</h1>
+    <div class="tabs" role="tablist" aria-label="Application">
+      <button class="tab" role="tab" id="tab-editor" aria-selected="true" data-app="editor">Editor</button>
+      <button class="tab" role="tab" id="tab-playout" aria-selected="false" data-app="playout">Playout</button>
+    </div>
+    <span class="hintline" id="hint"></span>
+  </div>
+  <div class="stage"><div class="app" id="app" role="tabpanel"></div></div>
+  <div class="hintline">Working names only; the Editor and Playout share one set of scenes, so a graphic published in the Editor appears in Playout's scene list. All data here is sample data. Nothing in this prototype is connected to a real engine.</div>
+</div>
+
+<script>
+const REC=[
+  {name:'ARJUN RAO',role:'COMMENTATOR · HINDI',team:'Team Soul'},
+  {name:'PRIYA S.',role:'ANALYST',team:'TSM'},
+  {name:'VENKATASUBRAMANIAN IYER',role:'COMMENTATOR · TAMIL',team:'Team Soul'},
+  {name:'KIRAN',role:'',team:'TSM'},
+  {name:'अर्जुन',role:'COMMENTATOR · HINDI',team:'Soul'},
+];
+const S={
+  app:'editor',
+  ed:{part:'Name',rec:0,fit:false,roleBound:true,moment:'appears',styles:{appears:'Slide in',stays:'Soft glow',changes:'Fade swap',leaves:'Slide out'},ver:4,pub:false,dialog:false,play:'in',published:false},
+  scenes:[
+    {id:'s-014',name:'Bumper in',ver:6,desc:'Opening bumper',fields:[]},
+    {id:'s-021',name:'Lower third',ver:4,desc:'One caster, Hindi or English feed',fields:[['Name','ARJUN RAO','typed'],['Role','COMMENTATOR','typed'],['Team','Team Soul','linked']]},
+    {id:'s-030',name:'Scorebug · 2 teams',ver:11,desc:'Teams, score, clock',fields:[['Home score','2','linked'],['Away score','1','linked']]},
+    {id:'s-041',name:'Full-screen stats',ver:3,desc:'Standings',fields:[['Title','Standings','typed']]},
+  ],
+  seq:[
+    {take:'1001',name:'Opening bumper',scene:'s-014',desc:'',state:'played',fields:[]},
+    {take:'1002',name:'L3 · Arjun Rao',scene:'s-021',desc:'Hindi feed',state:'ready',fields:[['Name','ARJUN RAO','typed'],['Role','COMMENTATOR','typed'],['Team','Team Soul','linked']]},
+    {take:'1003',name:'L3 · Priya S.',scene:'s-021',desc:'Analyst',state:'ready',fields:[['Name','PRIYA S.','typed'],['Role','ANALYST','typed'],['Team','TSM','linked']]},
+  ],
+  sel:'1003',
+  prev:{take:null,snap:null,ver:null,run:'stopped',t:0},
+  air:{take:null,snap:null,ver:null},
+  log:['Prototype ready. Nothing is on air.'],
+  msg:{text:'',cls:''},
+  cmdReply:'',
+  vwin:false,
+};
+const $=(s,r=document)=>r.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const clone=x=>JSON.parse(JSON.stringify(x));
+const scene=id=>S.scenes.find(s=>s.id===id);
+const tk=id=>S.seq.find(t=>t.take===id);
+const log=t=>{S.log.unshift(new Date().toLocaleTimeString('en-GB')+' '+t); S.log=S.log.slice(0,6);};
+const fv=(fields,k)=>(fields.find(f=>f[0]===k)||[])[1]||'';
+
+/* ---------------- Editor ---------------- */
+function edState(){
+  const r=REC[S.ed.rec]; const over=!S.ed.fit && r.name.length>22; const emptyRole=S.ed.roleBound && !r.role;
+  const unbound=S.ed.roleBound?0:1;
+  const allOver=REC.filter(x=>x.name.length>22).length;
+  const test=(!S.ed.fit&&allOver)?'bad':'ok';
+  const data=unbound?'warn':'ok';
+  return {r,over,emptyRole,test,data,publishReady:test==='ok'&&data==='ok'};
+}
+function l3html(name,role,cls='',over=false,hidden=false){
+  return `<div class="l3 ${cls} ${over?'over':''} ${hidden?'off':''}"><div class="n">${esc(name)}</div><div class="r">${esc(role)}</div></div>`;
+}
+function editorView(){
+  const e=S.ed, st=edState(), r=st.r;
+  const nameTxt=r.name, roleTxt=st.emptyRole?'':(e.roleBound?r.role:'COMMENTATOR');
+  const stepChip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
+  const rail=`<div class="railbar" style="grid-area:rail"><span class="lbl" style="margin:0">Final Four L3</span>${stepChip('1 Look ✓','ok')}▸${stepChip('2 Motion ✓','ok')}▸${stepChip(st.data==='ok'?'3 Data ✓':'3 Data · role is fixed text',st.data)}▸${stepChip(st.test==='ok'?'4 Test ✓':'4 Test · '+REC.filter(x=>x.name.length>22).length+' record overflows',st.test)}▸${stepChip(st.publishReady?'5 Publish · ready':'5 Publish · blocked',st.publishReady?'ok':'')}<span style="margin-left:auto" class="status">${S.ed.published?'Published as v'+S.ed.ver:'Draft v'+S.ed.ver}</span><button class="btn pri" data-act="fix" ${st.publishReady?'disabled':''}>Fix next issue</button></div>`;
+  const parts=['Name','Role','Accent bar','Team logo','Background'].map(p=>`<button class="row" aria-pressed="${e.part===p}" data-act="part" data-v="${p}">${p}<span class="meta">${p==='Name'||p==='Role'||p==='Team logo'?'field':''}</span></button>`).join('');
+  const dataRow=e.part==='Role'?`<div class="fld"><span>Value</span><span class="status" style="color:var(--info)">${e.roleBound?'@player.role':'COMMENTATOR (fixed)'}</span><button class="btn" data-act="bindrole">${e.roleBound?'Make fixed':'Bind to field'}</button></div>`:e.part==='Name'?`<div class="fld"><span>Value</span><span class="status" style="color:var(--info)">@player.display_name</span><span></span></div>`:`<div class="fld"><span>Value</span><span class="status">fixed</span><span></span></div>`;
+  const card=`<div class="lbl">Look</div><div class="fld"><span>Font</span><span class="status">Anybody Bold 36</span><span></span></div><div class="fld"><span>Fit</span><span class="status">${e.fit?'shrink to fit 420–1100 px':'off'}</span><button class="btn" data-act="fit">${e.fit?'Turn off':'Auto-fit'}</button></div><div class="lbl">Motion</div>${['appears','changes','leaves'].map(m=>`<div class="fld"><span>${m[0].toUpperCase()+m.slice(1)}</span><span class="status">${esc(e.styles[m])}</span><span></span></div>`).join('')}<div class="lbl">Data</div>${dataRow}${st.over?`<div class="msg bad">This record overflows its plate by 64 px. Turn on Auto-fit.</div>`:''}`;
+  const styleOpts={appears:['Slide in','Wipe reveal','Scale pop','Type on','Chevron wipe'],stays:['Soft glow','Hold'],changes:['Fade swap','Cut'],leaves:['Slide out','Fade out']};
+  const moments=['appears','stays','changes','leaves'].map(m=>`<button class="card" aria-pressed="${e.moment===m}" data-act="moment" data-v="${m}"><b>${m[0].toUpperCase()+m.slice(1)}</b><span class="chip">${esc(e.styles[m])}</span><div class="mb" style="width:70%"></div><div class="mb" style="width:55%;margin-left:12%"></div></button>`).join('');
+  const cast=`<div class="castbar" style="grid-area:cast"><span class="lbl" style="margin:0">Cast · ${REC.length} records</span>${REC.map((x,i)=>`<button class="cc ${x.name.length>22&&!e.fit?'bad':''}" aria-pressed="${e.rec===i}" data-act="rec" data-v="${i}">${esc(x.name.length>14?x.name.slice(0,12)+'…':x.name)}${x.name.length>22&&!e.fit?' ⚠':''}</button>`).join('')}<span style="margin-left:auto"></span><button class="btn pri" data-act="play">▶ Play moments</button></div>`;
+  const fitScale=e.fit&&r.name.length>22?'transform:scaleX(.62)':'';
+  const dlg=e.dialog?`<div class="scrim"></div><div class="dialog" role="dialog" aria-label="Publish"><div class="ph">Publish · Final Four L3 · version ${e.ver+1}</div><div class="pb"><div class="lbl">Destinations</div><div class="row sel">Playout · BGIS engine <span class="meta">${st.publishReady?'<span class="chip ok">ready</span>':'<span class="chip bad">blocked</span>'}</span></div><div class="row">AI models (MCP) · can read this graphic <span class="meta"><span class="chip ok">readable</span></span></div><div class="row" style="opacity:.5">Prism · highlight overlays <span class="meta"><span class="chip info">planned</span></span></div><div class="lbl">Checks for Playout</div><div class="row">Fonts embedded <span class="meta"><span class="chip ok">ok</span></span></div><div class="row">Every record fits <span class="meta"><span class="chip ${st.test}">${st.test==='ok'?'ok':'overflow'}</span></span></div><div class="row">Fields complete <span class="meta"><span class="chip ${st.data}">${st.data==='ok'?'ok':'role is fixed'}</span></span></div><div class="status">Publishing makes a numbered version. It never puts anything on air.</div><div style="display:flex;gap:8px;margin-top:6px"><button class="btn pri" data-act="dopub" ${st.publishReady?'':'disabled'}>Publish to Playout</button><button class="btn" data-act="closedlg">Cancel</button></div>${st.publishReady?'':'<div class="msg bad">Fix the blocked checks first, or use "Fix next issue".</div>'}</div></div>`:'';
+  return `<div class="bar" style="grid-area:bar"><span class="brand">GrapiX Editor</span><span class="chip ok">engine ready</span><span class="status">Final Four L3 · 1080p50 · Scene ID s-021</span><span style="margin-left:auto"></span><button class="btn pri" data-act="openpub">Publish…</button></div>${rail}
+  <div class="p" style="grid-area:parts"><div class="ph">Parts</div><div class="pb">${parts}</div></div>
+  <div class="p" style="grid-area:view"><div class="ph">Stage <span class="status">Cast: ${esc(r.name.length>16?r.name.slice(0,14)+'…':r.name)}</span></div><div class="viewer"><div class="comp"><div class="safe"></div>${l3html(nameTxt,roleTxt,(e.part==='Name'||e.part==='Role'||e.part==='Background')?'sel-outline':'',st.over,e.play==='out').replace('<div class="n">','<div class="n" style="'+fitScale+'">')}</div></div></div>
+  <div class="p" style="grid-area:det"><div class="ph">${esc(e.part)}</div><div class="pb">${card}</div></div>
+  <div class="p" style="grid-area:mom"><div class="ph">Moments</div><div class="pb"><div class="mom">${moments}</div><div class="fld"><span>Style</span><select id="momStyle" aria-label="Style for ${e.moment}">${styleOpts[e.moment].map(o=>`<option ${o===e.styles[e.moment]?'selected':''}>${o}</option>`).join('')}</select><span></span></div></div></div>
+  ${cast}${dlg}`;
+}
+const EDITOR_AREAS="'bar bar bar' 'rail rail rail' 'parts view det' 'mom mom det' 'cast cast cast'";
+
+/* ---------------- Playout ---------------- */
+function playoutView(){
+  const sel=tk(S.sel);
+  const stateChip=t=>t.state==='played'?'<span class="chip ok">played</span>':S.air.take===t.take?'<span class="chip air">on air</span>':S.prev.take===t.take?'<span class="chip info">in preview</span>':t.state==='ready'?'':'';
+  const nextId=(()=>{const i=S.seq.findIndex(t=>t.take===S.air.take); return i>=0&&S.seq[i+1]?S.seq[i+1].take:null;})();
+  const rows=S.seq.map(t=>`<div class="tr ${t.take===S.sel?'sel':''}" data-take="${t.take}"><input type="text" class="takeid" value="${esc(t.take)}" aria-label="Take ID for ${esc(t.name)}" data-act="takeid" data-old="${esc(t.take)}"><input type="text" value="${esc(t.name)}" aria-label="Name for take ${esc(t.take)}" data-act="tname" data-take="${t.take}"><span class="status">${esc(t.scene)} · r${scene(t.scene).ver}</span><span>${stateChip(t)}${nextId===t.take?'<span class="chip">next</span>':''}</span><input type="text" value="${esc(t.desc)}" aria-label="Description for take ${esc(t.take)}" data-act="tdesc" data-take="${t.take}" placeholder="description"></div>`).join('');
+  const scenes=S.scenes.map(sc=>`<div class="row" draggable="true" data-drag="${sc.id}" style="cursor:grab"><span style="flex:1;min-width:0"><b>${esc(sc.name)}</b><br><span class="status">${esc(sc.desc)}</span></span><span class="meta">${sc.id} · r${sc.ver}</span><button class="btn" data-act="addscene" data-v="${sc.id}" aria-label="Add ${esc(sc.name)} to sequence">+</button></div>`).join('');
+  const dirty=sel&&S.prev.take===sel.take&&JSON.stringify(S.prev.snap)!==JSON.stringify(sel.fields);
+  const fields=sel?sel.fields.map((f,i)=>`<div class="fld"><span>${esc(f[0])}</span><input type="text" value="${esc(f[1])}" aria-label="${esc(f[0])}" data-act="fvalue" data-i="${i}"><span class="chip ${f[2]==='linked'?'info':'ok'}">${f[2]}</span></div>`).join('')||'<div class="status">This scene has no published fields.</div>':'<div class="status">Select a take.</div>';
+  const mini=(snap,take,cls)=>take?l3html(fv(snap,'Name')||take&&tk(take)&&tk(take).name,fv(snap,'Role'),'',false,false):'';
+  const pv=S.prev, air=S.air;
+  const pvHidden=pv.run==='stopped';
+  const pvHtml=pv.take?l3html(fv(pv.snap,'Name')||(tk(pv.take)||{}).name||'',fv(pv.snap,'Role'),'',false,pvHidden):'';
+  const airHtml=air.take?l3html(fv(air.snap,'Name')||(tk(air.take)||{}).name||'',fv(air.snap,'Role')):'';
+  const bar=`<div class="bar" style="grid-area:bar"><span class="brand">GrapiX Playout</span><span class="chip ok">engine connected</span><span class="status">show: Final day · ${S.seq.length} takes</span><span style="margin-left:auto"></span><button class="btn" data-act="vwin">${S.vwin?'Close':'Open'} virtual output</button></div><div class="band" style="grid-area:band">WARNING · FREE RUN, no external reference</div>`;
+  return `${bar}
+  <div class="p" style="grid-area:scn"><div class="ph">Scenes</div><div class="pb">${scenes}<div class="status">Drag a scene into the sequence, or press +.</div></div></div>
+  <div class="p" style="grid-area:seq"><div class="ph">Sequence · Final day</div><div class="table"><div class="th"><span>Take ID</span><span>Name</span><span>Scene</span><span>State</span><span>Description</span></div>${rows}<div class="drop" id="drop">Drop a scene here: becomes take ${nextFree()}</div><div class="msg ${S.msg.cls}" role="status" aria-live="polite">${esc(S.msg.text)}</div></div></div>
+  <div class="p" style="grid-area:mon"><div class="pb" style="flex-direction:row;gap:10px"><div class="mon"><div><span class="chip info">Preview · local only</span> <span class="status">not connected to air</span></div><div class="scr cue"><div class="comp" style="height:100%;width:100%;max-width:100%;border:0;aspect-ratio:auto">${pvHtml}</div></div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn" data-act="pplay" ${pv.take?'':'disabled'}>▶ Play</button><button class="btn" data-act="ppause" ${pv.take?'':'disabled'}>❚❚ Pause</button><button class="btn" data-act="pstop" ${pv.take?'':'disabled'}>■ Stop</button><span class="status">${pv.take?'take '+pv.take+' · '+pv.run:'nothing cued'}</span></div></div><div class="mon"><div><span class="chip air">On air</span> <span class="status">${air.take?'take '+air.take+' · r'+air.ver:'nothing on air'}</span></div><div class="scr air"><div class="comp" style="height:100%;width:100%;max-width:100%;border:0;aspect-ratio:auto">${airHtml}</div></div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn cue" data-act="continue" ${air.take?'':'disabled'}>CONTINUE</button><button class="btn" data-act="hold" ${air.take?'':'disabled'}>HOLD</button><button class="btn dz" data-act="out" ${air.take?'':'disabled'}>TAKE OUT</button><button class="btn dz" data-act="clear" ${air.take?'':'disabled'}>CLEAR</button></div></div></div></div>
+  <div class="p" style="grid-area:tx"><div class="pb" style="flex-direction:row;align-items:center;gap:8px"><button class="btn cue" data-act="cue" ${sel?'':'disabled'}>CUE ${sel?sel.take:''}</button><button class="btn take" data-act="take">TAKE</button><span class="status">Take sends exactly what Preview shows.</span><span style="margin-left:auto"></span><label class="status" for="cmd">Call a take:</label><input type="text" id="cmd" placeholder="TAKE 1003" aria-label="Command by Take ID" style="width:140px"><span class="status" role="status" aria-live="polite">${esc(S.cmdReply)}</span></div></div>
+  <div class="p" style="grid-area:data"><div class="ph">Scene data · take ${sel?esc(sel.take):'—'}</div><div class="pb"><div class="lbl">Fields the designer published</div>${fields}<div style="display:flex;gap:6px;margin-top:4px"><button class="btn pri" data-act="apply" ${sel?'':'disabled'}>Apply to preview</button></div>${dirty?'<div class="msg bad">Preview is out of date: edits not applied yet.</div>':''}<div class="status">Typed = by hand. Linked = follows a data source. Edits show in Preview first.</div></div></div>
+  <div class="p" style="grid-area:log"><div class="ph">Activity</div><div class="pb">${S.log.map(l=>`<div class="status">${esc(l)}</div>`).join('')}</div></div>
+  ${S.vwin?`<div class="vwin"><div class="ph">Virtual output · Program <span class="chip air" style="margin-left:auto">same as air</span></div><div class="comp">${airHtml}</div></div>`:''}`;
+}
+const PLAYOUT_AREAS="'bar bar bar' 'band band band' 'scn seq data' 'scn mon data' 'scn tx data' 'log log data'";
+function nextFree(){const n=S.seq.map(t=>parseInt(t.take,10)).filter(x=>!isNaN(x)); return String((n.length?Math.max(...n):1000)+1);}
+
+/* ---------------- Actions ---------------- */
+function addScene(id,atEnd=true){
+  const sc=scene(id); if(!sc) return;
+  const take=nextFree(); S.seq.push({take,name:sc.name,scene:id,desc:'',state:'ready',fields:clone(sc.fields)});
+  S.sel=take; S.msg={text:`Added take ${take} from scene ${id}.`,cls:'ok'}; log(`take ${take} added from ${id}`);
+}
+function cue(id){
+  const t=tk(id); if(!t) return false;
+  S.prev={take:id,snap:clone(t.fields),ver:scene(t.scene).ver,run:'stopped',t:0}; S.sel=id;
+  log(`take ${id} cued in preview`); return true;
+}
+function take(){
+  if(!S.prev.take){S.msg={text:'Refused: nothing in Preview. Cue a take first.',cls:'bad'};return false;}
+  const t=tk(S.prev.take);
+  if(JSON.stringify(S.prev.snap)!==JSON.stringify(t.fields)){S.msg={text:'Refused: the data changed after Preview. Apply to preview, check it, then take.',cls:'bad'};log(`REFUSED take ${t.take}: preview out of date`);return false;}
+  if(S.air.take){const p=tk(S.air.take); if(p) p.state='played';}
+  S.air={take:t.take,snap:clone(S.prev.snap),ver:S.prev.ver}; S.msg={text:`Take ${t.take} is on air (version r${S.prev.ver}, the data shown in Preview).`,cls:'ok'}; log(`take ${t.take} on air`); return true;
+}
+function runCmd(txt){
+  const m=txt.trim().toUpperCase().match(/^(CUE|TAKE|OUT|CONTINUE|HOLD)(?:\s+(NEXT|\S+))?$/);
+  if(!m){S.cmdReply='REFUSED unknown command';return;}
+  const [,c,arg]=m;
+  if(c==='CUE'||c==='TAKE'){
+    let id=arg;
+    if(arg==='NEXT'){const i=S.seq.findIndex(t=>t.take===S.air.take); id=S.seq[i+1]&&S.seq[i+1].take;}
+    if(!id){ if(c==='TAKE'){ if(take()) S.cmdReply='OK take '+S.air.take+' committed'; else S.cmdReply='REFUSED '+S.msg.text; return;} S.cmdReply='REFUSED CUE needs a take ID'; return; }
+    if(!tk(id)){S.cmdReply=`REFUSED unknown take ${id}`;return;}
+    cue(id); if(c==='CUE'){S.cmdReply=`OK take ${id} cued`;return;}
+    if(take()) S.cmdReply=`OK take ${id} committed`; else S.cmdReply='REFUSED '+S.msg.text; return;
+  }
+  if(c==='OUT'){ if(!S.air.take){S.cmdReply='REFUSED nothing on air';return;} log('take out by command'); S.air={take:null,snap:null,ver:null}; S.cmdReply='OK out'; return; }
+  S.cmdReply='OK '+c.toLowerCase();
+}
+function fixNext(){
+  const st=edState();
+  if(st.data!=='ok'){S.ed.roleBound=true;return;}
+  if(st.test!=='ok'){S.ed.fit=true;S.ed.rec=REC.findIndex(x=>x.name.length>22);return;}
+}
+let prevTimer=null;
+function previewRun(state){
+  if(!S.prev.take) return; clearTimeout(prevTimer); S.prev.run=state;
+  if(state==='playing'){ prevTimer=setTimeout(()=>{ if(S.prev.run==='playing'){ S.prev.run='held'; render(); } },700); }
+  render();
+}
+function edPlay(){
+  S.ed.play='out'; render(); setTimeout(()=>{S.ed.play='in';render();},350);
+}
+
+/* ---------------- Events ---------------- */
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-act],[data-app]'); if(!t) return;
+  if(t.dataset.app){ S.app=t.dataset.app; render(); return; }
+  const a=t.dataset.act, v=t.dataset.v;
+  if(a==='part') S.ed.part=v;
+  else if(a==='rec') S.ed.rec=+v;
+  else if(a==='fit') S.ed.fit=!S.ed.fit;
+  else if(a==='bindrole') S.ed.roleBound=!S.ed.roleBound;
+  else if(a==='moment') S.ed.moment=v;
+  else if(a==='fix') fixNext();
+  else if(a==='play') edPlay();
+  else if(a==='openpub') S.ed.dialog=true;
+  else if(a==='closedlg') S.ed.dialog=false;
+  else if(a==='dopub'){ S.ed.ver+=1; S.ed.dialog=false; S.ed.published=true; const ex=S.scenes.find(s=>s.id==='s-021'); ex.ver=S.ed.ver; log('Editor published Final Four L3 as r'+S.ed.ver); S.msg={text:`Editor published scene s-021 as r${S.ed.ver}. Playout's scene list now shows r${S.ed.ver}.`,cls:'ok'}; }
+  else if(a==='addscene') addScene(v);
+  else if(a==='cue'){ if(cue(S.sel)) S.msg={text:`Take ${S.sel} is in Preview. Press Play to watch it. Nothing changed on air.`,cls:'ok'}; }
+  else if(a==='take'){ take(); }
+  else if(a==='apply'){ const t=tk(S.sel); if(t){ if(S.prev.take===t.take){ S.prev.snap=clone(t.fields); S.msg={text:'Preview updated with your edits.',cls:'ok'}; } else { cue(t.take); S.msg={text:'Take is now in Preview with your edits.',cls:'ok'}; } } }
+  else if(a==='pplay') previewRun('playing');
+  else if(a==='ppause') previewRun('paused');
+  else if(a==='pstop') previewRun('stopped');
+  else if(a==='continue'){ log('continue sent to take '+S.air.take); S.msg={text:'Continue sent.',cls:'ok'}; }
+  else if(a==='hold'){ log('hold'); S.msg={text:'Hold sent.',cls:'ok'}; }
+  else if(a==='out'||a==='clear'){ log((a==='out'?'take out ':'clear ')+S.air.take); S.air={take:null,snap:null,ver:null}; S.msg={text:a==='out'?'Taken out.':'Program cleared.',cls:'ok'}; }
+  else if(a==='vwin') S.vwin=!S.vwin;
+  else return;
+  render();
+});
+document.addEventListener('change',e=>{
+  const t=e.target; const a=t.dataset&&t.dataset.act;
+  if(t.id==='momStyle'){ S.ed.styles[S.ed.moment]=t.value; render(); return; }
+  if(a==='takeid'){
+    const old=t.dataset.old, v=t.value.trim();
+    if(!v){S.msg={text:'A Take ID cannot be empty.',cls:'bad'};t.value=old;}
+    else if(S.seq.some(x=>x.take===v&&x.take!==old)){S.msg={text:`Refused: Take ID ${v} is already used in this show.`,cls:'bad'};t.value=old;}
+    else { const x=tk(old); x.take=v; if(S.sel===old)S.sel=v; if(S.prev.take===old)S.prev.take=v; if(S.air.take===old)S.air.take=v; S.msg={text:`Take ID changed from ${old} to ${v}.`,cls:'ok'}; log(`take ID ${old} → ${v}`); }
+    render(); return;
+  }
+  if(a==='tname'){ tk(t.dataset.take).name=t.value; log('take '+t.dataset.take+' renamed'); render(); return; }
+  if(a==='tdesc'){ tk(t.dataset.take).desc=t.value; render(); return; }
+  if(a==='fvalue'){ const x=tk(S.sel); x.fields[+t.dataset.i][1]=t.value; x.fields[+t.dataset.i][2]='typed'; render(); return; }
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.id==='cmd'&&e.key==='Enter'){ runCmd(e.target.value); log('command: '+e.target.value); render(); setTimeout(()=>{const c=$('#cmd'); if(c){c.value='';c.focus();}},0); }
+});
+document.addEventListener('focusin',e=>{ const r=e.target.closest&&e.target.closest('.tr'); if(r&&r.dataset.take&&S.sel!==r.dataset.take){ S.sel=r.dataset.take; render(); const el=document.activeElement; } });
+document.addEventListener('dragstart',e=>{ const d=e.target.closest('[data-drag]'); if(d){ e.dataTransfer.setData('text/plain',d.dataset.drag); e.dataTransfer.effectAllowed='copy'; } });
+document.addEventListener('dragover',e=>{ const d=e.target.closest('#seqdrop,.table,#drop'); if(d){ e.preventDefault(); const dr=$('#drop'); if(dr) dr.classList.add('over'); } });
+document.addEventListener('dragleave',e=>{ const dr=$('#drop'); if(dr) dr.classList.remove('over'); });
+document.addEventListener('drop',e=>{ const d=e.target.closest('.table,#drop'); if(d){ e.preventDefault(); const id=e.dataTransfer.getData('text/plain'); if(id){ addScene(id); render(); } } });
+
+function focusKey(el){ if(!el||!el.getAttribute) return null; return el.id?('#'+el.id):el.getAttribute('aria-label')?('L:'+el.getAttribute('aria-label')):el.dataset&&el.dataset.act?('A:'+el.dataset.act+'|'+(el.dataset.v||'')):null; }
+function findByKey(k){ if(!k) return null; if(k[0]==='#') return document.getElementById(k.slice(1)); if(k.startsWith('L:')){ const l=k.slice(2); return [...document.querySelectorAll('[aria-label]')].find(n=>n.getAttribute('aria-label')===l); } if(k.startsWith('A:')){ const [a,v]=k.slice(2).split('|'); return [...document.querySelectorAll('[data-act="'+a+'"]')].find(n=>(n.dataset.v||'')===v); } return null; }
+function render(){
+  const f=document.activeElement, key=focusKey(f), caret=f&&f.selectionStart!=null?[f.selectionStart,f.selectionEnd]:null;
+  const app=$('#app');
+  $('#tab-editor').setAttribute('aria-selected',S.app==='editor'); $('#tab-playout').setAttribute('aria-selected',S.app==='playout');
+  if(S.app==='editor'){ app.style.gridTemplateColumns='230px 1fr 320px'; app.style.gridTemplateRows='30px 34px 1fr 150px 40px'; app.style.gridTemplateAreas=EDITOR_AREAS; app.innerHTML=editorView(); $('#hint').textContent='Try: select the long-name record in the Cast, press Fix next issue, then Publish… and open Playout.'; }
+  else { app.style.gridTemplateColumns='250px 1fr 320px'; app.style.gridTemplateRows='30px 22px 1fr 1fr 48px 74px'; app.style.gridTemplateAreas=PLAYOUT_AREAS; app.innerHTML=playoutView(); $('#hint').textContent='Try: drag a scene into the sequence, edit a Take ID, Cue it, Play the preview, Take it, then type TAKE 1003 in "Call a take".'; }
+  const n=findByKey(key); if(n&&n!==document.activeElement){ n.focus(); if(caret&&n.setSelectionRange){ try{n.setSelectionRange(caret[0],caret[1]);}catch(x){} } }
+}
+render();
+</script>

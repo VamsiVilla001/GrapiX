@@ -4,7 +4,9 @@
 //! itself; nested clip groups multiply. Track mattes (3.19, user decisions 15
 //! Nov 2026) use the same per-frame matte: an object's `trackMatte` names a
 //! source whose alpha or luma, at its own opacity, shapes it; the source is a
-//! matte only and is never drawn. The GPU compositor and the CPU reference
+//! matte whether or not it is seen, and is drawn like any layer when its own
+//! visibility says so (3.30; before that it was never drawn). The GPU
+//! compositor and the CPU reference
 //! both take their clips and mattes from this one plan.
 
 use gx_contracts::scene::{resolve_hierarchy, SceneDocument, SceneObject, TrackMatteMode};
@@ -48,7 +50,7 @@ pub(crate) struct ClipPlan {
     /// The object's track matte: its source's index and the mode.
     pub track_of: Vec<Option<(usize, TrackMatteMode)>>,
     /// Whether the object is some layer's track matte source: composited into
-    /// its matte, never drawn.
+    /// its matte, and drawn too unless it is hidden.
     pub is_source: Vec<bool>,
 }
 
@@ -111,7 +113,8 @@ impl ClipPlan {
     }
 
     /// A clip child or a track matte source: composited into its matte each
-    /// frame and never drawn itself.
+    /// frame (a clip child is never drawn itself; a source is drawn too when
+    /// it is visible).
     pub(crate) fn is_matte(&self, index: usize) -> bool {
         self.is_clip.get(index) == Some(&true) || self.is_source.get(index) == Some(&true)
     }

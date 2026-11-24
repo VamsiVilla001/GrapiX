@@ -434,6 +434,7 @@ mod tests {
     fn scene() -> SceneDocument {
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "template".into(),
             name: "Template".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,
@@ -448,6 +449,7 @@ mod tests {
                 duration_frames: 1,
                 channels: Vec::new(),
                 phases: Vec::new(),
+                path_channels: Vec::new(),
             },
             data_context: Default::default(),
             assets: Vec::new(),
@@ -455,6 +457,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: vec![
                 SceneObject::Text(TextObject {
                     base: ObjectBase::new("headline", "Headline"),

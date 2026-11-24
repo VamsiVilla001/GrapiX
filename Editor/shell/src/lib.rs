@@ -47,8 +47,8 @@ use gx_asset_plane::package::{PackageSource, MAX_PACKAGE_BYTES};
 use gx_asset_plane::{content_hash, AssetHandoff, AssetStore, AssetStoreError, PublishRefusal};
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
-    parse_command, CommandOutcome, EditorCommand, OpenScene, SaveScene, SaveTarget, SceneSource,
-    SceneTarget, SessionKey, SessionView,
+    parse_command, CommandOutcome, EditorCommand, HistoryView, OpenScene, SaveScene, SaveTarget,
+    SceneSource, SceneTarget, SessionKey, SessionView,
 };
 use gx_contracts::control::{
     apply_control_values, fillable_properties, ControlFieldKind, ControlValue, TakePage,
@@ -59,6 +59,7 @@ use gx_contracts::platform::service_data_root;
 use gx_contracts::scene::{AssetLibraryItem, SceneDocument};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 use gx_editor::publish::{package_sources, publish_document, PublishFailure};
+use gx_editor::recent::RecentProjects;
 use gx_editor::{CommandError, Projects, Workspace};
 use serde::{Deserialize, Serialize};
 
@@ -608,6 +609,13 @@ fn publish_error(failure: PublishFailure, directory: Option<&Path>) -> EditorErr
                 PublishRefusal::InvalidPublishRequest { detail } => (detail, false),
                 PublishRefusal::SceneRefused { cause }
                 | PublishRefusal::PreparationRefused { cause } => (cause.to_string(), false),
+                // 2.24: the engine wants a credential this Editor does not hold, or holds the wrong one.
+                PublishRefusal::AuthRefused { cause } => (
+                    format!(
+                        "{cause}; this engine verifies a credential on its asset plane: start the Editor with GX_ASSET_CREDENTIAL set to one made with the engine's secret (Author scope)"
+                    ),
+                    false,
+                ),
                 PublishRefusal::PackageRefused { cause } => (
                     cause.to_string(),
                     matches!(
@@ -705,11 +713,49 @@ pub fn take_page_preview(
     apply_control_values(&template, values).map_err(refused)
 }
 
-/// The per-user projects root. A shell that cannot name one says so rather
-/// than writing into whatever directory it was launched from.
+pub mod start;
+pub mod workspaces;
+
+/// The project the Editor has open. One window, one project.
+static OPEN_PROJECT: start::OpenProjectCell = start::OpenProjectCell::new();
+
+/// The store of the open project. With none open there is no store: the shell refuses by name
+/// rather than writing into some default folder, so work starts only after a project is
+/// created at a path the user chose or opened from its `.gpx` (11.43).
 fn projects() -> Result<Projects, EditorError> {
-    let root = service_data_root().map_err(refused)?;
-    Ok(Projects::at_root(root.join("projects")))
+    OPEN_PROJECT.projects().ok_or_else(|| {
+        refused(Refusal::ProjectNotFound {
+            project: "no project is open: create one at a path you choose, or open a .gpx".into(),
+        })
+    })
+}
+
+/// The folder the Editor looked in for projects before they had a chosen location. It is only
+/// offered, on the Start screen, so work made there is not stranded.
+fn default_projects_root() -> Result<PathBuf, EditorError> {
+    Ok(service_data_root().map_err(refused)?.join("projects"))
+}
+
+/// The per-user recent-projects list.
+fn recent_projects() -> Result<RecentProjects, EditorError> {
+    Ok(RecentProjects::at(
+        service_data_root()
+            .map_err(refused)?
+            .join("recent-projects.json"),
+    ))
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+fn start_error(error: start::StartError) -> EditorError {
+    match error {
+        start::StartError::Store(error) => project_error(error),
+        start::StartError::Command(error) => command_error(error, None),
+    }
 }
 
 /// A scene as the manager lists it. Ids come from the store; the rest is what
@@ -899,6 +945,19 @@ fn cmd_session_view(
         .map_err(|error| command_error(error, None))
 }
 
+/// One open scene's change history for the history list (11.82): a read. A click in the list
+/// is a `goToHistoryStep` command through `cmd_execute`, like every other change.
+#[tauri::command]
+fn cmd_session_history(
+    state: tauri::State<'_, ShellState>,
+    session: SessionKey,
+) -> Result<HistoryView, EditorError> {
+    state
+        .workspace()
+        .history(session)
+        .map_err(|error| command_error(error, None))
+}
+
 /// Publish the document a target names. The document is cloned under the
 /// lock and published after it is released: no network IO under the mutex.
 #[tauri::command]
@@ -919,8 +978,16 @@ async fn cmd_engine_preview(
     endpoint: String,
     target: SceneTarget,
     frame: u64,
+    matte_view: Option<gx_contracts::matte_view::MatteViewRequest>,
 ) -> Result<tauri::ipc::Response, EditorError> {
     let scene = state.document_for_preview(&target)?;
+    // 3.30: a view of a layer's track matte is a changed copy of the document, drawn like any other frame; nothing authored changes.
+    let scene = match matte_view {
+        Some(request) => gx_contracts::matte_view::matte_view_document(&scene, &request).map_err(|refusal| EditorError::Protocol {
+            detail: format!("the matte view cannot be drawn: {refusal}"),
+        })?,
+        None => scene,
+    };
     let image = tauri::async_runtime::spawn_blocking(move || {
         gx_editor::preview::preview_document(&endpoint, scene, frame)
     })
@@ -989,14 +1056,313 @@ fn cmd_motion_presets(project: Option<String>) -> Result<Vec<MotionPreset>, Edit
     Ok(presets)
 }
 
+/// The application's settings (2.28): user settings that roam and machine settings that do not.
+/// Opened once, on first use; a file that did not read is on the log and its replacement is named.
+static SETTINGS: std::sync::OnceLock<Result<gx_settings::SettingsStore, String>> =
+    std::sync::OnceLock::new();
+
+fn settings() -> Result<&'static gx_settings::SettingsStore, EditorError> {
+    SETTINGS
+        .get_or_init(|| match gx_settings::SettingsStore::open_default() {
+            Ok((store, report)) => {
+                for scope in &report.recovered_from_backup {
+                    tracing::warn!(
+                        event = "settings.recovered_from_backup",
+                        scope = scope.as_str()
+                    );
+                }
+                for scope in &report.reset_to_defaults {
+                    tracing::warn!(event = "settings.reset_to_defaults", scope = scope.as_str());
+                }
+                Ok(store)
+            }
+            Err(error) => Err(error.to_string()),
+        })
+        .as_ref()
+        .map_err(|detail| EditorError::ProjectFailed {
+            detail: format!("settings are unavailable: {detail}"),
+        })
+}
+
+fn settings_error(error: gx_settings::SettingsError) -> EditorError {
+    match error {
+        gx_settings::SettingsError::Refused(cause) => refused(cause),
+        other => EditorError::ProjectFailed {
+            detail: other.to_string(),
+        },
+    }
+}
+
+/// Every setting and the revision they are at; the page re-reads after each change.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSnapshot {
+    pub user: gx_contracts::settings::UserSettings,
+    pub machine: gx_contracts::settings::MachineSettings,
+    pub revision: u64,
+}
+
+fn settings_snapshot(store: &gx_settings::SettingsStore) -> SettingsSnapshot {
+    SettingsSnapshot {
+        user: store.user(),
+        machine: store.machine(),
+        revision: store.revision(),
+    }
+}
+
+#[tauri::command]
+fn cmd_settings_get() -> Result<SettingsSnapshot, EditorError> {
+    Ok(settings_snapshot(settings()?))
+}
+
+/// Set one setting by its key. A key that is not a setting, a value of the wrong kind and a value
+/// out of range refuse by name and change nothing.
+#[tauri::command]
+fn cmd_settings_set(
+    scope: gx_contracts::settings::SettingsScope,
+    key: String,
+    value: serde_json::Value,
+) -> Result<SettingsSnapshot, EditorError> {
+    let store = settings()?;
+    store.set(scope, &key, value).map_err(settings_error)?;
+    Ok(settings_snapshot(store))
+}
+
+/// Put one setting, or with no key every setting of the scope, back to its default.
+#[tauri::command]
+fn cmd_settings_reset(
+    scope: gx_contracts::settings::SettingsScope,
+    key: Option<String>,
+) -> Result<SettingsSnapshot, EditorError> {
+    let store = settings()?;
+    store.reset(scope, key.as_deref()).map_err(settings_error)?;
+    Ok(settings_snapshot(store))
+}
+
+static WORKSPACES: std::sync::OnceLock<Result<gx_workspace_store::WorkspaceStore, String>> =
+    std::sync::OnceLock::new();
+
+/// The workspace store in its usual places (2.29). A store that cannot be opened (no data folder) is reported on
+/// every call, not by stopping the Editor: it still works with the workspace that ships.
+fn workspace_store() -> Result<&'static gx_workspace_store::WorkspaceStore, EditorError> {
+    WORKSPACES
+        .get_or_init(|| {
+            gx_workspace_store::WorkspaceStore::open_default(
+                gx_workspace_store::LAYOUT_SCHEMA_VERSION,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|detail| EditorError::ProjectFailed {
+            detail: detail.clone(),
+        })
+}
+
+/// One saved workspace, as the page asks for it: the document, or what was found instead.
+#[tauri::command]
+fn cmd_workspace_get(
+    app: String,
+    kind: String,
+    id: String,
+) -> Result<workspaces::WorkspaceRead, EditorError> {
+    workspaces::get(workspace_store()?, &app, &kind, &id)
+}
+
+/// Keep one workspace. The id and the document are checked first; a refusal names why and writes nothing.
+#[tauri::command]
+fn cmd_workspace_put(
+    app: String,
+    kind: String,
+    id: String,
+    value: serde_json::Value,
+) -> Result<(), EditorError> {
+    workspaces::put(workspace_store()?, &app, &kind, &id, &value)
+}
+
+#[tauri::command]
+fn cmd_workspace_delete(app: String, kind: String, id: String) -> Result<bool, EditorError> {
+    workspaces::delete(workspace_store()?, &app, &kind, &id)
+}
+
+#[tauri::command]
+fn cmd_workspace_list(app: String, kind: String) -> Result<Vec<String>, EditorError> {
+    workspaces::list(workspace_store()?, &app, &kind)
+}
+
+#[tauri::command]
+fn cmd_workspace_active(app: String) -> Result<Option<String>, EditorError> {
+    workspaces::active(workspace_store()?, &app)
+}
+
+#[tauri::command]
+fn cmd_workspace_set_active(app: String, id: Option<String>) -> Result<(), EditorError> {
+    workspaces::set_active(workspace_store()?, &app, id.as_deref())
+}
+
+#[tauri::command]
+fn cmd_workspace_order(app: String) -> Result<Vec<String>, EditorError> {
+    workspaces::order(workspace_store()?, &app)
+}
+
+#[tauri::command]
+fn cmd_workspace_set_order(app: String, ids: Vec<String>) -> Result<(), EditorError> {
+    workspaces::set_order(workspace_store()?, &app, &ids)
+}
+
 #[tauri::command]
 fn cmd_default_endpoint() -> &'static str {
     DEFAULT_ASSET_ENDPOINT
 }
 
+/// The projects beside the open one (its store's), or none when no project is open.
 #[tauri::command]
 fn cmd_project_list() -> Result<Vec<String>, EditorError> {
-    projects()?.list_projects().map_err(project_error)
+    match OPEN_PROJECT.projects() {
+        Some(projects) => projects.list_projects().map_err(project_error),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// File > New Project: create `<parent>/<name>/<name>.gpx` in a folder the user chose, and open it.
+#[tauri::command]
+fn cmd_new_project(
+    state: tauri::State<'_, ShellState>,
+    parent: String,
+    name: String,
+    color_depth: Option<gx_contracts::color::ColorDepth>,
+) -> Result<start::OpenedProject, EditorError> {
+    let recent = recent_projects()?;
+    let mut workspace = state.workspace();
+    let mut settings = gx_contracts::project::ProjectSettings::new_project();
+    if let Some(depth) = color_depth {
+        settings.color_depth = depth;
+    }
+    start::new_project_with(
+        &mut workspace,
+        &OPEN_PROJECT,
+        &recent,
+        Path::new(&parent),
+        &name,
+        settings,
+        now_ms(),
+    )
+    .map_err(start_error)
+}
+
+/// File > Open Project: open the project a `.gpx` file is.
+#[tauri::command]
+fn cmd_open_project(
+    state: tauri::State<'_, ShellState>,
+    path: String,
+) -> Result<start::OpenedProject, EditorError> {
+    let recent = recent_projects()?;
+    let mut workspace = state.workspace();
+    start::open_project(
+        &mut workspace,
+        &OPEN_PROJECT,
+        &recent,
+        Path::new(&path),
+        now_ms(),
+    )
+    .map_err(start_error)
+}
+
+/// Open a project folder made before the `.gpx` existed (it is upgraded, losslessly, on the way in).
+#[tauri::command]
+fn cmd_open_project_folder(
+    state: tauri::State<'_, ShellState>,
+    folder: String,
+) -> Result<start::OpenedProject, EditorError> {
+    let recent = recent_projects()?;
+    let mut workspace = state.workspace();
+    start::open_folder(
+        &mut workspace,
+        &OPEN_PROJECT,
+        &recent,
+        Path::new(&folder),
+        now_ms(),
+    )
+    .map_err(start_error)
+}
+
+/// File > Save As: copy the open project to `<parent>/<name>/<name>.gpx` and open the copy. The
+/// project left behind is untouched; the unsaved work of its scenes goes into the copy.
+#[tauri::command]
+fn cmd_save_project_as(
+    state: tauri::State<'_, ShellState>,
+    parent: String,
+    name: String,
+) -> Result<start::OpenedProject, EditorError> {
+    let recent = recent_projects()?;
+    let mut workspace = state.workspace();
+    start::save_project_as(
+        &mut workspace,
+        &OPEN_PROJECT,
+        &recent,
+        Path::new(&parent),
+        &name,
+        now_ms(),
+    )
+    .map_err(start_error)
+}
+
+/// File > Exit: end the application in order, unless a scene has unsaved work (refused by name).
+#[tauri::command]
+fn cmd_exit(app: tauri::AppHandle, state: tauri::State<'_, ShellState>) -> Result<(), EditorError> {
+    {
+        let workspace = state.workspace();
+        start::require_can_exit(&workspace).map_err(start_error)?;
+    }
+    app.exit(0);
+    Ok(())
+}
+
+/// File > Close Project: close its scenes and leave none open.
+#[tauri::command]
+fn cmd_close_project(
+    state: tauri::State<'_, ShellState>,
+) -> Result<Vec<gx_contracts::command::SessionKey>, EditorError> {
+    let mut workspace = state.workspace();
+    start::close_project(&mut workspace, &OPEN_PROJECT).map_err(start_error)
+}
+
+/// The project open now, if any.
+#[tauri::command]
+fn cmd_current_project() -> Result<Option<start::OpenedProject>, EditorError> {
+    let Some(open) = OPEN_PROJECT.get() else {
+        return Ok(None);
+    };
+    let projects = Projects::at_root(&open.root);
+    let settings = projects.settings(&open.name).map_err(project_error)?;
+    Ok(Some(start::OpenedProject {
+        gpx: projects.gpx_path(&open.name).display().to_string(),
+        root: open.root.display().to_string(),
+        name: open.name,
+        working_color_space: settings.working_color_space,
+        color_depth: settings.color_depth,
+        closed_sessions: Vec::new(),
+    }))
+}
+
+/// File > Open Recent: the remembered projects, newest first.
+#[tauri::command]
+fn cmd_recent_projects() -> Result<Vec<start::ListedRecent>, EditorError> {
+    Ok(start::list_recent(&recent_projects()?))
+}
+
+/// Take a project off the recent list. The project itself is not touched.
+#[tauri::command]
+fn cmd_forget_recent_project(gpx: String) -> Result<(), EditorError> {
+    recent_projects()?.forget(&gpx).map_err(project_error)
+}
+
+/// Projects in the folder the Editor kept them in before they had a chosen location.
+#[tauri::command]
+fn cmd_default_location_projects() -> Result<Vec<(String, String)>, EditorError> {
+    Ok(start::discover(&default_projects_root()?)
+        .into_iter()
+        .map(|(name, folder)| (name, folder.display().to_string()))
+        .collect())
 }
 
 #[tauri::command]
@@ -1318,7 +1684,8 @@ pub fn run() {
     // 2.12: the Editor's log, from here until the window closes.
     let mut log = gx_telemetry::sink::init_process_logging("editor", "shell");
     tracing::info!(event = "editor.start", version = env!("CARGO_PKG_VERSION"));
-    let workspace = Workspace::new(projects().ok());
+    // No project is open at start: the Start screen asks for one before any work.
+    let workspace = Workspace::new(None);
     let built = tauri::Builder::default()
         .manage(ShellState::new(workspace))
         .plugin(tauri_plugin_dialog::init())
@@ -1329,6 +1696,7 @@ pub fn run() {
             cmd_execute,
             cmd_import_file,
             cmd_session_view,
+            cmd_session_history,
             cmd_publish,
             cmd_engine_preview,
             cmd_take_page_preview,
@@ -1339,7 +1707,28 @@ pub fn run() {
             cmd_starter_presets,
             cmd_motion_presets,
             cmd_default_endpoint,
+            cmd_settings_get,
+            cmd_settings_set,
+            cmd_settings_reset,
+            cmd_workspace_get,
+            cmd_workspace_put,
+            cmd_workspace_delete,
+            cmd_workspace_list,
+            cmd_workspace_active,
+            cmd_workspace_set_active,
+            cmd_workspace_order,
+            cmd_workspace_set_order,
             cmd_project_list,
+            cmd_new_project,
+            cmd_open_project,
+            cmd_open_project_folder,
+            cmd_save_project_as,
+            cmd_exit,
+            cmd_close_project,
+            cmd_current_project,
+            cmd_recent_projects,
+            cmd_forget_recent_project,
+            cmd_default_location_projects,
             cmd_scene_list,
             cmd_scene_read,
             cmd_take_page_list,

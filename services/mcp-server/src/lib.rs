@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 pub mod wire;
 
 pub use wire::{
-    serve_http_listener, serve_http_listener_within, HttpLimits, Jobs, McpService,
+    serve_http_listener, serve_http_listener_within, HttpAuth, HttpLimits, Jobs, McpService,
     HANDSHAKE_PROTOCOL_VERSION, HTTP_PATH, SUPPORTED_PROTOCOL_VERSIONS,
 };
 
@@ -139,6 +139,15 @@ const INVALID_PARAMS: i64 = -32602;
 /// than masquerading as one of the reserved ones.
 const REFUSED: i64 = -32000;
 
+/// Who is calling, as a transport that authenticates knows it (2.23): the credential's subject and
+/// the scopes it grants. A call that carries one is gated by those scopes and not by the ones the
+/// server was built with, and its record names the subject (never the credential).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Caller {
+    pub subject: String,
+    pub scopes: Vec<Scope>,
+}
+
 /// The server: a set of handlers, the caller's scopes, and the one gate.
 pub struct Server {
     handlers: BTreeMap<&'static str, Box<dyn ToolHandler>>,
@@ -176,11 +185,15 @@ impl Server {
     }
 
     /// The handler for one tool, if the caller may reach it.
-    fn authorised_handler(&self, name: &str) -> Result<&dyn ToolHandler, Refusal> {
+    fn authorised_handler(
+        &self,
+        name: &str,
+        scopes: &[Scope],
+    ) -> Result<&dyn ToolHandler, Refusal> {
         // The gate runs before the lookup, so an out-of-scope call to a tool
         // that exists and one that does not are indistinguishable — a caller
         // probing for what exists learns nothing it was not told.
-        ToolRegistry::authorise(name, &self.scopes)?;
+        ToolRegistry::authorise(name, scopes)?;
         self.handlers
             .get(name)
             .map(|handler| handler.as_ref())
@@ -246,6 +259,17 @@ impl Server {
     /// Call one tool through the scope gate. Both the in-process API and the
     /// MCP wire dispatch from here, so there is one gate on every path.
     pub fn call_tool(&self, name: &str, args: serde_json::Value) -> Result<ToolOutput, Refusal> {
+        self.call_tool_for(name, args, None)
+    }
+
+    /// [`Self::call_tool`] for a caller a transport has authenticated (2.23): the gate uses the
+    /// scopes that caller's credential grants, and the record names its subject.
+    pub fn call_tool_for(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        caller: Option<&Caller>,
+    ) -> Result<ToolOutput, Refusal> {
         // 2.12 (ADR-0004): every call, on every path, is on record at the one
         // gate: the tool, its effect, its revision and retry key, how large
         // its arguments were, how long it took and what came of it. Never
@@ -273,7 +297,9 @@ impl Server {
         let scope = descriptor
             .and_then(|tool| tool.required_scope)
             .map(|scope| format!("{scope:?}"));
-        let result = self.call_tool_unlogged(name, args);
+        let scopes = caller.map_or(self.scopes.as_slice(), |caller| caller.scopes.as_slice());
+        let subject = caller.map(|caller| caller.subject.as_str());
+        let result = self.call_tool_unlogged(name, args, scopes);
         let duration_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         match &result {
             Ok(_) => tracing::info!(
@@ -281,6 +307,7 @@ impl Server {
                 tool = name,
                 effect,
                 scope = scope.as_deref(),
+                subject,
                 result = "ok",
                 if_revision,
                 idempotency_key = idempotency_key.as_deref(),
@@ -292,6 +319,7 @@ impl Server {
                 tool = name,
                 effect,
                 scope = scope.as_deref(),
+                subject,
                 result = "refused",
                 refusal = refusal.code_name(),
                 detail = %refusal,
@@ -308,8 +336,9 @@ impl Server {
         &self,
         name: &str,
         args: serde_json::Value,
+        scopes: &[Scope],
     ) -> Result<ToolOutput, Refusal> {
-        let handler = self.authorised_handler(name)?;
+        let handler = self.authorised_handler(name, scopes)?;
         let value = handler.handle(args)?;
         Ok(if handler.returns_call_tool_result() {
             ToolOutput::CallToolResult(value)
@@ -493,6 +522,41 @@ mod tests {
         assert!(matches!(
             error.data.expect("structured").code,
             Refusal::Unauthenticated
+        ));
+    }
+
+    /// 2.23: a call for a caller a transport authenticated is gated by the scopes that caller's
+    /// credential grants, whatever the server was built with; with no caller, by the server's own.
+    #[test]
+    fn a_caller_the_transport_authenticated_is_gated_by_its_own_scopes() {
+        let mut server = Server::new(vec![Scope::Author]);
+        server.register("playout.take", Box::new(Echo));
+        server.register("scenes.create", Box::new(Echo));
+        let operator = Caller {
+            subject: "desk-1".into(),
+            scopes: vec![Scope::Take],
+        };
+        let nobody = Caller {
+            subject: "read-only".into(),
+            scopes: Vec::new(),
+        };
+        let args = || serde_json::json!({});
+        assert!(server
+            .call_tool_for("playout.take", args(), Some(&operator))
+            .is_ok());
+        assert!(matches!(
+            server.call_tool_for("scenes.create", args(), Some(&operator)),
+            Err(Refusal::Unauthenticated)
+        ));
+        assert!(matches!(
+            server.call_tool_for("scenes.create", args(), Some(&nobody)),
+            Err(Refusal::Unauthenticated)
+        ));
+        // No caller: the server's own scopes, as stdio and the in-process API always had.
+        assert!(server.call_tool_for("scenes.create", args(), None).is_ok());
+        assert!(matches!(
+            server.call_tool("playout.take", args()),
+            Err(Refusal::Unauthenticated)
         ));
     }
 

@@ -535,6 +535,7 @@ fn drive_control_contract_refusals(report: &mut Report) {
 
     let scene = || SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -549,6 +550,7 @@ fn drive_control_contract_refusals(report: &mut Report) {
             duration_frames: 1,
             channels: Vec::new(),
             phases: Vec::new(),
+            path_channels: Vec::new(),
         },
         data_context: Default::default(),
         assets: Vec::new(),
@@ -556,6 +558,9 @@ fn drive_control_contract_refusals(report: &mut Report) {
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects: vec![SceneObject::Rect(RectObject {
             base: ObjectBase::new("card", "Card"),
             radius: 0.0,
@@ -666,6 +671,7 @@ fn drive_editor_refusals(report: &mut Report) {
     let projects = gx_editor::Projects::at_root(&root);
     let scene = gx_contracts::scene::SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -686,6 +692,9 @@ fn drive_editor_refusals(report: &mut Report) {
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects: Vec::new(),
     };
 
@@ -733,11 +742,37 @@ fn drive_editor_refusals(report: &mut Report) {
         ),
     );
 
+    // A scene in the project's space but at another depth refuses by name too.
+    let mut deep = scene.clone();
+    deep.working_color_space = gx_contracts::color::WorkingColorSpace::Srgb;
+    deep.color_depth = gx_contracts::color::ColorDepth::Bits32;
+    deep.id = "audit-depth".into();
+    let depth_mismatch = projects.write_scene("audit-space", &deep);
+    report.record(
+        PLANE,
+        "SceneColorDepthMismatch is produced for a scene whose depth differs from its project's",
+        expect(
+            matches!(
+                depth_mismatch,
+                Err(gx_editor::EditorError::Refused(
+                    Refusal::SceneColorDepthMismatch {
+                        scene: gx_contracts::color::ColorDepth::Bits32,
+                        project_depth: gx_contracts::color::ColorDepth::Bits16,
+                        ..
+                    }
+                ))
+            ) && !root
+                .join("audit-space")
+                .join("scenes")
+                .join("audit-depth.json")
+                .exists(),
+            "a 32-bit scene was written into a 16-bit project, or refused under another name",
+        ),
+    );
+
     // A settings file that is present but unreadable refuses rather than
     // reading as absent, which would compose every scene in the wrong space.
-    let settings = root
-        .join("audit-space")
-        .join(gx_contracts::project::PROJECT_SETTINGS_FILE);
+    let settings = projects.gpx_path("audit-space");
     let corrupted = std::fs::write(&settings, br#"{"workingColorSpace":"hdr"}"#);
     report.record(
         PLANE,
@@ -751,6 +786,137 @@ fn drive_editor_refusals(report: &mut Report) {
                     ))
                 ),
             "an unreadable project settings file was not refused by name",
+        ),
+    );
+
+    // 11.82: a click on a line of the change history that the history no longer has (a new
+    // edit dropped it) refuses by name and changes nothing. Driven on the real workspace.
+    let mut workspace = gx_editor::Workspace::new(None);
+    let opened = workspace.execute(gx_contracts::command::EditorCommand::OpenScene(
+        gx_contracts::command::OpenScene {
+            source: gx_contracts::command::SceneSource::New {
+                id: "audit-history".into(),
+                name: "Audit history".into(),
+            },
+        },
+    ));
+    let session = opened
+        .ok()
+        .and_then(|outcome| outcome.session)
+        .map(|view| view.session);
+    let stale_step = session.map(|session| {
+        let before = workspace.view(session).ok();
+        let refused = workspace.execute(gx_contracts::command::EditorCommand::GoToHistoryStep(
+            gx_contracts::command::GoToHistoryStep {
+                session,
+                step: Some(7),
+            },
+        ));
+        matches!(
+            refused,
+            Err(gx_editor::CommandError::Refused(Refusal::HistoryStepUnknown { session: key, step: 7 })) if key == session
+        ) && workspace.view(session).ok() == before
+    });
+    report.record(
+        PLANE,
+        "HistoryStepUnknown is produced for a step the change history does not list",
+        expect(
+            stale_step == Some(true),
+            "a jump to a step that is not listed was not refused by name, or it changed the scene",
+        ),
+    );
+
+    // 2.28: a setting outside its range, and a key that does not exist, refuse by name and
+    // leave the stored settings as they were. Driven on the real store, in a scratch folder.
+    let settings_root = root.join("audit-settings");
+    let invalid_setting = gx_settings::SettingsStore::open(
+        settings_root.join("user.json"),
+        settings_root.join("machine.json"),
+    )
+    .ok()
+    .map(|(store, _)| {
+        let before = (store.user(), store.machine(), store.revision());
+        let out_of_range = store.set(
+            gx_contracts::settings::SettingsScope::Machine,
+            "controlPort",
+            serde_json::json!(80),
+        );
+        let unknown_key = store.set(
+            gx_contracts::settings::SettingsScope::User,
+            "noSuchSetting",
+            serde_json::json!(true),
+        );
+        matches!(
+            out_of_range,
+            Err(gx_settings::SettingsError::Refused(Refusal::SettingInvalid { ref key, .. })) if key == "controlPort"
+        ) && matches!(
+            unknown_key,
+            Err(gx_settings::SettingsError::Refused(Refusal::SettingInvalid { ref key, .. })) if key == "noSuchSetting"
+        ) && (store.user(), store.machine(), store.revision()) == before
+    });
+    report.record(
+        PLANE,
+        "SettingInvalid is produced for a value out of range and for an unknown key",
+        expect(
+            invalid_setting == Some(true),
+            "a setting out of range or an unknown key was not refused by name, or it changed the settings",
+        ),
+    );
+
+    // 2.29: a workspace whose id is not a safe file name refuses by name and writes nothing; one over a file
+    // written by a newer build refuses by name and leaves that file as it was. Driven on the real store.
+    let workspace_root = root.join("audit-workspaces");
+    let workspaces = gx_workspace_store::WorkspaceStore::open(
+        workspace_root.join("roaming"),
+        workspace_root.join("local"),
+        gx_workspace_store::LAYOUT_SCHEMA_VERSION,
+    );
+    let good = serde_json::json!({ "schemaVersion": 1, "workspaceId": "mine" });
+    let unsafe_id = workspaces.put(
+        gx_workspace_store::App::Editor,
+        gx_workspace_store::Kind::Saved,
+        "../escape",
+        &good,
+    );
+    report.record(
+        PLANE,
+        "WorkspaceInvalid is produced for an id that is not a safe file name, and writes nothing",
+        expect(
+            matches!(
+                unsafe_id,
+                Err(gx_workspace_store::WorkspaceError::Refused(
+                    Refusal::WorkspaceInvalid { .. }
+                ))
+            ) && !workspace_root.exists(),
+            "an unsafe workspace id was not refused by name, or it wrote something",
+        ),
+    );
+    let saved_folder = workspace_root.join("roaming").join("editor").join("saved");
+    let newer_file = saved_folder.join("mine.json");
+    let newer_text = br#"{"schemaVersion":2,"workspaceId":"mine"}"#;
+    let planted = std::fs::create_dir_all(&saved_folder).is_ok()
+        && std::fs::write(&newer_file, newer_text).is_ok();
+    let over_newer = workspaces.put(
+        gx_workspace_store::App::Editor,
+        gx_workspace_store::Kind::Saved,
+        "mine",
+        &good,
+    );
+    report.record(
+        PLANE,
+        "WorkspaceNewer is produced for a write over a file saved by a newer build, which stays as it was",
+        expect(
+            planted
+                && matches!(
+                    over_newer,
+                    Err(gx_workspace_store::WorkspaceError::Refused(Refusal::WorkspaceNewer {
+                        found: 2,
+                        supported: 1,
+                        ..
+                    }))
+                )
+                && std::fs::read(&newer_file).ok().as_deref() == Some(&newer_text[..]),
+            "a write over a newer workspace file was not refused by name, or it changed the file",
         ),
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -773,6 +939,7 @@ fn drive_animation_refusals(report: &mut Report) {
 
     let scene_with = |objects: Vec<SceneObject>| SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -793,6 +960,9 @@ fn drive_animation_refusals(report: &mut Report) {
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects,
     };
     let rect = |id: &str| {
@@ -1132,6 +1302,7 @@ fn drive_authoring_refusals(report: &mut Report) {
 
     let empty_scene = || SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -1152,6 +1323,9 @@ fn drive_authoring_refusals(report: &mut Report) {
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects: Vec::new(),
     };
 
@@ -1305,6 +1479,35 @@ fn drive_media_refusals(report: &mut Report) {
                 })
             ),
             "an engine lacking the negotiated codec was not refused as MediaCodecNotOffered",
+        ),
+    );
+    // 2.15: the transport refuses a Program command that names no operator, or one the
+    // rules refuse, before the engine sees it. Driven through a real server and client.
+    report.record(
+        PLANE,
+        "OperatorRequired and OperatorNameInvalid are produced for a Program command with no acceptable operator",
+        expect(
+            operator_refusals_are_produced(),
+            "a Program command with no operator, or a bad name, was not refused as OperatorRequired or OperatorNameInvalid",
+        ),
+    );
+    // 3.24: at the last load level a headless render is refused by name with a retry hint.
+    report.record(
+        PLANE,
+        "LoadShed is produced for a headless render while the engine sheds load",
+        expect(
+            load_shed_is_produced(),
+            "a render at the last load level was not refused as LoadShed",
+        ),
+    );
+    // 12.10: a command aimed at a channel or a layer the engine does not have is refused by
+    // name before the engine sees it. Driven through a real server and client.
+    report.record(
+        PLANE,
+        "ChannelNotSupported and LayerNotSupported are produced for a command aimed at another channel or layer",
+        expect(
+            target_refusals_are_produced(),
+            "a command aimed at another channel or layer was not refused as ChannelNotSupported or LayerNotSupported",
         ),
     );
     // 5.7: the request-to-scope table refuses an Editor credential's take.
@@ -1670,6 +1873,9 @@ fn drive_material_refusals(report: &mut Report) {
                     ],
                     in_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
                     out_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
                 },
                 compound_paths: None,
                 fill_enabled: false,
@@ -1678,6 +1884,7 @@ fn drive_material_refusals(report: &mut Report) {
                 trim_start: Some(140.0),
                 trim_end: None,
                 trim_offset: None,
+                contour_ids: None,
             },
         ));
     let found = gx_contracts::validate::validate_scene_document(
@@ -2018,6 +2225,131 @@ fn record_surface_limitations(report: &mut Report) {
     );
 }
 
+/// 2.15: one Program command with no operator, one with a name the rules refuse, one with a
+/// good name; only the first two are refused, each by its own name.
+fn operator_refusals_are_produced() -> bool {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    let mut engine = MockEngine::new();
+    engine.publish(
+        TakeId("audit".into()),
+        Revision(1),
+        ContentHash("a".repeat(64)),
+    );
+    let Ok(server) = gx_control_transport::Server::bind(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        None,
+        engine,
+    ) else {
+        return false;
+    };
+    let Ok(address) = server.local_addr() else {
+        return false;
+    };
+    server.serve_in_background();
+    let Ok(mut client) = gx_control_transport::Client::connect(address) else {
+        return false;
+    };
+    let take = || {
+        ClientRequest::Take(TakeRequest {
+            take_id: TakeId("audit".into()),
+            revision: Revision(1),
+            content_hash: Some(ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        })
+    };
+    let none = matches!(
+        client.handle(take()),
+        EngineReply::Refused(Refusal::OperatorRequired { .. })
+    );
+    client.set_operator_unchecked_for_test(Some(
+        "Bad
+Name"
+            .into(),
+    ));
+    let bad = matches!(
+        client.handle(take()),
+        EngineReply::Refused(Refusal::OperatorNameInvalid { .. })
+    );
+    client.set_operator_unchecked_for_test(Some("Audit Operator".into()));
+    let good = matches!(client.handle(take()), EngineReply::Taken(_));
+    none && bad && good
+}
+
+/// 3.24: a real engine forced to the last load level refuses a headless render by name.
+fn load_shed_is_produced() -> bool {
+    use gx_control_plane::render::RenderRequest;
+    let mut engine = gx_render_worker::Engine::new(
+        std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        gx_contracts::Locality::CoLocated,
+    );
+    engine.set_load_level_for_test(gx_render_worker::governor::Level::NonLiveRefused);
+    matches!(
+        gx_control_plane::EnginePeer::handle(
+            &mut engine,
+            ClientRequest::Render(RenderRequest {
+                take_id: TakeId("audit".into()),
+                revision: Revision(1),
+                content_hash: Some(ContentHash("a".repeat(64))),
+                frame: 0,
+            }),
+        ),
+        EngineReply::Refused(Refusal::LoadShed { .. })
+    )
+}
+
+/// 12.10: the same real server and client as the operator check, with a target set.
+fn target_refusals_are_produced() -> bool {
+    use gx_control_plane::message::OutputTarget;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    let mut engine = MockEngine::new();
+    engine.publish(
+        TakeId("audit".into()),
+        Revision(1),
+        ContentHash("a".repeat(64)),
+    );
+    let Ok(server) = gx_control_transport::Server::bind(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        None,
+        engine,
+    ) else {
+        return false;
+    };
+    let Ok(address) = server.local_addr() else {
+        return false;
+    };
+    server.serve_in_background();
+    let Ok(mut client) = gx_control_transport::Client::connect(address) else {
+        return false;
+    };
+    client.set_operator_unchecked_for_test(Some("Audit Operator".into()));
+    let take = || {
+        ClientRequest::Take(TakeRequest {
+            take_id: TakeId("audit".into()),
+            revision: Revision(1),
+            content_hash: Some(ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        })
+    };
+    client.set_target(Some(OutputTarget {
+        channel: "preview".into(),
+        layer: "main".into(),
+    }));
+    let channel = matches!(
+        client.handle(take()),
+        EngineReply::Refused(Refusal::ChannelNotSupported { .. })
+    );
+    client.set_target(Some(OutputTarget::program("bug")));
+    let layer = matches!(
+        client.handle(take()),
+        EngineReply::Refused(Refusal::LayerNotSupported { .. })
+    );
+    client.set_target(Some(OutputTarget::main()));
+    let good = matches!(client.handle(take()), EngineReply::Taken(_));
+    channel && layer && good
+}
+
 fn is_driven(variant: &str) -> bool {
     matches!(
         variant,
@@ -2052,6 +2384,11 @@ fn is_driven(variant: &str) -> bool {
             | "MediaTransportUnavailable"
             | "MediaCodecNotOffered"
             | "ScopeNotGranted"
+            | "OperatorRequired"
+            | "OperatorNameInvalid"
+            | "LoadShed"
+            | "ChannelNotSupported"
+            | "LayerNotSupported"
             | "StopRefusedProgramOnAir"
             | "AssetChunkOutOfOrder"
             | "AssetTransferAlreadyComplete"
@@ -2132,6 +2469,10 @@ fn is_driven(variant: &str) -> bool {
             | "FontInUse"
             | "ModuleHistoryEmpty"
             | "HistoryConflict"
+            | "HistoryStepUnknown"
+            | "SettingInvalid"
+            | "WorkspaceInvalid"
+            | "WorkspaceNewer"
             | "SceneNameEmpty"
             | "SceneIdInvalid"
             | "ProjectNameInvalid"
@@ -2142,6 +2483,7 @@ fn is_driven(variant: &str) -> bool {
             | "SceneIdBound"
             | "SceneSchemaUnsupported"
             | "SceneWorkingSpaceMismatch"
+            | "SceneColorDepthMismatch"
             | "ProjectSettingsInvalid"
             | "ShapeTrimInvalid"
             | "SceneHierarchyInvalid"
@@ -2158,6 +2500,30 @@ fn is_driven(variant: &str) -> bool {
 
 fn limitations() -> &'static [Limitation] {
     &[
+        Limitation {
+            variant: "CueIdInvalid",
+            reason: "a Cue ID is held by the show's cue table (`ids::CueTable`, 1.13) and proved by its contract tests; no EnginePeer route carries one until Playout's show uses the table (12.13, 12.15)",
+        },
+        Limitation {
+            variant: "CueIdDuplicate",
+            reason: "the cue table refuses it (1.13, contract tests); no EnginePeer route carries a Cue ID yet",
+        },
+        Limitation {
+            variant: "CueIdLockedOnAir",
+            reason: "the cue table refuses it (1.13, contract tests); Playout marks a cue on air in a later row (12.13)",
+        },
+        Limitation {
+            variant: "UnknownCueId",
+            reason: "the cue table refuses it (1.13, contract tests); no EnginePeer route carries a Cue ID yet",
+        },
+        Limitation {
+            variant: "CuePlanStale",
+            reason: "the cue table refuses a stale or edited bulk plan (12.15, contract tests); no EnginePeer route carries a Cue ID plan yet",
+        },
+        Limitation {
+            variant: "SceneLabelInvalid",
+            reason: "the Scene ID label is edited by `setSceneLabel` and checked with the scene (contract tests); the audit's scene edits do not drive it",
+        },
         Limitation {
             variant: "UnsupportedPathGradient",
             reason: "since 3.17 and 3.18 every drawn path and text paint draws gradients; only brush paint strokes refuse one, and brush paint objects are refused as a kind first",

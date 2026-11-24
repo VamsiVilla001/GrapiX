@@ -1,0 +1,17 @@
+[package]
+name = "gx-workspace-store"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The workspace store (2.29): saved panel arrangements for the Editor and Playout as versioned, atomic files."
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-fs = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+
+[lib]
+name = "gx_workspace_store"
+path = "src/lib.rs"

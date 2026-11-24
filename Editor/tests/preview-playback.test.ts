@@ -48,7 +48,7 @@ function documentWithChannels(): SceneDocument {
     id: "preview",
     name: "Preview",
     version: 1,
-    workingColorSpace: "srgb",
+    workingColorSpace: "srgb", colorDepth: "32",
     canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
     timeline: {
       durationFrames: 100 as unknown as bigint,
@@ -70,14 +70,14 @@ function documentWithChannels(): SceneDocument {
           ],
         },
       ],
-      phases: [],
+      phases: [], pathChannels: [],
     },
     dataContext: {},
     assets: [],
     fonts: [],
     materials: [],
     controls: [],
-    textStyles: [],
+    textStyles: [], pathLinks: [], guides: [],
     objects: [card],
   } as SceneDocument;
 }

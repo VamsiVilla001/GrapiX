@@ -1,0 +1,47 @@
+{
+  "state": {
+    "decision": "What the render engine should do when its recovery journal was written before a scene schema change and no longer restores.",
+    "what_happens_today": "The engine's recovery journal (schema 3, unchanged) records, per take, the published revision and its content hash (the pin), plus the prepared scene documents, what is on Program and what is cued. On start the engine restores it and checks that each prepared scene document's content hash equals its pin. The content hash is the hash of the JSON form of the parsed scene document struct. On 22 Nov 2026 the scene schema went from 3 to 4, adding a colorDepth field (8, 16 or 32 bits per channel). A scene file without the field reads as 32, which is what older files rendered in; new scenes always write it. The operator's own journal, written 19 Nov, holds two prepared scenes of schema 3 with no colorDepth. Re-serialising them now adds colorDepth 32, so their hash no longer equals the pin and the engine exits with code 1 and the message 'cannot restore recovery journal: invalid recovery journal state: prepared scene legacy/1 does not hash to its published pin'. The operator must move the file aside by hand; this had to be done once before, on 18 Nov, for a journal of an older journal schema (kept as recovery.json.schema1-20261003.bak). Nothing was lost by the failure itself, and the journal file was not touched.",
+    "why_a_journal_exists": "GrapiX is a broadcast graphics engine. The journal lets a restarted engine come back with the same published graphics, Program and cue after a crash, including during a live show.",
+    "constraints": "Windows only. A published pin names content by hash; take pages, the asset plane and packages refer to it. The engine must never silently drop what is on Program or cued. Scene schema changes will happen again.",
+    "option_A": "Stamp the journal with the scene schema it was written under. On start, a journal written under an older scene schema is refused by its own plain message that names the file and says to move it aside or run with an explicit discard flag. The engine still does not start until the operator acts.",
+    "option_B": "Keep old hashes stable: do not write a defaulted field into the hashed JSON (omit colorDepth when it is 32, the value an absent field reads as), so a schema 3 document hashes exactly as before and the old journal restores with no migration. A new scene declaring 32 bits would also omit the field. Each future additive field would need the same treatment.",
+    "option_C": "Migrate on load: for a prepared scene written under an older scene schema, recompute its content hash under the current rules and rewrite the published pin to it. The pins change; anything that referred to the old hash by value no longer matches.",
+    "option_D": "If a journal cannot be restored, move it aside automatically to a dated .bak file, start with an empty state, and log it prominently. The engine always starts. What was on Program and cued before the crash is not restored.",
+    "option_E": "Option A, plus an explicit discard action the operator chooses on purpose (a command-line flag now, a button in the Editor or Playout later) that moves the journal aside to a dated .bak and starts empty. Without the action the engine refuses; with it, nothing is silently lost.",
+    "facts_checked": "The operator's journal and the failing check were read and reproduced on 23 Nov 2026: schema 3 journal, two prepared scenes with document version 3 and no colorDepth. Two engine-host tests that had read this real journal now use a scratch journal; they pass."
+  },
+  "questions": {
+    "best_option": {
+      "type": "choice",
+      "instructions": "Which option should GrapiX adopt for a recovery journal that was written before a scene schema change and no longer restores?",
+      "criteria": {
+        "A": "Option A: refuse by a plain versioned message; the operator moves the file aside.",
+        "B": "Option B: keep old hashes stable by not hashing a defaulted field.",
+        "C": "Option C: migrate on load and rewrite the pins.",
+        "D": "Option D: quarantine automatically and always start empty.",
+        "E": "Option E: refuse by default, with an explicit discard action the operator chooses."
+      }
+    },
+    "silent_discard_acceptable": {
+      "type": "noul",
+      "instructions": "Is it acceptable for a broadcast engine to move an unrestorable recovery journal aside by itself and start empty, without the operator choosing that?",
+      "criteria": {"true": "Yes, always starting matters more than keeping the old Program and cue state.", "false": "No, losing Program and cue state must be the operator's choice."}
+    },
+    "repin_safe": {
+      "type": "noul",
+      "instructions": "Is it safe to rewrite the published pins (content hashes) of old scenes on load, given that take pages, the asset plane and packages refer to content by hash?",
+      "criteria": {"true": "Yes, rewriting a pin cannot orphan anything that refers to the old hash.", "false": "No, rewriting a pin can orphan references to the old hash."}
+    },
+    "omit_default_sustainable": {
+      "type": "noul",
+      "instructions": "Is leaving a defaulted field out of the hashed JSON a sustainable way to keep old content hashes stable across future additive schema changes?",
+      "criteria": {"true": "Yes, it scales to future fields without surprises.", "false": "No, it needs special handling for every new field and makes the stored form ambiguous."}
+    },
+    "needs_operator_action_today": {
+      "type": "noul",
+      "instructions": "Is requiring the operator to act (move the file aside or pass a discard flag) after a schema upgrade acceptable for this product at this stage?",
+      "criteria": {"true": "Yes, an explicit upgrade step is acceptable.", "false": "No, a schema upgrade must never need a manual step."}
+    }
+  }
+}

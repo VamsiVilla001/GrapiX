@@ -26,6 +26,7 @@
 use std::net::SocketAddr;
 use std::sync::Mutex;
 
+use gx_contracts::auth::OperatorName;
 use gx_contracts::Refusal;
 use gx_contracts::{ContentHash, Revision, TakeId};
 use gx_control_plane::intent::{
@@ -94,13 +95,86 @@ impl PlayoutError {
     }
 }
 
-/// The live connection, or nothing.
+/// The live connection, or nothing, and the person operating it.
 ///
 /// Held in a `Mutex` because Tauri commands run on a thread pool and the
 /// control plane is ordered: serialising requests here is what keeps the
 /// sequence numbers the transport assigns monotonic per connection.
+///
+/// The operator (2.15) is held beside the client, not inside it, so a person can sign in
+/// before the engine is reachable and stay signed in across a reconnect. Every Program
+/// command is sent for them; with nobody signed in it is refused before it is sent.
 #[derive(Default)]
-pub struct Connection(Mutex<Option<Client>>);
+pub struct Connection {
+    client: Mutex<Option<Client>>,
+    operator: Mutex<Option<OperatorName>>,
+}
+
+/// Who is signed in to Playout (2.15).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSession {
+    /// The signed-in person, as the engine will be told; `None` when nobody is.
+    pub name: Option<String>,
+}
+
+impl Connection {
+    fn operator(&self) -> Option<OperatorName> {
+        self.operator
+            .lock()
+            .expect("operator mutex poisoned")
+            .clone()
+    }
+}
+
+/// Sign `name` in as the person operating Playout. The name is judged by the same rules the
+/// engine applies (`OperatorName`), so a name the engine would refuse is refused here, naming
+/// the rule. Program commands sent from now on carry it.
+pub fn sign_in(state: &Connection, name: &str) -> Result<OperatorSession, PlayoutError> {
+    let parsed = OperatorName::parse(name).map_err(|fault| {
+        PlayoutError::refused(Refusal::OperatorNameInvalid {
+            request: "signIn".to_owned(),
+            fault,
+        })
+    });
+    let parsed = match parsed {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::info!(event = "operator.sign_in", result = "refused", detail = %error);
+            return Err(error);
+        }
+    };
+    *state.operator.lock().expect("operator mutex poisoned") = Some(parsed.clone());
+    tracing::info!(
+        event = "operator.sign_in",
+        result = "signed_in",
+        operator = parsed.as_str()
+    );
+    Ok(OperatorSession {
+        name: Some(parsed.to_string()),
+    })
+}
+
+/// Sign out: the next Program command is refused, by name, until someone signs in.
+pub fn sign_out(state: &Connection) -> OperatorSession {
+    let was = state
+        .operator
+        .lock()
+        .expect("operator mutex poisoned")
+        .take();
+    tracing::info!(
+        event = "operator.sign_out",
+        operator = was.as_ref().map(OperatorName::as_str),
+    );
+    OperatorSession { name: None }
+}
+
+/// Who is signed in.
+pub fn operator(state: &Connection) -> OperatorSession {
+    OperatorSession {
+        name: state.operator().map(|name| name.to_string()),
+    }
+}
 
 /// What the operator surface needs after every command.
 ///
@@ -182,9 +256,12 @@ fn connect_unlogged(
         detail: error.to_string(),
     })?;
 
-    let mut held = state.0.lock().expect("connection mutex poisoned");
+    let mut held = state.client.lock().expect("connection mutex poisoned");
     *held = Some(client);
     let client = held.as_mut().expect("just stored");
+    // Whoever was signed in stays signed in: the operator is held beside the client and every
+    // Program command is sent for them (`with_program_client`), so a new connection needs
+    // nothing done to it (2.15).
     read_status(client)
 }
 
@@ -246,9 +323,28 @@ fn with_client<T>(
     state: &Connection,
     action: impl FnOnce(&mut Client) -> Result<T, PlayoutError>,
 ) -> Result<T, PlayoutError> {
-    let mut held = state.0.lock().expect("connection mutex poisoned");
+    let mut held = state.client.lock().expect("connection mutex poisoned");
     let client = held.as_mut().ok_or(PlayoutError::NotConnected)?;
     action(client)
+}
+
+/// The one way a Program command is sent (2.15): for the signed-in person, or not at all.
+/// With nobody signed in the command is refused here, by the name the engine uses
+/// (`OperatorRequired`), and nothing is sent; otherwise the client sends it carrying them.
+fn with_program_client<T>(
+    state: &Connection,
+    request: &'static str,
+    action: impl FnOnce(&mut Client) -> Result<T, PlayoutError>,
+) -> Result<T, PlayoutError> {
+    with_client(state, |client| {
+        let operator = state.operator().ok_or_else(|| {
+            PlayoutError::refused(Refusal::OperatorRequired {
+                request: request.to_owned(),
+            })
+        })?;
+        client.set_operator(Some(&operator));
+        action(client)
+    })
 }
 
 /// Current status and the clock indicator derived from it.
@@ -298,7 +394,7 @@ pub fn cue(
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
     let note = (take_id.clone(), content_hash.clone(), at);
-    let result = with_client(state, |client| {
+    let result = with_program_client(state, "cue", |client| {
         committed(
             client.handle(ClientRequest::Cue(CueRequest {
                 take_id,
@@ -329,7 +425,7 @@ pub fn take(
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
     let note = (take_id.clone(), content_hash.clone(), at);
-    let result = with_client(state, |client| {
+    let result = with_program_client(state, "take", |client| {
         committed(
             client.handle(ClientRequest::Take(TakeRequest {
                 take_id,
@@ -353,7 +449,7 @@ pub fn take(
 
 /// Clear Program.
 pub fn clear(state: &Connection, at: TakeAt) -> Result<TakeCommitted, PlayoutError> {
-    let result = with_client(state, |client| {
+    let result = with_program_client(state, "clear", |client| {
         committed(
             client.handle(ClientRequest::Clear(ClearRequest { at })),
             "a clear commitment",
@@ -376,7 +472,7 @@ pub fn phase(
     at: TakeAt,
 ) -> Result<PhaseCommitted, PlayoutError> {
     let name = phase.clone();
-    let result = with_client(state, |client| {
+    let result = with_program_client(state, "phase", |client| {
         match client.handle(ClientRequest::Phase(PhaseRequest { phase, at })) {
             EngineReply::PhaseCommitted(committed) => Ok(committed),
             EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),
@@ -430,7 +526,7 @@ pub fn configure_output(
     accept_free_run: bool,
 ) -> Result<OutputState, PlayoutError> {
     let requested = (adapter.clone(), live, accept_free_run);
-    let result = with_client(state, |client| {
+    let result = with_program_client(state, "configureOutput", |client| {
         match client.handle(ClientRequest::ConfigureOutput(OutputConfig {
             adapter,
             live,
@@ -555,6 +651,25 @@ fn cmd_configure_output(
     configure_output(&state, adapter, live, accept_free_run)
 }
 
+/// 2.15: sign in as the person operating Playout.
+#[tauri::command]
+fn cmd_sign_in(
+    state: tauri::State<'_, Connection>,
+    name: String,
+) -> Result<OperatorSession, PlayoutError> {
+    sign_in(&state, &name)
+}
+
+#[tauri::command]
+fn cmd_sign_out(state: tauri::State<'_, Connection>) -> OperatorSession {
+    sign_out(&state)
+}
+
+#[tauri::command]
+fn cmd_operator(state: tauri::State<'_, Connection>) -> OperatorSession {
+    operator(&state)
+}
+
 #[tauri::command]
 fn cmd_default_endpoint() -> &'static str {
     DEFAULT_CONTROL_ENDPOINT
@@ -598,6 +713,9 @@ pub fn run() {
             cmd_clear,
             cmd_phase,
             cmd_configure_output,
+            cmd_sign_in,
+            cmd_sign_out,
+            cmd_operator,
             cmd_default_endpoint,
         ]))
         .build(tauri::generate_context!());
@@ -678,12 +796,26 @@ mod tests {
 
     // --- 2.12: the operator's commands are on record -------------------------
 
+    /// Tests that capture what the shell logs, and tests that send commands (which log),
+    /// take this one at a time. `tracing` registers each event's call site once per
+    /// process and caches whether anyone is listening, so a command sent in one test while
+    /// another is capturing can make the capture lose the event. Serial tests cannot race
+    /// (the control transport's own tests do the same).
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn logged(label: &str, body: impl FnOnce()) -> Vec<serde_json::Value> {
         use tracing_subscriber::layer::SubscriberExt;
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
+        let _alone = serial();
         let dir = std::env::temp_dir().join(format!(
             "gx-playout-log-{label}-{}-{nanos}",
             std::process::id()
@@ -766,6 +898,7 @@ mod tests {
         let records = logged("committed", || {
             let state = Connection::default();
             connect(&state, &address.to_string(), None).expect("connected");
+            sign_in(&state, "Test Operator").expect("signed in");
             take(
                 &state,
                 TakeId("scorebug".into()),
@@ -805,6 +938,157 @@ mod tests {
         assert_eq!(poll["level"], "debug");
     }
 
+    fn serve_mock() -> SocketAddr {
+        let mut engine = gx_mock_engine::MockEngine::new();
+        engine.publish(
+            TakeId("scorebug".into()),
+            Revision(2),
+            ContentHash("c".repeat(64)),
+        );
+        let server =
+            gx_control_transport::Server::bind("127.0.0.1:0".parse().unwrap(), None, engine)
+                .unwrap();
+        let address = server.local_addr().unwrap();
+        std::thread::spawn(move || server.serve());
+        address
+    }
+
+    fn take_scorebug(state: &Connection) -> Result<TakeCommitted, PlayoutError> {
+        take(
+            state,
+            TakeId("scorebug".into()),
+            Revision(2),
+            Some(ContentHash("c".repeat(64))),
+            TakeAt::NextOpportunity,
+        )
+    }
+
+    /// 2.15: with nobody signed in, every Program command is refused by name before it is
+    /// sent; signing in releases it; signing out holds it again.
+    #[test]
+    fn every_program_command_is_refused_until_someone_signs_in_and_again_after_they_sign_out() {
+        let _alone = serial();
+        let address = serve_mock();
+        let state = Connection::default();
+        connect(&state, &address.to_string(), None).expect("connected");
+        let held = |error: PlayoutError, request: &str| {
+            assert!(
+                matches!(&error, PlayoutError::Refused { refusal: Refusal::OperatorRequired { request: r }, .. } if r == request),
+                "{request}: {error:?}"
+            );
+        };
+        held(
+            take_scorebug(&state).expect_err("nobody is signed in"),
+            "take",
+        );
+        held(
+            cue(
+                &state,
+                TakeId("scorebug".into()),
+                Revision(2),
+                None,
+                TakeAt::NextOpportunity,
+            )
+            .expect_err("nobody is signed in"),
+            "cue",
+        );
+        held(
+            clear(&state, TakeAt::NextOpportunity).expect_err("nobody"),
+            "clear",
+        );
+        held(
+            phase(&state, "hold".into(), TakeAt::NextOpportunity).expect_err("nobody"),
+            "phase",
+        );
+        held(
+            configure_output(&state, "null".into(), false, false).expect_err("nobody"),
+            "configureOutput",
+        );
+        // A read is not held.
+        assert!(status(&state).is_ok());
+
+        assert_eq!(
+            sign_in(&state, "  Ada Lovelace ").unwrap().name.as_deref(),
+            Some("Ada Lovelace")
+        );
+        assert_eq!(operator(&state).name.as_deref(), Some("Ada Lovelace"));
+        take_scorebug(&state).expect("a signed-in operator may take");
+
+        assert_eq!(sign_out(&state).name, None);
+        assert_eq!(operator(&state).name, None);
+        held(take_scorebug(&state).expect_err("signed out"), "take");
+    }
+
+    #[test]
+    fn a_name_the_rules_refuse_is_refused_naming_the_rule_and_signs_no_one_in() {
+        let _alone = serial();
+        let state = Connection::default();
+        let error = sign_in(
+            &state,
+            "Ada
+Lovelace",
+        )
+        .expect_err("a line break is not a name");
+        assert!(
+            matches!(
+                &error,
+                PlayoutError::Refused {
+                    refusal: Refusal::OperatorNameInvalid {
+                        fault: gx_contracts::auth::OperatorNameFault::BadCharacter,
+                        ..
+                    },
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(operator(&state).name, None);
+        assert!(matches!(
+            sign_in(&state, "   ").expect_err("empty"),
+            PlayoutError::Refused {
+                refusal: Refusal::OperatorNameInvalid {
+                    fault: gx_contracts::auth::OperatorNameFault::Empty,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    /// A person can sign in before the engine is reachable, and a reconnect does not sign
+    /// them out: the command that follows still carries them.
+    #[test]
+    fn signing_in_before_connecting_and_reconnecting_keep_the_person() {
+        let _alone = serial();
+        let address = serve_mock();
+        let state = Connection::default();
+        sign_in(&state, "Ada Lovelace").expect("signed in with no engine");
+        connect(&state, &address.to_string(), None).expect("connected");
+        take_scorebug(&state).expect("the operator carried over the connect");
+        connect(&state, &address.to_string(), None).expect("connected again");
+        assert_eq!(operator(&state).name.as_deref(), Some("Ada Lovelace"));
+        clear(&state, TakeAt::NextOpportunity).expect("and over a second connection");
+    }
+
+    #[test]
+    fn signing_in_and_out_is_on_record_with_the_name_and_without_the_token() {
+        let records = logged("operator-sign-in", || {
+            let state = Connection::default();
+            sign_in(&state, "Ada Lovelace").unwrap();
+            let _ = sign_in(&state, "-bad");
+            sign_out(&state);
+        });
+        let signed_in = event(&records, "operator.sign_in", "signed_in");
+        assert_eq!(signed_in["fields"]["operator"], "Ada Lovelace");
+        let refused = event(&records, "operator.sign_in", "refused");
+        assert!(refused["fields"]["detail"].as_str().is_some(), "{refused}");
+        let out = records
+            .iter()
+            .find(|r| r["event"] == "operator.sign_out")
+            .expect("the sign-out is recorded");
+        assert_eq!(out["fields"]["operator"], "Ada Lovelace");
+    }
+
     #[test]
     fn an_absent_frame_is_next_opportunity_never_now() {
         assert_eq!(scheduled(None), TakeAt::NextOpportunity);
@@ -813,6 +1097,7 @@ mod tests {
 
     #[test]
     fn commanding_before_connecting_is_refused_rather_than_queued() {
+        let _alone = serial();
         let state = Connection::default();
         // A command with nowhere to go must say so. Silently queuing it would
         // mean an operator pressing take and getting no answer at all.
@@ -829,6 +1114,7 @@ mod tests {
 
     #[test]
     fn an_unparseable_endpoint_is_refused_before_any_socket_opens() {
+        let _alone = serial();
         let state = Connection::default();
         let error =
             connect(&state, "not-an-address", None).expect_err("a malformed endpoint cannot dial");

@@ -486,6 +486,7 @@ mod tests {
     fn scene() -> SceneDocument {
         SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
             id: "scene-1".into(),
             name: "Package test".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -514,6 +515,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: Vec::new(),
         }
     }

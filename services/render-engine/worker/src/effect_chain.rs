@@ -44,10 +44,15 @@ pub const GLOW_BRIGHT: u32 = 15;
 pub const GLOW_COMBINE: u32 = 16;
 pub const SHADOW_MAKE: u32 = 17;
 pub const SHADOW_COMBINE: u32 = 18;
+pub use crate::effects::MIX;
 
 /// Parameter slots the per-pixel coordinate kernels read the layer origin
 /// from: the layer-space position of texel (0, 0)'s corner.
-pub const ORIGIN_SLOT: usize = 28;
+pub const ORIGIN_SLOT: usize = 60;
+
+/// The parameter slot holding the project depth's level count (255 or
+/// 65535; 0 for 32-bit float, which stores nothing).
+pub const DEPTH_SLOT: usize = 62;
 
 /// Which GPU entry point runs a pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +70,8 @@ pub struct EffectContext {
     pub origin: [f64; 2],
     pub size: [f64; 2],
     pub space: WorkingColorSpace,
+    /// The project's colour depth: every effect pass stores its output at it.
+    pub depth: gx_contracts::color::ColorDepth,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +84,11 @@ enum Role {
     GlowCombine,
     ShadowMake,
     ShadowCombine,
+    /// 3.28: keeps the effect's input beside the stack (a fourth target), for a
+    /// mask reference to mix it back in.
+    SavePre,
+    /// 3.28: the effect's output where its masks cover, its input elsewhere.
+    Mix,
 }
 
 /// One pass: which effect it belongs to, what it does, and its packed
@@ -100,6 +112,17 @@ impl PlannedPass {
     /// A save pass writes the auxiliary target and leaves the current one.
     pub fn writes_aux(&self) -> bool {
         self.role == Role::Save
+    }
+
+    /// 3.28: writes the effect's saved input, the fourth target, and leaves the
+    /// current one.
+    pub fn writes_pre(&self) -> bool {
+        self.role == Role::SavePre
+    }
+
+    /// 3.28: reads the saved input and the effect's mask weights.
+    pub fn mixes(&self) -> bool {
+        self.role == Role::Mix
     }
 }
 
@@ -229,6 +252,11 @@ impl EffectPlan {
             })
         };
         for (i, instance) in effects.iter().enumerate() {
+            // 3.28: an effect with a mask reference is kept apart from its input.
+            let referenced = instance.mask_ids.as_ref().is_some_and(|ids| !ids.is_empty());
+            if referenced {
+                push(i, Role::SavePre);
+            }
             let blur = |push: &mut dyn FnMut(usize, Role), n: usize| {
                 for horizontal in [true, false] {
                     for index in 0..n {
@@ -256,6 +284,9 @@ impl EffectPlan {
                 }
                 _ => push(i, Role::Pixel),
             }
+            if referenced {
+                push(i, Role::Mix);
+            }
         }
         Self { passes }
     }
@@ -276,18 +307,75 @@ impl EffectPlan {
         height: usize,
         ctx: &EffectContext,
     ) -> Vec<WorkingRgba> {
+        self.run_with_weights(pixels, width, height, ctx, &[])
+    }
+
+    /// `run`, with each effect's mask weights (3.28): `weights[i]` is the
+    /// coverage, 0 to 1 per pixel, that limits effect `i`; an effect without
+    /// one acts everywhere.
+    pub fn run_with_weights(
+        &self,
+        pixels: &[WorkingRgba],
+        width: usize,
+        height: usize,
+        ctx: &EffectContext,
+        weights: &[Option<Vec<f32>>],
+    ) -> Vec<WorkingRgba> {
         let mut cur = pixels.to_vec();
         let mut aux = vec![WorkingRgba::transparent(); pixels.len()];
+        let mut pre = vec![WorkingRgba::transparent(); pixels.len()];
         for pass in &self.passes {
-            let out = run_pass(&pass.packed, &cur, &aux, width, height, ctx);
+            if pass.mixes() {
+                let w = weights.get(pass.effect).and_then(Option::as_ref);
+                let mut out = if matches!(pass.packed.kind, IDENTITY) {
+                    cur.clone()
+                } else {
+                    mix_pixels(&pre, &cur, w)
+                };
+                if !matches!(pass.packed.kind, IDENTITY) {
+                    for px in &mut out {
+                        *px = crate::blend::store_pixel(ctx.depth, *px);
+                    }
+                }
+                cur = out;
+                continue;
+            }
+            let mut out = run_pass(&pass.packed, &cur, &aux, width, height, ctx);
+            if !matches!(pass.packed.kind, IDENTITY | SAVE) {
+                for px in &mut out {
+                    *px = crate::blend::store_pixel(ctx.depth, *px);
+                }
+            }
             if pass.writes_aux() {
                 aux = out;
+            } else if pass.writes_pre() {
+                pre = out;
             } else {
                 cur = out;
             }
         }
         cur
     }
+}
+
+/// 3.28: `(1 - w) * input + w * output` on premultiplied RGBA, with `w` the
+/// mask weight; no weights is the effect everywhere.
+fn mix_pixels(pre: &[WorkingRgba], out: &[WorkingRgba], weights: Option<&Vec<f32>>) -> Vec<WorkingRgba> {
+    out.iter()
+        .zip(pre)
+        .enumerate()
+        .map(|(i, (e, o))| {
+            let w = weights.and_then(|w| w.get(i)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            // Exact at both ends: weight 0 is the input and weight 1 is the effect, bit for bit.
+            let mix = |input: f32, effect: f32| input * (1.0 - w) + effect * w;
+            finite(WorkingRgba {
+                r: mix(o.r, e.r),
+                g: mix(o.g, e.g),
+                b: mix(o.b, e.b),
+                a: mix(o.a, e.a),
+            })
+        })
+        .collect()
 }
 
 fn colour(c: Rgba, space: WorkingColorSpace) -> [f32; 4] {
@@ -304,6 +392,7 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
     let p = &mut out.params;
     p[ORIGIN_SLOT] = ctx.origin[0] as f32;
     p[ORIGIN_SLOT + 1] = ctx.origin[1] as f32;
+    p[DEPTH_SLOT] = ctx.depth.levels().map_or(0.0, |n| n as f32);
     let box_pass = |p: &mut [f32], radius: usize, repeat: bool, horizontal: bool| -> u32 {
         p[0] = radius as f32;
         p[1] = f32::from(u8::from(repeat));
@@ -380,11 +469,12 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
             IRIS_WIPE
         }
         (Role::Pixel, _) => {
-            // The colour effects pack themselves; keep the origin slots.
-            let origin = [p[ORIGIN_SLOT], p[ORIGIN_SLOT + 1]];
+            // The colour effects pack themselves; keep the origin and depth slots.
+            let (origin, depth) = ([p[ORIGIN_SLOT], p[ORIGIN_SLOT + 1]], p[DEPTH_SLOT]);
             out.pack(instance, ctx.space);
             out.params[ORIGIN_SLOT] = origin[0];
             out.params[ORIGIN_SLOT + 1] = origin[1];
+            out.params[DEPTH_SLOT] = depth;
             return;
         }
         (Role::Box { horizontal, index }, Effect::GaussianBlur(e)) => {
@@ -426,7 +516,8 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
                 DIRECTIONAL
             }
         }
-        (Role::Save, _) => SAVE,
+        (Role::Save, _) | (Role::SavePre, _) => SAVE,
+        (Role::Mix, _) => MIX,
         (Role::GlowBright, Effect::Glow(e)) => {
             p[0] = e.threshold as f32;
             GLOW_BRIGHT
@@ -818,6 +909,7 @@ mod tests {
             origin: [-(OFF as f64), -(OFF as f64)],
             size: [10.0, 10.0],
             space: WorkingColorSpace::LinearSrgb,
+            depth: gx_contracts::color::ColorDepth::Bits32,
         }
     }
 
@@ -845,6 +937,45 @@ mod tests {
 
     fn total(px: &[WorkingRgba]) -> f32 {
         px.iter().map(|p| p.a).sum()
+    }
+
+    #[test]
+    fn a_mask_reference_mixes_the_effect_with_its_input_by_the_weights() {
+        use gx_contracts::effect::{Fill, GaussianBlur};
+        let fill = || Effect::Fill(Fill { color: Rgba::srgb(0.0, 0.0, 1.0, 1.0), opacity: 1.0 });
+        let referenced = |effect: Effect| {
+            let mut instance = EffectInstance::new("e", effect);
+            instance.mask_ids = Some(vec!["m".into()]);
+            vec![instance]
+        };
+        let go = |effects: &[EffectInstance], weights: &[Option<Vec<f32>>]| {
+            let mut plan = EffectPlan::layout(effects, &[1]);
+            plan.pack(effects, &ctx());
+            plan.run_with_weights(&square(), N, N, &ctx(), weights)
+        };
+        let plain = run(fill());
+        // No weights given: the effect acts everywhere, as if it had no reference.
+        assert_eq!(go(&referenced(fill()), &[]), plain);
+        // Weight 1 everywhere is the effect, weight 0 everywhere is the input, and half is halfway.
+        let all = |w: f32| vec![Some(vec![w; N * N])];
+        assert_eq!(go(&referenced(fill()), &all(1.0)), plain);
+        assert_eq!(go(&referenced(fill()), &all(0.0)), square());
+        let half = go(&referenced(fill()), &all(0.5));
+        let (input, full) = (square()[at(2, 2)], plain[at(2, 2)]);
+        assert!((half[at(2, 2)].b - (input.b + full.b) / 2.0).abs() < 1e-6);
+        assert!((half[at(2, 2)].r - (input.r + full.r) / 2.0).abs() < 1e-6);
+        // A multi-pass effect (a blur) is mixed with the input from before its first pass.
+        let blur = || Effect::GaussianBlur(GaussianBlur { blurriness: 4.0, ..Default::default() });
+        assert_eq!(go(&referenced(blur()), &all(0.0)), square());
+        // The mix keeps alpha in 0 to 1, so a blur's last-bit overshoot may differ by that much and no more.
+        let (mixed, plain_blur) = (go(&referenced(blur()), &all(1.0)), run(blur()));
+        assert!(mixed.iter().zip(&plain_blur).all(|(m, p)| {
+            (m.r - p.r).abs() < 1e-6 && (m.g - p.g).abs() < 1e-6 && (m.b - p.b).abs() < 1e-6 && (m.a - p.a).abs() < 1e-6
+        }));
+        // An effect that is switched off does nothing, referenced or not.
+        let mut off = referenced(fill());
+        off[0].enabled = false;
+        assert_eq!(go(&off, &all(1.0)), square());
     }
 
     #[test]

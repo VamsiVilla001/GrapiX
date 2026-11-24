@@ -116,6 +116,7 @@ fn new_scene(specification: &str) -> Result<SceneDocument, EditorError> {
     }
     Ok(SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
         id: id.into(),
         name: name.into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -133,11 +134,17 @@ fn new_scene(specification: &str) -> Result<SceneDocument, EditorError> {
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects: Vec::new(),
     })
 }
 
 fn publish((engine, scene): (SocketAddr, SceneDocument)) -> Result<(), EditorError> {
+    // 2.24: an engine started with a token verifies a credential on the asset plane. A process that
+    // holds one for it (`GX_ASSET_CREDENTIAL`, made with the engine's secret, Author scope) sends it.
+    let _credential = gx_asset_plane::auth::enter_from_environment();
     match publish_scene(engine, scene).map_err(|error| match error {
         gx_asset_plane::PublishClientError::Connect(source) => {
             EditorError::Connect(source.to_string())
@@ -159,7 +166,8 @@ fn publish((engine, scene): (SocketAddr, SceneDocument)) -> Result<(), EditorErr
         }
         PublishReply::Refused(PublishRefusal::SceneRefused { cause })
         | PublishReply::Refused(PublishRefusal::PreparationRefused { cause })
-        | PublishReply::Refused(PublishRefusal::PackageRefused { cause }) => {
+        | PublishReply::Refused(PublishRefusal::PackageRefused { cause })
+        | PublishReply::Refused(PublishRefusal::AuthRefused { cause }) => {
             return Err(EditorError::PublishRefused(cause.to_string()))
         }
     }

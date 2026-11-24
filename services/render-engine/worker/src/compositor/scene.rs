@@ -27,6 +27,13 @@ pub struct SourceTrace {
     pub height: u32,
 }
 
+/// 11.112: a layer whose source is drawn again each frame, because its object
+/// animates a path.
+struct AnimatedSource {
+    object_index: usize,
+    plan: crate::layer_source::SourceRedraw,
+}
+
 struct MappedLayer {
     object_index: usize,
     origin: [f64; 2],
@@ -63,6 +70,10 @@ pub struct GpuScene {
     effect_contexts: Vec<crate::effect_chain::EffectContext>,
     sources: Vec<SourceTrace>,
     clear_frame: Arc<Frame>,
+    // 11.112: sources drawn again each frame, and what they are drawn with.
+    animated: Vec<AnimatedSource>,
+    draw: Option<crate::gpu::DrawHandle>,
+    texts: crate::text::PreparedTexts,
 }
 
 impl GpuScene {
@@ -78,6 +89,7 @@ impl GpuScene {
         let mut contexts = Vec::new();
         let mut layers = Vec::new();
         let mut sources = Vec::new();
+        let mut animated = Vec::new();
         // 3.19: clip groups become per-frame mattes.
         let clips = crate::clip::ClipPlan::of(doc);
         for index in PreparedScene::draw_order(doc) {
@@ -110,6 +122,15 @@ impl GpuScene {
                 scene.images(),
             )?;
             let (width, height) = (source.width, source.height);
+            if let Some(plan) = source.redraw.clone() {
+                animated.push(AnimatedSource { object_index: index, plan });
+            } else if crate::layer_source::animates_a_path(doc, &id) {
+                return Err(mapping_refusal(
+                    &id,
+                    &path,
+                    "an animated path needs its source drawn on the GPU every frame, and this one was not",
+                ));
+            }
             let route = match (source.drawn.is_some(), object) {
                 (true, SceneObject::Image(_)) => "gpu-image-fit-at-prepare",
                 (true, _) => "gpu-vello-coverage-at-prepare",
@@ -122,6 +143,7 @@ impl GpuScene {
                 origin,
                 size: [object.base().width, object.base().height],
                 space: doc.working_color_space,
+                depth: doc.color_depth,
             };
             let effects = (!instances.is_empty()).then(|| {
                 let mut plan = crate::effect_chain::EffectPlan::layout(instances, &iterations);
@@ -158,6 +180,15 @@ impl GpuScene {
                 matte,
                 clip: None,
                 track: None,
+                preserve: object.base().preserves_underlying_transparency(),
+                effect_weights: source
+                    .effect_weights
+                    .iter()
+                    .map(|w| match w {
+                        Some(crate::layer_source::EffectWeights::Gpu(texture)) => Some(texture.clone()),
+                        _ => None,
+                    })
+                    .collect(),
             });
             sources.push(SourceTrace {
                 object_id: id.clone(),
@@ -170,21 +201,54 @@ impl GpuScene {
             layers.push(MappedLayer {
                 object_index: index,
                 origin,
-                object_id: id,
+                object_id: id.clone(),
                 blend_mode,
                 matte,
             });
+            // 3.30 (Masking spec v2, 6.2): a track matte source is a matte
+            // whether or not it is seen, and it is also drawn like any layer
+            // when its own visibility says so. The matte layer above reads at
+            // the source's own opacity; this copy of it, drawn in the frame
+            // at its effective opacity (zero when hidden), shows it.
+            if matte
+                && clips.is_source.get(index) == Some(&true)
+                && clips.is_clip.get(index) != Some(&true)
+            {
+                let mut seen = inputs.last().expect("the matte was just pushed").clone();
+                seen.matte = false;
+                seen.state = layer_state(object.base().anchor, resolved, origin);
+                seen.state.seed = frame_seed(&id, blend_mode, 0);
+                inputs.push(seen);
+                let context = *contexts
+                    .last()
+                    .expect("the matte's context was just pushed");
+                contexts.push(context);
+                layers.push(MappedLayer {
+                    object_index: index,
+                    origin,
+                    object_id: id,
+                    blend_mode,
+                    matte: false,
+                });
+            }
         }
         // 3.19: each clipped layer reads its clip child's matte.
+        // A source's matte layer, not its drawn copy, is what clips and mattes read.
         let layer_of: std::collections::HashMap<usize, usize> = layers
             .iter()
             .enumerate()
+            .filter(|(_, layer)| layer.matte)
             .map(|(i, layer)| (layer.object_index, i))
             .collect();
         for (input, layer) in inputs.iter_mut().zip(&layers) {
             input.clip = clips.clip_of[layer.object_index].and_then(|c| layer_of.get(&c).copied());
-            input.track = clips.track_of[layer.object_index]
-                .and_then(|(source, mode)| Some((*layer_of.get(&source)?, mode)));
+            // 3.30 (spec 6.4): a matte reads its source BEFORE the source's own track matte, so the matte layer of a source takes none
+            // (its drawn copy and a plain layer do), and a source that is itself matted, or two layers matting each other, never recurse.
+            input.track = if layer.matte {
+                None
+            } else {
+                clips.track_of[layer.object_index].and_then(|(source, mode)| Some((*layer_of.get(&source)?, mode)))
+            };
         }
         let stage = Stage::new(
             doc.canvas.width,
@@ -192,8 +256,10 @@ impl GpuScene {
             StageOrigin { x: 0.0, y: 0.0 },
         )
         .map_err(|e| mapping_refusal(&doc.id, "canvas", &e.to_string()))?;
-        let compositor = PreparedCompositor::prepare(gpu, stage, doc.working_color_space, &inputs)
-            .map_err(compositor_refusal)?;
+        let mut compositor =
+            PreparedCompositor::prepare(gpu, stage, doc.working_color_space, &inputs)
+                .map_err(compositor_refusal)?;
+        compositor.set_depth(doc.color_depth);
         let ring = compositor.output_ring().map_err(compositor_refusal)?;
         let states = inputs.iter().map(|input| input.state).collect();
         let effects = inputs.iter().map(|input| input.effects.clone()).collect();
@@ -214,6 +280,9 @@ impl GpuScene {
             effect_contexts,
             sources,
             clear_frame,
+            animated,
+            draw: gpu.draw_handle(),
+            texts: scene.texts().clone(),
         })
     }
 
@@ -238,6 +307,22 @@ impl GpuScene {
                     &channel.object_id,
                     &channel.property,
                     value,
+                )?;
+            }
+        }
+        // 11.112: animated paths, by vertex id; a key held for a topology
+        // mismatch is the reference's answer too. Each animated source is drawn
+        // again, into the texture it was prepared with, before the frame is composed.
+        if !self.animated.is_empty() {
+            gx_contracts::path_anim::apply_path_channels(&mut self.evaluated, scene_frame)?;
+            let draw = self.draw.as_ref().ok_or(Refusal::TierTooLow { actual: gx_contracts::DeviceTier::T2 })?;
+            for animated in &self.animated {
+                crate::layer_source::redraw_layer_source(
+                    &mut self.evaluated,
+                    &self.texts,
+                    animated.object_index,
+                    draw,
+                    &animated.plan,
                 )?;
             }
         }

@@ -1,0 +1,44 @@
+{
+  "state": {
+    "decision": "What a click on a step in the Editor's Change history list should do to the undo and redo stacks.",
+    "what_exists_today": "GrapiX's Editor keeps, per open scene, a log of edit batches in the order they were first applied. Each entry is active or undone. Undo marks the latest active entry undone and pushes it on a redo stack; Redo reapplies the latest undone one. The scene is always the opened document with the active entries replayed in order, so a state is reached in one replay and a replay that fails is refused and changes nothing. Undo can also be scoped to one part of the app (Timeline, Inspector and so on), which undoes that part's latest step and leaves later steps of other parts applied; so undone entries can sit between applied ones. A new edit after an undo removes every undone entry (history forks). The log holds at most 200 steps; older ones are folded into the starting document.",
+    "what_is_being_built": "A list of those steps, oldest first, each naming what was done and which part of the app did it, with undone steps shown greyed. Clicking a step takes the scene to the state just after that step. A first line, 'Scene as opened', takes it back to before every listed step.",
+    "who_uses_it": "Broadcast graphics designers who know After Effects and Photoshop. After Effects has Edit > History: choosing an entry undoes back to it, then Undo keeps going further back and Redo comes forward. Photoshop's History panel works the same way in its current default mode. Ross XPression, the benchmark product, has no history list.",
+    "plan_row_text": "Edit > Change history lists the steps of the command log; clicking one takes the scene back or forward to it as one undoable move; each entry names the part of the app that made it.",
+    "option_A": "Navigation. A click on step K makes steps up to and including K applied and every later step undone, in one replay. It is exactly what pressing Undo or Redo the right number of times would give, done at once. The later steps stay in the list, greyed, so one click on the old step returns. Undo after a jump goes one step further back; Redo comes one step forward. The jump is not itself an entry. Steps before K that had been undone by a scoped undo become applied again, so the list always reads as 'everything above the line is applied'.",
+    "option_B": "The jump is recorded as its own step at the end of the list ('Went back to step K'). Undo right after it returns to where the author was. The list grows by one entry per jump and the steps it skipped are kept inside that entry, not shown as greyed steps.",
+    "option_C": "Navigation as in option A, but the first Undo after a jump reverts the jump instead of stepping further back, as old Photoshop did with Ctrl+Z.",
+    "constraints": "The history must stay deterministic and replayable. A refused replay must leave everything as it was. Undo and Redo buttons, the shortcut and the list must never disagree about what is applied. A new edit after going back still forks history and drops the greyed steps."
+  },
+  "questions": {
+    "best_option": {
+      "type": "choice",
+      "instructions": "Which behaviour should a click on a history step have in GrapiX's Editor?",
+      "criteria": {
+        "A": "Option A: navigation, the same as many undos or redos at once; the jump is not an entry.",
+        "B": "Option B: the jump is recorded as its own step that Undo reverts.",
+        "C": "Option C: navigation, but the first Undo after a jump reverts the jump."
+      }
+    },
+    "navigation_satisfies_row": {
+      "type": "noul",
+      "instructions": "The plan row says a click takes the scene to the step 'as one undoable move'. Under option A the jump happens in one replay and is reversed by one click on the old step or by Redo. Does option A satisfy that sentence?",
+      "criteria": {"true": "Yes, one atomic move that can be reversed in one action satisfies it.", "false": "No, the sentence requires that a single Undo reverts the jump."}
+    },
+    "undo_goes_further_back_expected": {
+      "type": "noul",
+      "instructions": "After jumping back in a history list, do designers who use After Effects and current Photoshop expect Undo to step one further back, not to return to where they were?",
+      "criteria": {"true": "Yes, they expect Undo to continue backwards.", "false": "No, they expect Undo to revert the jump."}
+    },
+    "reapply_scoped_undone_steps_ok": {
+      "type": "noul",
+      "instructions": "When the author clicks step K, is it acceptable that an earlier step which had been undone by a scoped undo becomes applied again, so that every step up to K is applied?",
+      "criteria": {"true": "Yes, 'the state just after step K' means every step up to K is applied.", "false": "No, earlier undone steps must stay undone."}
+    },
+    "jump_as_entry_clutters": {
+      "type": "noul",
+      "instructions": "Would recording every jump as its own entry make a 200-step history list harder to read and reason about?",
+      "criteria": {"true": "Yes, jump entries clutter the list and hide the skipped steps.", "false": "No, jump entries are clear and worth it."}
+    }
+  }
+}

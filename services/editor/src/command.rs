@@ -39,8 +39,8 @@ use gx_contracts::animation::validate_scene_animation;
 use gx_contracts::animation::{capture_motion_phase, KeyRef};
 use gx_contracts::command::{
     apply_edits, CommandOutcome, EditContext, EditEffect, EditorCommand, EditorModule,
-    HistoryDirection, PresetPhase, SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget,
-    SessionKey, SessionView,
+    HistoryDirection, HistoryStep, HistoryView, PresetPhase, SaveTarget, SceneEdit, SceneOrigin,
+    SceneSource, SceneTarget, SessionKey, SessionView,
 };
 use gx_contracts::control::TakePage;
 use gx_contracts::design_system::{
@@ -133,6 +133,9 @@ struct Session {
     /// Undone batches by `seq`, most recently undone last.
     redo: Vec<u64>,
     next_seq: u64,
+    /// Batches folded into `base` past `MAX_HISTORY`: the history list says how many steps it
+    /// no longer shows (11.82).
+    folded: u32,
     /// Edited since the last successful save, to a project or to a file. What
     /// a close refuses on.
     dirty: bool,
@@ -158,6 +161,7 @@ impl Session {
             log: Vec::new(),
             redo: Vec::new(),
             next_seq: 1,
+            folded: 0,
             dirty: false,
             project_dirty: false,
         }
@@ -217,8 +221,97 @@ impl Session {
             }
             self.base = folded;
             self.log.remove(0);
+            self.folded = self.folded.saturating_add(1);
         }
         self.mark_edited();
+    }
+
+    /// The change history as the list shows it (11.82), oldest step first.
+    fn history(&self) -> HistoryView {
+        HistoryView {
+            session: self.key,
+            steps: self
+                .log
+                .iter()
+                .map(|entry| HistoryStep {
+                    id: step_id(entry.seq),
+                    module: entry.module,
+                    edits: entry
+                        .edits
+                        .iter()
+                        .map(|edit| edit.name().to_owned())
+                        .collect(),
+                    about: entry.edits.first().and_then(about),
+                    applied: entry.active,
+                })
+                .collect(),
+            folded: self.folded,
+            limit: MAX_HISTORY as u32,
+        }
+    }
+
+    /// Take the session to the state just after `step`, or to the scene as opened when it is
+    /// absent (11.82): every entry up to the step applied and every later one undone, in one
+    /// replay. Returns whether anything changed. A replay that refuses puts every flag back.
+    fn go_to(&mut self, step: Option<u32>) -> Result<bool, Refusal> {
+        let applied = match step {
+            None => 0,
+            Some(step) => {
+                let index = self
+                    .log
+                    .iter()
+                    .position(|entry| step_id(entry.seq) == step)
+                    .ok_or(Refusal::HistoryStepUnknown {
+                        session: self.key,
+                        step,
+                    })?;
+                index + 1
+            }
+        };
+        let before: Vec<bool> = self.log.iter().map(|entry| entry.active).collect();
+        if before
+            .iter()
+            .enumerate()
+            .all(|(index, active)| *active == (index < applied))
+        {
+            return Ok(false);
+        }
+        // Named for what the author sees: it is a way back when any applied step is undone.
+        let direction = if before
+            .iter()
+            .enumerate()
+            .any(|(index, active)| *active && index >= applied)
+        {
+            HistoryDirection::Undo
+        } else {
+            HistoryDirection::Redo
+        };
+        for (index, entry) in self.log.iter_mut().enumerate() {
+            entry.active = index < applied;
+        }
+        match self.replay() {
+            Ok(document) => {
+                self.document = document;
+                // Redo takes the last seq first, so the step right after the target comes
+                // back first and the rest follow in the order they were made.
+                self.redo = self.log[applied..]
+                    .iter()
+                    .rev()
+                    .map(|entry| entry.seq)
+                    .collect();
+                Ok(true)
+            }
+            Err(refusal) => {
+                for (entry, active) in self.log.iter_mut().zip(before) {
+                    entry.active = active;
+                }
+                Err(Refusal::HistoryConflict {
+                    session: self.key,
+                    direction,
+                    detail: format!("[{}] {refusal}", refusal.code_name()),
+                })
+            }
+        }
     }
 
     /// The document with the active batches replayed over the base.
@@ -254,6 +347,34 @@ impl Session {
     }
 }
 
+/// A step's id on the wire. A session never reaches four thousand million batches.
+fn step_id(seq: u64) -> u32 {
+    u32::try_from(seq).unwrap_or(u32::MAX)
+}
+
+/// What a step's first edit was about, for the history list (11.82): only something a reader
+/// recognises, a name the author typed or the property that changed. Everything else is told
+/// by the edit's own kind.
+fn about(edit: &SceneEdit) -> Option<String> {
+    let text = match edit {
+        SceneEdit::CreateObject(p) => &p.name,
+        SceneEdit::CreateShape(p) => &p.name,
+        SceneEdit::RenameObject(p) => &p.name,
+        SceneEdit::SetSceneName(p) => &p.name,
+        SceneEdit::SetObjectField(p) => return Some(p.field.name().to_owned()),
+        SceneEdit::EditProperty(p) => &p.property,
+        SceneEdit::CreateKeyframe(p) => &p.property,
+        SceneEdit::UpdateKeyframe(p) => &p.property,
+        SceneEdit::MoveKeyframe(p) => &p.property,
+        SceneEdit::RemoveKeyframe(p) => &p.property,
+        SceneEdit::SetBinding(p) => &p.property,
+        SceneEdit::ApplyPreset(p) => &p.preset_id,
+        SceneEdit::ApplyTextStyle(p) => &p.style_id,
+        _ => return None,
+    };
+    (!text.is_empty()).then(|| text.clone())
+}
+
 fn apply_entry(document: &mut SceneDocument, entry: &LogEntry) -> Result<(), Refusal> {
     let context = EditContext {
         design_system: entry.design_system.as_ref(),
@@ -261,6 +382,15 @@ fn apply_entry(document: &mut SceneDocument, entry: &LogEntry) -> Result<(), Ref
         presets: entry.presets.as_deref(),
     };
     apply_edits(document, &entry.edits, &context).map(|_| ())
+}
+
+/// What [`Workspace::save_project_as`] leaves behind: the store the copy lives in, what the copy
+/// declares, and the scenes that were closed with the project it was made from.
+#[derive(Debug)]
+pub struct SavedProjectAs {
+    pub projects: Projects,
+    pub settings: gx_contracts::project::ProjectSettings,
+    pub closed_sessions: Vec<SessionKey>,
 }
 
 /// The open scenes, plus the project store when one is available.
@@ -273,6 +403,10 @@ pub struct Workspace {
     projects: Option<Projects>,
     sessions: Vec<Session>,
     next_key: u32,
+    /// What a scene made here is born with: the space and bits per channel the open project
+    /// declares, so saving it into that project is not refused for a mismatch the author never
+    /// chose. The shell sets it when a project opens; with none open it is the new-project default.
+    new_scene_settings: gx_contracts::project::ProjectSettings,
 }
 
 impl Workspace {
@@ -283,7 +417,119 @@ impl Workspace {
             projects,
             sessions: Vec::new(),
             next_key: 1,
+            new_scene_settings: gx_contracts::project::ProjectSettings::new_project(),
         }
+    }
+
+    /// Declare what the open project declares, for the scenes made from now on (a blank scene,
+    /// an imported SVG's depth). Called by the shell when a project opens.
+    pub fn set_new_scene_settings(&mut self, settings: gx_contracts::project::ProjectSettings) {
+        self.new_scene_settings = settings;
+    }
+
+    /// Switch to another project's store, or to none, the way closing one project and opening
+    /// another does in XPression, Viz or After Effects. Open scenes are closed with the project;
+    /// a scene with unsaved changes refuses by name and nothing is switched, so no work is lost
+    /// by choosing another project. Returns the sessions that were closed.
+    pub fn switch_project(
+        &mut self,
+        projects: Option<Projects>,
+    ) -> Result<Vec<SessionKey>, CommandError> {
+        self.require_no_unsaved()?;
+        let closed = self.sessions.iter().map(|s| s.key).collect();
+        self.sessions.clear();
+        self.projects = projects;
+        // Whatever the last project declared does not carry to the next; the shell declares it.
+        self.new_scene_settings = gx_contracts::project::ProjectSettings::new_project();
+        Ok(closed)
+    }
+
+    /// Refuse, by name, while any open scene has unsaved changes. Asked before a project is
+    /// created or opened, so a refused switch leaves nothing behind.
+    pub fn require_no_unsaved(&self) -> Result<(), CommandError> {
+        match self.sessions.iter().find(|s| s.dirty) {
+            Some(session) => Err(Refusal::SessionHasUnsavedChanges {
+                session: session.key,
+                name: session.document.name.clone(),
+            }
+            .into()),
+            None => Ok(()),
+        }
+    }
+
+    /// File > Save As (11.43): copy the open project `from` to `<parent>/<to>/<to>.gpx` and
+    /// switch to the copy, closing the open scenes the way a project switch does.
+    ///
+    /// The unsaved work of every scene that belongs to `from` is written into the copy and not
+    /// into `from`, which stays as it was last saved (the way Save As keeps the original file
+    /// untouched). Each of those scenes is held to the same revision check a save is: one whose
+    /// stored copy moved on since it was read refuses by name, so another writer's change is
+    /// never overwritten. A scene with unsaved work that is *not* stored in `from` (a new scene
+    /// never saved to a project, or one stored in another project) would be lost by the switch,
+    /// so it refuses by name instead. Everything is checked before anything is copied, and the
+    /// copy is made whole or not at all ([`Projects::save_copy`]).
+    pub fn save_project_as(
+        &mut self,
+        from: &str,
+        parent: &std::path::Path,
+        to: &str,
+    ) -> Result<SavedProjectAs, CommandError> {
+        let projects = self.projects()?.clone();
+        for session in &self.sessions {
+            let stored_in_from = session
+                .origin
+                .as_ref()
+                .is_some_and(|origin| origin.project == from);
+            if session.dirty && !stored_in_from {
+                return Err(Refusal::SessionHasUnsavedChanges {
+                    session: session.key,
+                    name: session.document.name.clone(),
+                }
+                .into());
+            }
+        }
+        // Held across the checks and the copy, so no writer lands between them.
+        let write_lock = projects.lock_scenes(from)?;
+        let settings = projects.settings(from)?;
+        let mut changed = Vec::new();
+        for session in self.sessions.iter().filter(|s| s.dirty) {
+            let Some(origin) = session.origin.as_ref() else {
+                continue;
+            };
+            require_scene_name(&session.document)?;
+            if !scene_exists(&projects, from, &origin.scene_id)? {
+                return Err(Refusal::SceneNotStored {
+                    project: origin.project.clone(),
+                    scene_id: origin.scene_id.clone(),
+                }
+                .into());
+            }
+            let read = session.document.revision.unwrap_or(Revision(0));
+            let current = projects
+                .stored_revision(from, &origin.scene_id)?
+                .unwrap_or(read);
+            let next = guarded(current, read)?;
+            let mut document = session.document.clone();
+            document.revision = Some(next);
+            changed.push(document);
+        }
+        let saved = projects.save_copy(from, parent, to, &changed)?;
+        drop(write_lock);
+        let closed_sessions = self.sessions.iter().map(|s| s.key).collect();
+        self.sessions.clear();
+        // The copy declares what the original declared, so the settings new scenes are born in
+        // are already the copy's.
+        self.projects = Some(saved.clone());
+        Ok(SavedProjectAs {
+            projects: saved,
+            settings,
+            closed_sessions,
+        })
+    }
+
+    /// Whether a project is open: with none, nothing can be stored.
+    pub fn has_project(&self) -> bool {
+        self.projects.is_some()
     }
 
     /// Carry out one command.
@@ -303,6 +549,7 @@ impl Workspace {
             EditorCommand::Redo(p) => {
                 self.step_history(p.session, HistoryDirection::Redo, p.module)
             }
+            EditorCommand::GoToHistoryStep(p) => self.go_to_history_step(p.session, p.step),
             EditorCommand::SaveScene(p) => self.save(p.session, p.to),
             EditorCommand::CreateProject(p) => self.create_project(p.project),
             EditorCommand::CreateScene(p) => self.create_scene(p.project, p.scene_id, p.name),
@@ -349,6 +596,68 @@ impl Workspace {
                     revision: Some(Revision(0)),
                 })
             }
+            EditorCommand::ImportAsset(p) => {
+                let from = std::path::Path::new(&p.from);
+                if !from.is_absolute() {
+                    return Err(Refusal::AssetFormatUnrecognised { file: p.from }.into());
+                }
+                let filed = self.projects()?.import_asset(
+                    &p.project,
+                    &p.folder,
+                    from,
+                    p.name.as_deref(),
+                    p.source.as_deref(),
+                )?;
+                use gx_contracts::import::{ImportEntry, ImportReport, ImportTier};
+                let path = filed.item.path.clone();
+                let report = ImportReport {
+                    // The format, in its own name: `png`, `mp4`, `glb`, `woff2`.
+                    source_format: path.rsplit('.').next().unwrap_or("").to_ascii_lowercase(),
+                    source_name: path.clone(),
+                    source_hash: filed.item.checksum.clone(),
+                    entries: vec![ImportEntry {
+                        source_id: path.clone(),
+                        source_name: path,
+                        tier: ImportTier::Native,
+                        object_id: None,
+                        substitutions: Vec::new(),
+                    }],
+                };
+                Ok(CommandOutcome {
+                    session: None,
+                    effects: vec![EditEffect::Imported { report }],
+                    revision: None,
+                })
+            }
+            EditorCommand::ImportFigma(p) => {
+                let outcome = import_figma_into_project(
+                    self.projects()?,
+                    &p.project,
+                    &p.scene_id,
+                    p.name.as_deref(),
+                    &p.source_name,
+                    FigmaSource {
+                        frame: p.frame.as_deref(),
+                        image_folder: p.image_folder.as_deref(),
+                        metadata: p.metadata.as_deref(),
+                    },
+                )?;
+                Ok(CommandOutcome {
+                    session: None,
+                    effects: vec![
+                        EditEffect::Stored {
+                            origin: SceneOrigin {
+                                project: p.project,
+                                scene_id: p.scene_id,
+                            },
+                        },
+                        EditEffect::Imported {
+                            report: outcome.report,
+                        },
+                    ],
+                    revision: Some(Revision(0)),
+                })
+            }
         }
     }
 
@@ -368,6 +677,12 @@ impl Workspace {
     /// One open session as the browser renders it.
     pub fn view(&self, session: SessionKey) -> Result<SessionView, CommandError> {
         Ok(self.session(session)?.view())
+    }
+
+    /// One open session's change history, oldest step first (11.82). A read: it changes
+    /// nothing.
+    pub fn history(&self, session: SessionKey) -> Result<HistoryView, CommandError> {
+        Ok(self.session(session)?.history())
     }
 
     fn projects(&self) -> Result<&Projects, CommandError> {
@@ -400,22 +715,24 @@ impl Workspace {
     /// divergent histories and no answer to which wins on save.
     fn open(&mut self, source: SceneSource) -> Result<CommandOutcome, CommandError> {
         let (document, origin, path) = match source {
-            SceneSource::New { id, name } => (
-                new_scene(
-                    &id,
-                    &name,
-                    gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
-                ),
-                None,
-                None,
-            ),
+            SceneSource::New { id, name } => {
+                // Born in what the open project declares (the way `create_scene` does), so
+                // saving it into that project is not refused for a space or depth nobody chose.
+                let settings = self.new_scene_settings;
+                let mut document = new_scene(&id, &name, settings.working_color_space);
+                document.color_depth = settings.color_depth;
+                (document, None, None)
+            }
             SceneSource::File { path } => (read_scene_file(&path)?, None, Some(path)),
             SceneSource::ImportSvg {
                 id,
                 source_name,
                 svg,
             } => {
-                let outcome = import_svg_document(&source_name, svg.as_bytes(), &id)?;
+                let mut outcome = import_svg_document(&source_name, svg.as_bytes(), &id)?;
+                // The depth is the project's, as a stored import's is; the space is not changed
+                // here, because the import converted its colours into the space it chose.
+                outcome.scene.color_depth = self.new_scene_settings.color_depth;
                 let key = self.open_document(outcome.scene, None, None);
                 return Ok(CommandOutcome {
                     session: Some(
@@ -693,6 +1010,24 @@ impl Workspace {
         })
     }
 
+    /// A click in the history list (11.82). Going to where the session already is answers the
+    /// session as it is and does not mark it edited.
+    fn go_to_history_step(
+        &mut self,
+        key: SessionKey,
+        step: Option<u32>,
+    ) -> Result<CommandOutcome, CommandError> {
+        let session = self.session_mut(key)?;
+        if session.go_to(step)? {
+            session.mark_edited();
+        }
+        Ok(CommandOutcome {
+            session: Some(session.view()),
+            effects: vec![EditEffect::None],
+            revision: None,
+        })
+    }
+
     fn save(&mut self, key: SessionKey, to: SaveTarget) -> Result<CommandOutcome, CommandError> {
         let index = self.index(key)?;
         let mut saved_revision = None;
@@ -766,6 +1101,65 @@ impl Workspace {
                 session.dirty = false;
                 EditEffect::None
             }
+            SaveTarget::NextVersion => {
+                let session = &self.sessions[index];
+                if let Some(origin) = session.origin.clone() {
+                    require_scene_name(&session.document)?;
+                    let projects = self.projects()?;
+                    // The scene list is read and the new scene written under one lock, so two
+                    // versions saved at once cannot be given the same number.
+                    let _write = projects.lock_scenes(&origin.project)?;
+                    let taken = projects.list_scenes(&origin.project)?;
+                    let (scene_id, number) = next_version_id(&origin.scene_id, |id| {
+                        taken.iter().any(|taken| taken == id)
+                    })
+                    .ok_or_else(|| Refusal::SceneAlreadyExists {
+                        project: origin.project.clone(),
+                        scene_id: origin.scene_id.clone(),
+                    })?;
+                    let mut document = session.document.clone();
+                    document.id = scene_id.clone();
+                    document.name = versioned_name(&document.name, number);
+                    // A new scene is unpublished: the revision belongs to the version it came from.
+                    document.revision = None;
+                    projects.write_scene(&origin.project, &document)?;
+                    // Only now does the session change, so a failed write leaves it as it was.
+                    let origin = SceneOrigin {
+                        project: origin.project,
+                        scene_id,
+                    };
+                    let session = &mut self.sessions[index];
+                    session.base = document.clone();
+                    session.document = document;
+                    session.log.clear();
+                    session.redo.clear();
+                    session.folded = 0;
+                    session.origin = Some(origin.clone());
+                    // The file the old version was saved to is not this version's.
+                    session.path = None;
+                    session.dirty = false;
+                    session.project_dirty = false;
+                    saved_revision = Some(Revision(0));
+                    EditEffect::Stored { origin }
+                } else if let Some(path) = session.path.clone() {
+                    let next = next_version_path(&path).ok_or_else(|| {
+                        CommandError::Store(EditorError::Io {
+                            path: PathBuf::from(&path),
+                            source: std::io::Error::new(
+                                std::io::ErrorKind::AlreadyExists,
+                                "every numbered version of this file is taken",
+                            ),
+                        })
+                    })?;
+                    write_scene_file(&next, &session.document)?;
+                    let session = &mut self.sessions[index];
+                    session.path = Some(next);
+                    session.dirty = false;
+                    EditEffect::None
+                } else {
+                    return Err(Refusal::SessionUnbound { session: key }.into());
+                }
+            }
         };
         Ok(CommandOutcome {
             session: Some(self.sessions[index].view()),
@@ -798,8 +1192,9 @@ impl Workspace {
     ) -> Result<CommandOutcome, CommandError> {
         let projects = self.projects()?;
         // 3.15: a scene composites in its project's declared space.
-        let space = projects.settings(&project)?.working_color_space;
-        let document = new_scene(&scene_id, name.trim(), space);
+        let settings = projects.settings(&project)?;
+        let mut document = new_scene(&scene_id, name.trim(), settings.working_color_space);
+        document.color_depth = settings.color_depth;
         require_scene_name(&document)?;
         let _write = projects.lock_scenes(&project)?;
         if scene_exists(projects, &project, &scene_id)? {
@@ -1103,11 +1498,137 @@ pub fn import_into_project(
         }
         .into());
     }
-    let mut outcome = import_svg_document(source_name, svg.as_bytes(), scene_id)?;
+    let outcome = import_svg_document(source_name, svg.as_bytes(), scene_id)?;
+    store_import(
+        projects,
+        project,
+        scene_id,
+        name,
+        declared,
+        outcome,
+        svg.as_bytes(),
+    )
+}
+
+/// Ingest one Figma frame, as an agent read it through Figma's MCP, into a stored project
+/// scene (18.2, `importFigma`). The same all-or-nothing rules as the SVG import: an existing
+/// id refuses, every refusal comes before the first write, and the retained source is the
+/// metadata text, adopted by content hash.
+/// What an agent handed to `scenes.ingest_figma`: exactly one of a full-fidelity frame and a
+/// structure-only `get_metadata` reply, and the folder its pictures are filed in.
+#[derive(Clone, Copy)]
+pub struct FigmaSource<'a> {
+    pub frame: Option<&'a gx_contracts::figma_frame::FigmaNode>,
+    pub image_folder: Option<&'a str>,
+    pub metadata: Option<&'a str>,
+}
+
+pub fn import_figma_into_project(
+    projects: &Projects,
+    project: &str,
+    scene_id: &str,
+    name: Option<&str>,
+    source_name: &str,
+    source: FigmaSource<'_>,
+) -> Result<crate::import::ImportOutcome, CommandError> {
+    let FigmaSource {
+        frame,
+        image_folder,
+        metadata,
+    } = source;
+    let declared = projects.settings(project)?.working_color_space;
+    if scene_exists(projects, project, scene_id)? {
+        return Err(Refusal::SceneAlreadyExists {
+            project: project.to_owned(),
+            scene_id: scene_id.to_owned(),
+        }
+        .into());
+    }
+    let refused = |detail: String| {
+        CommandError::Refused(Refusal::SceneParseFailed {
+            detail: format!("ingest of {source_name}: {detail}"),
+        })
+    };
+    // Exactly one source, and the bytes retained are the ones that were read.
+    let (outcome, retained) =
+        match (frame, metadata) {
+            (Some(frame), None) => {
+                // Pictures are looked up in Images/<folder>/ of the project: the folder named by
+                // the caller, else the root frame's own name made into one file-system name.
+                let folder = image_folder.map(str::to_owned).unwrap_or_else(|| {
+                    gx_contracts::platform::sanitize_filename(if frame.name.trim().is_empty() {
+                        &frame.id
+                    } else {
+                        &frame.name
+                    })
+                });
+                let find = |stem: &str| projects.find_image(project, &folder, stem).ok().flatten();
+                let find_font = |family: &str, style: &str| {
+                    projects.find_font(project, family, style).ok().flatten()
+                };
+                let lookup = crate::figma_rich::PictureLookup {
+                    folder: folder.clone(),
+                    find: &find,
+                    font: &find_font,
+                };
+                (
+                    crate::figma_rich::import_figma_frame_with(
+                        source_name,
+                        frame,
+                        scene_id,
+                        Some(&lookup),
+                    )
+                    .map_err(|e| refused(e.to_string()))?,
+                    crate::figma_rich::canonical_source(frame),
+                )
+            }
+            (None, Some(text)) => (
+                crate::figma::import_figma_metadata(source_name, text, scene_id)
+                    .map_err(|e| refused(e.to_string()))?,
+                text.to_owned(),
+            ),
+            _ => return Err(refused(
+                "give exactly one of frame (the full-fidelity route) and metadata (structure only)"
+                    .into(),
+            )),
+        };
+    let metadata = retained.as_str();
+    // The same strict reader the Editor opens a stored scene with: no ingest can produce a
+    // document the engine later refuses.
+    let bytes = serde_json::to_vec(&outcome.scene).map_err(|error| {
+        CommandError::Refused(Refusal::SceneParseFailed {
+            detail: error.to_string(),
+        })
+    })?;
+    parse_scene_document(&bytes).map_err(CommandError::Refused)?;
+    store_import(
+        projects,
+        project,
+        scene_id,
+        name,
+        declared,
+        outcome,
+        metadata.as_bytes(),
+    )
+}
+
+/// Name, check and write an imported scene, adopting its retained source (7.2).
+fn store_import(
+    projects: &Projects,
+    project: &str,
+    scene_id: &str,
+    name: Option<&str>,
+    declared: gx_contracts::color::WorkingColorSpace,
+    mut outcome: crate::import::ImportOutcome,
+    source_bytes: &[u8],
+) -> Result<crate::import::ImportOutcome, CommandError> {
     if let Some(name) = name {
         outcome.scene.name = name.trim().to_owned();
         require_scene_name(&outcome.scene)?;
     }
+    // Depth is a rounding setting, not an authoring difference, so an
+    // imported scene takes its project's; a colour space it must match.
+    outcome.scene.color_depth = projects.settings(project)?.color_depth;
     // Every refusal comes before the first write: a project in another
     // working space refuses here, so no source is adopted for a scene that
     // will never be stored (3.15).
@@ -1127,9 +1648,65 @@ pub fn import_into_project(
         .find(|item| item.checksum.is_some() && item.checksum == outcome.report.source_hash)
         .cloned()
         .expect("an import carries its source as an asset");
-    projects.adopt_asset(project, &source, svg.as_bytes())?;
+    projects.adopt_asset(project, &source, source_bytes)?;
     projects.write_scene(project, &outcome.scene)?;
     Ok(outcome)
+}
+
+/// The number a name carries at its end: `strap_v003` is `("strap", Some(3))` and `strap` is
+/// `("strap", None)`. `separator` is what stands before the `v` (`_` in an id, a space in a name).
+fn split_version(text: &str, separator: char) -> (&str, Option<u32>) {
+    if let Some(at) = text.rfind(separator) {
+        let rest = &text[at + separator.len_utf8()..];
+        if let Some(digits) = rest.strip_prefix('v') {
+            if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                if let Ok(number) = digits.parse::<u32>() {
+                    if number >= 1 && at > 0 {
+                        return (&text[..at], Some(number));
+                    }
+                }
+            }
+        }
+    }
+    (text, None)
+}
+
+/// The most numbered versions one scene or file can have.
+const MAX_VERSION: u32 = 9999;
+
+/// The id of the next version of `scene_id`, and its number (11.30): the number after the one it
+/// carries (2 when it carries none), moving on past any that `taken` names. `None` when every
+/// number up to [`MAX_VERSION`] is taken.
+fn next_version_id(scene_id: &str, taken: impl Fn(&str) -> bool) -> Option<(String, u32)> {
+    let (base, number) = split_version(scene_id, '_');
+    (number.map_or(2, |number| number + 1)..=MAX_VERSION)
+        .map(|number| (format!("{base}_v{number:03}"), number))
+        .find(|(id, _)| !taken(id))
+}
+
+/// A name numbered like its version: `Strap` and `Strap v007` become `Strap v008`.
+fn versioned_name(name: &str, number: u32) -> String {
+    let name = name.trim();
+    let (base, _) = split_version(name, ' ');
+    format!("{base} v{number:03}")
+}
+
+/// The scene file beside `path` for the next numbered version: `strap.json` gives
+/// `strap_v002.json`, `strap_v003.json` gives `strap_v004.json`, and a file that is there is passed
+/// over. `None` when the path has no file name or every number is taken.
+fn next_version_path(path: &str) -> Option<String> {
+    let path = std::path::Path::new(path);
+    let stem = path.file_stem()?.to_str()?;
+    let (base, number) = split_version(stem, '_');
+    (number.map_or(2, |number| number + 1)..=MAX_VERSION).find_map(|number| {
+        let mut name = format!("{base}_v{number:03}");
+        if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
+            name.push('.');
+            name.push_str(extension);
+        }
+        let candidate = path.with_file_name(name);
+        (!candidate.exists()).then(|| candidate.display().to_string())
+    })
 }
 
 fn require_scene_name(document: &SceneDocument) -> Result<(), CommandError> {
@@ -1180,9 +1757,9 @@ mod tests {
     use gx_contracts::animation::{KeyframeChannel, SceneEasing, SceneKeyframe};
     use gx_contracts::command::{
         CloseScene, ConfirmDesignSystem, CreateKeyframe, CreateObject, CreateProject, CreateScene,
-        DeclareControl, DeleteScene, DuplicateScene, EditScene, OpenScene, Redo, RenameObject,
-        SaveMotionPreset, SaveScene, SaveTakePage, SetBinding, SetObjectField, SetObjectLocked,
-        SetObjectVisible, SetSceneId, SetSceneName, Undo,
+        DeclareControl, DeleteScene, DuplicateScene, EditScene, GoToHistoryStep, OpenScene, Redo,
+        RenameObject, SaveMotionPreset, SaveScene, SaveTakePage, SetBinding, SetObjectField,
+        SetObjectLocked, SetObjectVisible, SetSceneId, SetSceneName, Undo,
     };
     use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue};
     use gx_contracts::object_edit::ObjectField;
@@ -1815,6 +2392,623 @@ mod tests {
         assert!(workspace.view(session).unwrap().document.objects.is_empty());
     }
 
+    // --- the change history list (11.82) -----------------------------------
+
+    fn go_to(session: SessionKey, step: Option<u32>) -> EditorCommand {
+        EditorCommand::GoToHistoryStep(GoToHistoryStep { session, step })
+    }
+
+    fn applied(workspace: &Workspace, session: SessionKey) -> Vec<(u32, bool)> {
+        workspace
+            .history(session)
+            .expect("the session is open")
+            .steps
+            .iter()
+            .map(|step| (step.id, step.applied))
+            .collect()
+    }
+
+    /// Four batches from three parts of the app, and the document's hash before any of them and
+    /// after each one.
+    fn four_steps(workspace: &mut Workspace, session: SessionKey) -> Vec<String> {
+        let batches = vec![
+            tagged(
+                session,
+                EditorModule::ObjectManager,
+                vec![create_rect("Card")],
+            ),
+            tagged(
+                session,
+                EditorModule::Inspector,
+                vec![set_field("rect-1", ObjectField::X(100.0))],
+            ),
+            tagged(
+                session,
+                EditorModule::ObjectManager,
+                vec![SceneEdit::SetObjectVisible(SetObjectVisible {
+                    object_id: "rect-1".into(),
+                    visible: false,
+                })],
+            ),
+            tagged(
+                session,
+                EditorModule::Inspector,
+                vec![set_field("rect-1", ObjectField::Y(50.0))],
+            ),
+        ];
+        let mut hashes = vec![content_hash(workspace, session)];
+        for batch in batches {
+            run(workspace, batch);
+            hashes.push(content_hash(workspace, session));
+        }
+        hashes
+    }
+
+    #[test]
+    fn the_history_lists_every_step_with_its_part_of_the_app_its_edits_and_what_it_was_about() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        assert_eq!(
+            workspace.history(session).unwrap(),
+            HistoryView {
+                session,
+                steps: Vec::new(),
+                folded: 0,
+                limit: MAX_HISTORY as u32,
+            },
+            "a scene just opened has no steps"
+        );
+        run(
+            &mut workspace,
+            tagged(
+                session,
+                EditorModule::ObjectManager,
+                vec![
+                    create_rect("Card"),
+                    set_field("rect-1", ObjectField::X(10.0)),
+                ],
+            ),
+        );
+        run(
+            &mut workspace,
+            tagged(
+                session,
+                EditorModule::Inspector,
+                vec![set_field("rect-1", ObjectField::Y(5.0))],
+            ),
+        );
+        run(
+            &mut workspace,
+            tagged(
+                session,
+                EditorModule::Timeline,
+                vec![SceneEdit::SetObjectLocked(SetObjectLocked {
+                    object_id: "rect-1".into(),
+                    locked: true,
+                })],
+            ),
+        );
+        run(&mut workspace, undo(session));
+        let step = |id, module, edits: &[&str], about: Option<&str>, applied| HistoryStep {
+            id,
+            module,
+            edits: edits.iter().map(|edit| (*edit).to_owned()).collect(),
+            about: about.map(str::to_owned),
+            applied,
+        };
+        assert_eq!(
+            workspace.history(session).unwrap().steps,
+            vec![
+                // A batch of two edits lists both, and is about its first.
+                step(
+                    1,
+                    EditorModule::ObjectManager,
+                    &["createObject", "setObjectField"],
+                    Some("Card"),
+                    true
+                ),
+                step(
+                    2,
+                    EditorModule::Inspector,
+                    &["setObjectField"],
+                    Some("y"),
+                    true
+                ),
+                // An edit that names nothing a reader knows says nothing, and an undone step
+                // stays listed.
+                step(3, EditorModule::Timeline, &["setObjectLocked"], None, false),
+            ]
+        );
+        assert!(matches!(
+            workspace.history(SessionKey(99)),
+            Err(CommandError::Refused(Refusal::SessionUnknown { .. }))
+        ));
+    }
+
+    #[test]
+    fn going_to_a_step_gives_what_that_many_undos_give_and_redo_comes_forward_in_order() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        let hashes = four_steps(&mut workspace, session);
+
+        // Back two steps in one move.
+        let view = run(&mut workspace, go_to(session, Some(2)))
+            .session
+            .expect("a jump answers its session");
+        assert_eq!((view.undo_depth, view.redo_depth), (2, 2));
+        assert_eq!(content_hash(&workspace, session), hashes[2]);
+        assert_eq!(
+            applied(&workspace, session),
+            vec![(1, true), (2, true), (3, false), (4, false)],
+            "the later steps stay listed, undone"
+        );
+        // Redo comes forward one step at a time, in the order the steps were made.
+        run(&mut workspace, redo(session));
+        assert_eq!(content_hash(&workspace, session), hashes[3]);
+        run(&mut workspace, redo(session));
+        assert_eq!(content_hash(&workspace, session), hashes[4]);
+        assert!(matches!(
+            refusal(&mut workspace, redo(session)),
+            Refusal::HistoryEmpty { .. }
+        ));
+
+        // To the scene as opened: nothing is left to undo, and every step can be redone.
+        let view = run(&mut workspace, go_to(session, None)).session.unwrap();
+        assert_eq!((view.undo_depth, view.redo_depth), (0, 4));
+        assert_eq!(content_hash(&workspace, session), hashes[0]);
+        assert!(matches!(
+            refusal(&mut workspace, undo(session)),
+            Refusal::HistoryEmpty { .. }
+        ));
+        // Undo after a jump goes one further back, as it does after an undo.
+        run(&mut workspace, go_to(session, Some(3)));
+        assert_eq!(content_hash(&workspace, session), hashes[3]);
+        run(&mut workspace, undo(session));
+        assert_eq!(content_hash(&workspace, session), hashes[2]);
+        // Forward in one move, past a step Undo just took back.
+        run(&mut workspace, go_to(session, Some(4)));
+        assert_eq!(content_hash(&workspace, session), hashes[4]);
+        assert_eq!(workspace.view(session).unwrap().redo_depth, 0);
+    }
+
+    #[test]
+    fn going_to_a_step_applies_one_a_module_undo_had_skipped() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        let hashes = four_steps(&mut workspace, session);
+        let inspector_undo = || {
+            EditorCommand::Undo(Undo {
+                session,
+                module: Some(EditorModule::Inspector),
+            })
+        };
+        run(&mut workspace, inspector_undo());
+        run(&mut workspace, inspector_undo());
+        assert_eq!(
+            applied(&workspace, session),
+            vec![(1, true), (2, false), (3, true), (4, false)],
+            "the Inspector's two steps are undone around the Object Manager's"
+        );
+
+        run(&mut workspace, go_to(session, Some(3)));
+        assert_eq!(
+            applied(&workspace, session),
+            vec![(1, true), (2, true), (3, true), (4, false)],
+            "every step up to the one clicked is applied"
+        );
+        assert_eq!(content_hash(&workspace, session), hashes[3]);
+        run(&mut workspace, redo(session));
+        assert_eq!(content_hash(&workspace, session), hashes[4]);
+    }
+
+    #[test]
+    fn going_where_the_session_already_is_changes_nothing_and_does_not_mark_it_edited() {
+        let scratch = Scratch::new("history-noop");
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        run(&mut workspace, edit(session, vec![rename_scene("one")]));
+        run(&mut workspace, edit(session, vec![rename_scene("two")]));
+        run(
+            &mut workspace,
+            save(
+                session,
+                SaveTarget::File {
+                    path: scratch.file("a.json"),
+                },
+            ),
+        );
+        let saved = workspace.view(session).unwrap();
+        assert!(!saved.dirty);
+
+        let view = run(&mut workspace, go_to(session, Some(2)))
+            .session
+            .unwrap();
+        assert_eq!(
+            view, saved,
+            "the latest step is where the session already is"
+        );
+
+        let view = run(&mut workspace, go_to(session, Some(1)))
+            .session
+            .unwrap();
+        assert!(view.dirty, "a jump that changed the scene is unsaved work");
+        assert_eq!(view.document.name, "one");
+    }
+
+    #[test]
+    fn a_step_that_is_no_longer_listed_refuses_by_name_and_changes_nothing() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        run(&mut workspace, edit(session, vec![rename_scene("one")]));
+        run(&mut workspace, edit(session, vec![rename_scene("two")]));
+        run(&mut workspace, go_to(session, Some(1)));
+        // A new edit after going back forks the history: step 2 is gone for good.
+        run(&mut workspace, edit(session, vec![rename_scene("three")]));
+        assert_eq!(applied(&workspace, session), vec![(1, true), (3, true)]);
+        assert!(matches!(
+            refusal(&mut workspace, redo(session)),
+            Refusal::HistoryEmpty { .. }
+        ));
+
+        let before = workspace.view(session).unwrap();
+        assert_eq!(
+            refusal(&mut workspace, go_to(session, Some(2))),
+            Refusal::HistoryStepUnknown { session, step: 2 }
+        );
+        assert_eq!(
+            refusal(&mut workspace, go_to(session, Some(0))),
+            Refusal::HistoryStepUnknown { session, step: 0 }
+        );
+        assert_eq!(workspace.view(session).unwrap(), before);
+        assert!(matches!(
+            refusal(&mut workspace, go_to(SessionKey(99), None)),
+            Refusal::SessionUnknown { .. }
+        ));
+    }
+
+    #[test]
+    fn steps_past_the_limit_are_counted_and_can_no_longer_be_reached() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        for index in 0..MAX_HISTORY + 3 {
+            run(
+                &mut workspace,
+                edit(session, vec![rename_scene(&format!("edit {index}"))]),
+            );
+        }
+        let history = workspace.history(session).unwrap();
+        assert_eq!(history.steps.len(), MAX_HISTORY);
+        assert_eq!(
+            history.folded, 3,
+            "the three oldest are part of the scene as opened"
+        );
+        assert_eq!(history.steps[0].id, 4);
+        assert_eq!(
+            refusal(&mut workspace, go_to(session, Some(3))),
+            Refusal::HistoryStepUnknown { session, step: 3 }
+        );
+        // The scene as opened is now the scene after the folded steps.
+        run(&mut workspace, go_to(session, None));
+        assert_eq!(name_of(&workspace, session), "edit 2");
+    }
+
+    /// A replay that refuses is all or nothing. No command leaves a history whose first steps
+    /// cannot be replayed, so this breaks one by hand.
+    #[test]
+    fn a_jump_whose_replay_refuses_puts_every_step_back_and_names_the_direction() {
+        let broken = vec![SceneEdit::RenameObject(RenameObject {
+            object_id: "missing".into(),
+            name: "Nope".into(),
+        })];
+
+        // Forward: both steps undone, the first now impossible.
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        run(&mut workspace, edit(session, vec![rename_scene("one")]));
+        run(&mut workspace, edit(session, vec![rename_scene("two")]));
+        run(&mut workspace, go_to(session, None));
+        workspace.sessions[0].log[0].edits = broken.clone();
+        let before = workspace.view(session).unwrap();
+        let refused = refusal(&mut workspace, go_to(session, Some(2)));
+        assert!(
+            matches!(&refused, Refusal::HistoryConflict { session: key, direction: HistoryDirection::Redo, detail } if *key == session && detail.starts_with("[sceneObjectUnknown]")),
+            "{refused:?}"
+        );
+        assert_eq!(workspace.view(session).unwrap(), before);
+        assert_eq!(applied(&workspace, session), vec![(1, false), (2, false)]);
+        assert_eq!(workspace.sessions[0].redo, vec![2, 1]);
+
+        // Back: both steps applied, the first now impossible.
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        run(&mut workspace, edit(session, vec![rename_scene("one")]));
+        run(&mut workspace, edit(session, vec![rename_scene("two")]));
+        workspace.sessions[0].log[0].edits = broken;
+        let before = workspace.view(session).unwrap();
+        let refused = refusal(&mut workspace, go_to(session, Some(1)));
+        assert!(
+            matches!(
+                &refused,
+                Refusal::HistoryConflict {
+                    direction: HistoryDirection::Undo,
+                    ..
+                }
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(workspace.view(session).unwrap(), before);
+        assert_eq!(applied(&workspace, session), vec![(1, true), (2, true)]);
+        assert!(workspace.sessions[0].redo.is_empty());
+    }
+
+    // --- save as next version (11.30) ----------------------------------------
+
+    fn next_version(session: SessionKey) -> EditorCommand {
+        EditorCommand::SaveScene(SaveScene {
+            session,
+            to: SaveTarget::NextVersion,
+        })
+    }
+
+    fn stored_bytes(scratch: &Scratch, scene_id: &str) -> Vec<u8> {
+        std::fs::read(
+            scratch
+                .0
+                .join("projects")
+                .join("news")
+                .join("scenes")
+                .join(format!("{scene_id}.json")),
+        )
+        .unwrap_or_else(|error| panic!("scene {scene_id} is not stored: {error}"))
+    }
+
+    fn stored_ids(workspace: &Workspace) -> Vec<String> {
+        workspace
+            .projects()
+            .expect("a store")
+            .list_scenes("news")
+            .expect("the scenes list")
+    }
+
+    #[test]
+    fn splitting_a_number_off_an_id_a_name_and_a_file() {
+        assert_eq!(split_version("strap", '_'), ("strap", None));
+        assert_eq!(split_version("strap_v003", '_'), ("strap", Some(3)));
+        assert_eq!(split_version("strap_v2", '_'), ("strap", Some(2)));
+        assert_eq!(split_version("a_b_v010", '_'), ("a_b", Some(10)));
+        assert_eq!(split_version("Strap v007", ' '), ("Strap", Some(7)));
+        // Not numbers: no digits, a word, zero, a name that is only the number.
+        assert_eq!(split_version("strap_v", '_'), ("strap_v", None));
+        assert_eq!(split_version("strap_vx1", '_'), ("strap_vx1", None));
+        // `parse` would accept a sign; a version number is digits and nothing else.
+        assert_eq!(split_version("strap_v+3", '_'), ("strap_v+3", None));
+        assert_eq!(split_version("strap_v000", '_'), ("strap_v000", None));
+        assert_eq!(split_version("_v002", '_'), ("_v002", None));
+        assert_eq!(
+            split_version("Version v2 final", ' '),
+            ("Version v2 final", None)
+        );
+        assert_eq!(versioned_name("Strap", 2), "Strap v002");
+        assert_eq!(versioned_name("  Strap v007 ", 8), "Strap v008");
+        assert_eq!(versioned_name("Lower third", 12), "Lower third v012");
+    }
+
+    #[test]
+    fn the_next_version_id_follows_the_current_number_and_passes_over_those_taken() {
+        let none = |_: &str| false;
+        assert_eq!(
+            next_version_id("strap", none),
+            Some(("strap_v002".into(), 2))
+        );
+        assert_eq!(
+            next_version_id("strap_v003", none),
+            Some(("strap_v004".into(), 4))
+        );
+        // A number already taken is passed over, and a gap below the current one is not filled.
+        let taken = |id: &str| id == "strap_v002" || id == "strap_v004";
+        assert_eq!(
+            next_version_id("strap", taken),
+            Some(("strap_v003".into(), 3))
+        );
+        assert_eq!(
+            next_version_id("strap_v003", taken),
+            Some(("strap_v005".into(), 5))
+        );
+        // Past three digits the number simply grows; at the last number there is none left.
+        assert_eq!(
+            next_version_id("s_v999", none),
+            Some(("s_v1000".into(), 1000))
+        );
+        assert_eq!(next_version_id("s_v9999", none), None);
+        assert_eq!(next_version_id("s", |_| true), None);
+    }
+
+    #[test]
+    fn a_next_version_of_a_stored_scene_holds_the_unsaved_edits_and_leaves_the_old_one_untouched() {
+        let (scratch, mut workspace) = with_store("version-project");
+        let session = open_stored(&mut workspace, "b");
+        run(&mut workspace, edit(session, vec![create_rect("Card")]));
+        let before = stored_bytes(&scratch, "b");
+
+        let outcome = run(&mut workspace, next_version(session));
+        let view = outcome.session.expect("a save reports its session");
+        assert_eq!(view.document.id, "b_v002");
+        assert_eq!(view.document.name, "B v002");
+        assert_eq!(
+            view.origin,
+            Some(SceneOrigin {
+                project: "news".into(),
+                scene_id: "b_v002".into()
+            })
+        );
+        assert_eq!((view.dirty, view.project_dirty), (false, false));
+        assert_eq!(view.path, None);
+        assert_eq!(outcome.revision, Some(Revision(0)));
+        assert!(matches!(
+            outcome.effects.as_slice(),
+            [EditEffect::Stored { origin }] if origin.scene_id == "b_v002"
+        ));
+
+        // The old version is byte for byte what it was last saved as; the new one has the edit.
+        assert_eq!(stored_bytes(&scratch, "b"), before);
+        assert_eq!(stored_ids(&workspace), vec!["b", "b_v002"]);
+        let stored = stored_scene(&workspace, "b_v002");
+        assert_eq!(
+            (stored.id.as_str(), stored.name.as_str()),
+            ("b_v002", "B v002")
+        );
+        assert_eq!(stored.objects.len(), 1);
+        assert_eq!(stored.revision, None);
+        assert!(stored_scene(&workspace, "b").objects.is_empty());
+        assert_eq!(workspace.sessions[0].base, stored);
+    }
+
+    #[test]
+    fn the_new_version_starts_a_fresh_history_and_goes_on_from_its_own_number() {
+        let (scratch, mut workspace) = with_store("version-history");
+        let session = open_stored(&mut workspace, "b");
+        run(&mut workspace, edit(session, vec![create_rect("One")]));
+        run(&mut workspace, edit(session, vec![create_rect("Two")]));
+        run(&mut workspace, undo(session));
+        run(&mut workspace, next_version(session));
+        let view = workspace.view(session).unwrap();
+        assert_eq!((view.undo_depth, view.redo_depth), (0, 0));
+        assert!(workspace.history(session).unwrap().steps.is_empty());
+        assert!(matches!(
+            refusal(&mut workspace, undo(session)),
+            Refusal::HistoryEmpty { .. }
+        ));
+        // The scene is what was on screen when the version was saved, one rect, and can be edited on.
+        assert_eq!(view.document.objects.len(), 1);
+        run(
+            &mut workspace,
+            edit(session, vec![rename_scene("Third try")]),
+        );
+        assert!(workspace.view(session).unwrap().dirty);
+
+        // A save in place goes to the version, never back to the scene it came from, and it gives
+        // the version a revision of its own.
+        run(&mut workspace, save(session, SaveTarget::Origin));
+        assert_eq!(stored_scene(&workspace, "b_v002").name, "Third try");
+        assert_eq!(stored_scene(&workspace, "b").name, "B");
+        assert!(stored_scene(&workspace, "b_v002").revision.is_some());
+
+        // The next one numbers from this one, and its base is `b`, not `b_v002`.
+        run(&mut workspace, next_version(session));
+        assert_eq!(stored_ids(&workspace), vec!["b", "b_v002", "b_v003"]);
+        assert_eq!(stored_scene(&workspace, "b_v003").name, "Third try v003");
+        // A new version is unpublished: it does not carry the revision of the one it came from.
+        assert_eq!(stored_scene(&workspace, "b_v003").revision, None);
+        let _ = scratch;
+    }
+
+    #[test]
+    fn a_stored_scene_that_was_also_saved_to_a_file_does_not_keep_pointing_at_the_old_versions_file(
+    ) {
+        let (scratch, mut workspace) = with_store("version-path");
+        let session = open_stored(&mut workspace, "b");
+        let path = scratch.file("b.json");
+        run(
+            &mut workspace,
+            save(session, SaveTarget::File { path: path.clone() }),
+        );
+        assert_eq!(
+            workspace.view(session).unwrap().path.as_deref(),
+            Some(path.as_str())
+        );
+        let view = run(&mut workspace, next_version(session)).session.unwrap();
+        assert_eq!(
+            view.path, None,
+            "the new version was not saved to the old version's file"
+        );
+        assert!(std::path::Path::new(&path).exists());
+    }
+
+    #[test]
+    fn a_number_already_stored_is_passed_over_by_the_next_version() {
+        let (_scratch, mut workspace) = with_store("version-taken");
+        for id in ["b_v002", "b_v003"] {
+            run(
+                &mut workspace,
+                EditorCommand::DuplicateScene(gx_contracts::command::DuplicateScene {
+                    project: "news".into(),
+                    source_scene_id: "b".into(),
+                    scene_id: id.into(),
+                    name: id.into(),
+                }),
+            );
+        }
+        let session = open_stored(&mut workspace, "b");
+        run(&mut workspace, next_version(session));
+        assert_eq!(workspace.view(session).unwrap().document.id, "b_v004");
+        assert_eq!(
+            stored_ids(&workspace),
+            vec!["b", "b_v002", "b_v003", "b_v004"]
+        );
+    }
+
+    #[test]
+    fn a_next_version_of_a_scene_saved_to_a_file_is_the_next_numbered_file_and_keeps_the_history() {
+        let scratch = Scratch::new("version-file");
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "A");
+        run(&mut workspace, edit(session, vec![rename_scene("One")]));
+        let path = scratch.file("strap.json");
+        run(
+            &mut workspace,
+            save(session, SaveTarget::File { path: path.clone() }),
+        );
+        let first = std::fs::read(&path).unwrap();
+        run(&mut workspace, edit(session, vec![rename_scene("Two")]));
+
+        let view = run(&mut workspace, next_version(session))
+            .session
+            .expect("a save reports its session");
+        let second = scratch.file("strap_v002.json");
+        assert_eq!(view.path.as_deref(), Some(second.as_str()));
+        assert!(!view.dirty);
+        // The first file is as it was saved; the new one holds the later edit; the history stays.
+        assert_eq!(std::fs::read(&path).unwrap(), first);
+        assert_eq!(read_scene_file(&second).unwrap().name, "Two");
+        assert_eq!(view.undo_depth, 2);
+        run(&mut workspace, undo(session));
+        assert_eq!(name_of(&workspace, session), "One");
+
+        // Again: the number after this one. A file in the way is passed over.
+        std::fs::write(scratch.file("strap_v003.json"), b"{}").unwrap();
+        run(&mut workspace, next_version(session));
+        assert_eq!(
+            workspace.view(session).unwrap().path.as_deref(),
+            Some(scratch.file("strap_v004.json").as_str())
+        );
+        assert_eq!(
+            std::fs::read(scratch.file("strap_v003.json")).unwrap(),
+            b"{}"
+        );
+    }
+
+    #[test]
+    fn a_scene_never_saved_has_no_version_to_number_and_a_failed_write_changes_nothing() {
+        let (scratch, mut workspace) = with_store("version-refused");
+        let unsaved = open_new(&mut workspace, "fresh", "Fresh");
+        run(&mut workspace, edit(unsaved, vec![rename_scene("Edited")]));
+        let before = workspace.view(unsaved).unwrap();
+        assert_eq!(
+            refusal(&mut workspace, next_version(unsaved)),
+            Refusal::SessionUnbound { session: unsaved }
+        );
+        assert_eq!(workspace.view(unsaved).unwrap(), before);
+
+        // The project is gone from under a bound scene: the write fails and the session is as it was.
+        let bound = open_stored(&mut workspace, "b");
+        run(&mut workspace, edit(bound, vec![create_rect("Card")]));
+        let before = workspace.view(bound).unwrap();
+        std::fs::remove_dir_all(scratch.0.join("projects").join("news")).unwrap();
+        assert!(workspace.execute(next_version(bound)).is_err());
+        assert_eq!(workspace.view(bound).unwrap(), before);
+        assert_eq!(workspace.history(bound).unwrap().steps.len(), 1);
+    }
+
     // --- opening and closing ----------------------------------------------
 
     #[test]
@@ -2158,13 +3352,7 @@ mod tests {
                 .working_color_space,
             gx_contracts::color::WorkingColorSpace::Srgb
         );
-        std::fs::remove_file(
-            projects
-                .root()
-                .join("news")
-                .join(gx_contracts::project::PROJECT_SETTINGS_FILE),
-        )
-        .unwrap();
+        std::fs::remove_file(projects.gpx_path("news")).unwrap();
         run(
             &mut workspace,
             EditorCommand::CreateScene(CreateScene {

@@ -1,0 +1,36 @@
+import { connect, LOG, at } from "./lib.mjs";
+const c = await connect(9333, 120);
+const { ev, wait, click, mouse, key, shot, geometry } = c;
+const out = {};
+const ov = `document.getElementById("viewport-overlay")`;
+const shapes = () => ev(`return [...new Set([...document.querySelectorAll('button[data-action="select"][data-for]')].map((b) => b.dataset.for))].filter((x) => x.startsWith("shape"));`);
+await ev(`document.getElementById("tool-selection").click(); document.querySelector('button[data-action="select"][data-for="rect-1"]').click(); await new Promise(r=>setTimeout(r,500)); return 1;`);
+const g = await geometry();
+out.geometry = g;
+await ev(`document.getElementById("tool-pen").click(); return 1;`);
+// Mask mode, an open path: refused, given back, second Escape drops it.
+for (const p of [[300, 800], [500, 900], [650, 820]]) await click(at(g, p[0], p[1]));
+out.penVertices = await ev(`return document.querySelectorAll("#viewport-overlay .overlay-pen-vertex").length;`);
+await key(ov, "Enter");
+out.openRefused = { vertices: await ev(`return document.querySelectorAll("#viewport-overlay .overlay-pen-vertex").length;`), log: await ev(`return ${LOG}.slice(0, 1);`) };
+await key(ov, "Escape");
+out.afterEscape = await ev(`return document.querySelectorAll("#viewport-overlay .overlay-pen-vertex").length;`);
+// A shape: near-straight line with a corner, then Remove Point Keep Shape with Alt-click.
+await ev(`const s = document.getElementById("pen-creates"); s.value = "shape"; s.dispatchEvent(new Event("change", { bubbles: true })); return 1;`);
+for (const p of [[300, 300], [600, 302], [900, 300], [900, 600]]) await click(at(g, p[0], p[1]));
+await key(ov, "Enter"); await wait(900);
+out.line = await shapes();
+await ev(`document.getElementById("tool-vertex-delete").click(); return 1;`);
+const dOf = () => ev(`return document.querySelector("#viewport-overlay .overlay-path")?.getAttribute("d");`);
+const d0 = await dOf();
+await click(at(g, 600, 302), 1);
+await wait(900);
+out.keepShape = { before: d0, after: await dOf(), log: await ev(`return ${LOG}.slice(0, 1);`) };
+await click(at(g, 900, 300), 1);
+await wait(900);
+out.cornerKept = { after: await dOf(), log: await ev(`return ${LOG}.slice(0, 1);`) };
+await shot("m7-keep-shape");
+await ev(`document.getElementById("tool-selection").click(); document.getElementById("object-copy-svg").click(); await new Promise(r=>setTimeout(r,800)); return 1;`);
+out.copySvg = await ev(`return ${LOG}.slice(0, 1);`);
+console.log(JSON.stringify(out, null, 1));
+c.done();

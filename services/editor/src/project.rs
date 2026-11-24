@@ -15,14 +15,20 @@
 
 use std::path::{Path, PathBuf};
 
-use gx_contracts::color::WorkingColorSpace;
+use gx_contracts::color::{ColorDepth, WorkingColorSpace};
 use gx_contracts::control::TakePage;
 use gx_contracts::design_system::MotionPreset;
-use gx_contracts::project::{ProjectSettings, PROJECT_SETTINGS_FILE};
+use gx_contracts::project::{
+    project_file_name, ProjectDocument, ProjectSettings, ASSETS_FOLDER, AUDIO_FOLDER, FONTS_FOLDER,
+    IMAGES_FOLDER, MODELS_FOLDER, PROJECT_SETTINGS_FILE, SOURCES_FOLDER, VIDEOS_FOLDER,
+};
 use gx_contracts::scene::{parse_scene_document, AssetLibraryItem, SceneDocument};
 use gx_contracts::ContentHash;
 use gx_contracts::Refusal;
 use gx_contracts::Revision;
+
+mod assets;
+pub use assets::{detect, AssetClass, Detected, ImportedAsset, MAX_IMAGE_SIDE};
 
 /// The write lock on one project's scenes, held until it drops
 /// ([`Projects::lock_scenes`]).
@@ -120,8 +126,118 @@ impl Projects {
         self.project_directory(project).join("scenes")
     }
 
-    fn settings_path(&self, project: &str) -> PathBuf {
+    /// The settings file projects kept before the `.gpx`; read only to upgrade one.
+    fn legacy_settings_path(&self, project: &str) -> PathBuf {
         self.project_directory(project).join(PROJECT_SETTINGS_FILE)
+    }
+
+    /// The project's document: `<Project>/<Project>.gpx`.
+    pub fn gpx_path(&self, project: &str) -> PathBuf {
+        self.project_directory(project)
+            .join(project_file_name(project))
+    }
+
+    /// `Assets`, which holds the project's pictures, videos, audio and 3D models.
+    pub fn assets_root_directory(&self, project: &str) -> PathBuf {
+        self.project_directory(project).join(ASSETS_FOLDER)
+    }
+
+    /// `Assets/Images`: png, webp, jpg, jpeg and svg.
+    pub fn images_directory(&self, project: &str) -> PathBuf {
+        self.assets_root_directory(project).join(IMAGES_FOLDER)
+    }
+
+    /// `Assets/Videos`: mp4, mov, avi and webm.
+    pub fn videos_directory(&self, project: &str) -> PathBuf {
+        self.assets_root_directory(project).join(VIDEOS_FOLDER)
+    }
+
+    /// `Assets/Audio`: wav and mp3.
+    pub fn audio_directory(&self, project: &str) -> PathBuf {
+        self.assets_root_directory(project).join(AUDIO_FOLDER)
+    }
+
+    /// `Assets/Models`: gltf, glb, obj, fbx, stl, ply, dae, usd and usdz.
+    pub fn models_directory(&self, project: &str) -> PathBuf {
+        self.assets_root_directory(project).join(MODELS_FOLDER)
+    }
+
+    /// `Fonts`: otf, ttf, woff and woff2.
+    pub fn fonts_directory(&self, project: &str) -> PathBuf {
+        self.project_directory(project).join(FONTS_FOLDER)
+    }
+
+    fn class_directories(&self, project: &str) -> [PathBuf; 5] {
+        [
+            self.images_directory(project),
+            self.videos_directory(project),
+            self.audio_directory(project),
+            self.models_directory(project),
+            self.fonts_directory(project),
+        ]
+    }
+
+    /// Whether the project folder holds a child with exactly this name. Case is compared as the
+    /// folder lists it, so the old lower-case `assets` is told apart from `Assets` even where the
+    /// file system would treat them as one.
+    fn has_child(&self, project: &str, name: &str) -> bool {
+        std::fs::read_dir(self.project_directory(project))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .any(|e| e.file_name().to_string_lossy() == name)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Move the folders earlier layouts used to where they live now: the hash store `assets`
+    /// to `Sources` (so it is not mistaken for the user's `Assets`), and the top-level `Images`
+    /// and `Footage` of the first `.gpx` layout into `Assets/Images` and `Assets/Videos`. A move
+    /// that would land on something already there is not made.
+    fn migrate_folders(&self, project: &str) -> Result<(), EditorError> {
+        let base = self.project_directory(project);
+        let sources = base.join(SOURCES_FOLDER);
+        if self.has_child(project, "assets") && !sources.exists() {
+            // Before `Assets` exists: on Windows `assets` and `Assets` are one folder.
+            let from = base.join("assets");
+            std::fs::rename(&from, &sources)
+                .map_err(|source| EditorError::Io { path: from, source })?;
+        }
+        for (old, new) in [
+            ("Images", self.images_directory(project)),
+            ("Footage", self.videos_directory(project)),
+        ] {
+            if self.has_child(project, old) && !new.exists() {
+                if let Some(parent) = new.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| EditorError::Io {
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
+                }
+                let from = base.join(old);
+                std::fs::rename(&from, &new)
+                    .map_err(|source| EditorError::Io { path: from, source })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn make_folders(&self, project: &str) -> Result<(), EditorError> {
+        let mut directories = vec![self.scenes_directory(project)];
+        directories.extend(self.class_directories(project));
+        for directory in directories {
+            std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
+                path: directory,
+                source,
+            })?;
+        }
+        Ok(())
+    }
+
+    fn write_document(&self, project: &str, settings: ProjectSettings) -> Result<(), EditorError> {
+        let bytes = serde_json::to_vec_pretty(&ProjectDocument::new(project, settings))
+            .map_err(EditorError::Serialize)?;
+        gx_fs::write_atomic(&self.gpx_path(project), &bytes).map_err(EditorError::Write)
     }
 
     fn take_pages_directory(&self, project: &str) -> PathBuf {
@@ -133,8 +249,10 @@ impl Projects {
             .join(format!("{page_id}.json"))
     }
 
+    /// Where what a scene retains lives: import sources and assets adopted by content address.
+    /// `Sources`, not `assets`: the user's pictures, videos and the rest are in `Assets`.
     fn assets_directory(&self, project: &str) -> PathBuf {
-        self.project_directory(project).join("assets")
+        self.project_directory(project).join(SOURCES_FOLDER)
     }
 
     fn motion_presets_directory(&self, project: &str) -> PathBuf {
@@ -149,6 +267,183 @@ impl Projects {
     fn scene_path(&self, project: &str, scene_id: &str) -> PathBuf {
         self.scenes_directory(project)
             .join(format!("{scene_id}.json"))
+    }
+
+    /// Create a new project in a folder the user chose, the way File > New does in XPression,
+    /// Viz or After Effects: the project is `<parent>/<name>/<name>.gpx`, and the store it
+    /// belongs to is `parent`. The folder must already exist (it was picked, not typed), and a
+    /// project that is already there is never overwritten.
+    pub fn create_in(parent: &Path, name: &str) -> Result<Self, EditorError> {
+        Self::create_in_with(parent, name, ProjectSettings::new_project())
+    }
+
+    /// [`Projects::create_in`] with the project's declarations chosen, such as the colour
+    /// depth the New Project dialog offers.
+    pub fn create_in_with(
+        parent: &Path,
+        name: &str,
+        settings: ProjectSettings,
+    ) -> Result<Self, EditorError> {
+        if !parent.is_absolute() || !parent.is_dir() {
+            return Err(Refusal::PlatformDirectoryUnavailable {
+                detail: format!(
+                    "{} is not a folder that exists; choose where to save the project",
+                    parent.display()
+                ),
+            }
+            .into());
+        }
+        let projects = Self::at_root(parent);
+        projects.create_project_with(name, settings)?;
+        Ok(projects)
+    }
+
+    /// Open a project folder made before the `.gpx`: upgrade it (losslessly, once) and open it
+    /// the way [`Projects::open_gpx`] does.
+    pub fn open_folder(folder: &Path) -> Result<(Self, String), EditorError> {
+        let name = folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                EditorError::Refused(Refusal::ProjectNameInvalid {
+                    project: folder.display().to_string(),
+                })
+            })?;
+        let root = folder.parent().ok_or_else(|| {
+            EditorError::Refused(Refusal::ProjectNameInvalid {
+                project: folder.display().to_string(),
+            })
+        })?;
+        let projects = Self::at_root(root);
+        projects.upgrade_project(&name)?;
+        Self::open_gpx(&projects.gpx_path(&name))
+    }
+
+    /// Open a project from its `.gpx` file, the way File > Open does in XPression, Viz or After
+    /// Effects: the file is `<folder>/<Name>/<Name>.gpx`, and the store it belongs to is the
+    /// folder that holds `<Name>`. Returns that store and the project's name.
+    ///
+    /// The file must be a project document that names the folder it sits in; anything else (a
+    /// scene file that also ends in `.gpx`, a renamed copy, a document from a newer build)
+    /// refuses by name instead of opening as something it is not.
+    pub fn open_gpx(path: &Path) -> Result<(Self, String), EditorError> {
+        let invalid = |detail: String| -> EditorError {
+            Refusal::ProjectSettingsInvalid {
+                project: path.display().to_string(),
+                detail,
+            }
+            .into()
+        };
+        let folder = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .ok_or_else(|| invalid("a project file sits inside its project folder".into()))?;
+        let name = folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| invalid("the project folder has no name".into()))?
+            .to_owned();
+        if path.file_name().and_then(|n| n.to_str()) != Some(project_file_name(&name).as_str()) {
+            return Err(invalid(format!(
+                "a project file is named after its folder: expected {}",
+                project_file_name(&name)
+            )));
+        }
+        let root = folder
+            .parent()
+            .ok_or_else(|| invalid("the project folder has no parent".into()))?;
+        let projects = Self::at_root(root);
+        // Read through the same path every read takes, so a bad document refuses the same way.
+        projects.settings(&name)?;
+        Ok((projects, name))
+    }
+
+    /// Save As (11.43): copy a project to `<parent>/<to>/<to>.gpx` and return the store the copy
+    /// belongs to, the way File > Save As does in XPression, Viz or After Effects. The source is
+    /// left exactly as it was last saved. `changed` are scenes whose newer state replaces their
+    /// stored copy in the new project only, which is how work not yet saved moves to the copy.
+    ///
+    /// Nothing is half made: the copy is built in a staging folder beside its destination and
+    /// moved into place as the last step, and a failure removes the staging folder it made. It
+    /// never overwrites a project, and it refuses a folder inside the project being copied, which
+    /// would copy itself without end. Links and special files in the project are refused by name
+    /// rather than followed or dropped.
+    ///
+    /// The caller holds [`Projects::lock_scenes`] for `from` across the call, so no scene changes
+    /// between the check and the copy.
+    pub fn save_copy(
+        &self,
+        from: &str,
+        parent: &Path,
+        to: &str,
+        changed: &[SceneDocument],
+    ) -> Result<Self, EditorError> {
+        self.require_project(from)?;
+        require_component(to, |project| Refusal::ProjectNameInvalid { project })?;
+        if !parent.is_absolute() || !parent.is_dir() {
+            return Err(Refusal::PlatformDirectoryUnavailable {
+                detail: format!(
+                    "{} is not a folder that exists; choose where to save the project",
+                    parent.display()
+                ),
+            }
+            .into());
+        }
+        let settings = self.settings(from)?;
+        for scene in changed {
+            require_component(&scene.id, |id| Refusal::SceneIdInvalid { id })?;
+            self.require_working_space(from, scene)?;
+        }
+        let io = |path: &Path| {
+            let path = path.to_path_buf();
+            move |source| EditorError::Io { path, source }
+        };
+        let source = self.project_directory(from);
+        let source_real = std::fs::canonicalize(&source).map_err(io(&source))?;
+        let parent_real = std::fs::canonicalize(parent).map_err(io(parent))?;
+        if parent_real.starts_with(&source_real) {
+            return Err(Refusal::PlatformDirectoryUnavailable {
+                detail: format!(
+                    "{} is inside the project being copied; choose a folder outside it",
+                    parent.display()
+                ),
+            }
+            .into());
+        }
+        let destination = parent.join(to);
+        if destination.symlink_metadata().is_ok() {
+            return Err(Refusal::ProjectAlreadyExists {
+                project: to.to_owned(),
+            }
+            .into());
+        }
+        let staging_name = format!("{to}.saving");
+        let staging = parent.join(&staging_name);
+        // A staging folder left by an earlier attempt is in the way; it is named, not deleted.
+        std::fs::create_dir(&staging).map_err(io(&staging))?;
+        let build = || -> Result<(), EditorError> {
+            copy_project_tree(&source, &staging, true, &project_file_name(from))?;
+            let document = serde_json::to_vec_pretty(&ProjectDocument::new(to, settings))
+                .map_err(EditorError::Serialize)?;
+            let document_path = staging.join(project_file_name(to));
+            gx_fs::write_atomic(&document_path, &document).map_err(EditorError::Write)?;
+            Self::at_root(parent).make_folders(&staging_name)?;
+            for scene in changed {
+                let bytes = serde_json::to_vec_pretty(scene).map_err(EditorError::Serialize)?;
+                let path = staging.join("scenes").join(format!("{}.json", scene.id));
+                gx_fs::write_atomic(&path, &bytes).map_err(EditorError::Write)?;
+            }
+            std::fs::rename(&staging, &destination).map_err(io(&destination))
+        };
+        match build() {
+            Ok(()) => Ok(Self::at_root(parent)),
+            Err(error) => {
+                // Only the folder this call made.
+                let _ = std::fs::remove_dir_all(&staging);
+                Err(error)
+            }
+        }
     }
 
     /// Whether a project exists. The question every write asks first. A name
@@ -199,13 +494,40 @@ impl Projects {
             }
             .into());
         }
-        let scenes = self.scenes_directory(project);
-        std::fs::create_dir_all(&scenes).map_err(|source| EditorError::Io {
-            path: scenes,
-            source,
-        })?;
-        let bytes = serde_json::to_vec_pretty(&settings).map_err(EditorError::Serialize)?;
-        gx_fs::write_atomic(&self.settings_path(project), &bytes).map_err(EditorError::Write)
+        self.make_folders(project)?;
+        self.write_document(project, settings)
+    }
+
+    /// Bring a project made before the `.gpx` up to date: write its document with the settings
+    /// it declared (a project with no settings file keeps the linear light it was made in),
+    /// make its supporting folders, then remove the old settings file. Returns whether it
+    /// changed anything. Safe to call again, and safe after a crash half-way: the document is
+    /// written before the old file is removed, and a document always wins over the old file.
+    pub fn upgrade_project(&self, project: &str) -> Result<bool, EditorError> {
+        self.require_project(project)?;
+        let legacy = self.legacy_settings_path(project);
+        let has_document = self.gpx_path(project).is_file();
+        let has_legacy = legacy.is_file();
+        let old_layout = self.has_child(project, "assets")
+            || self.has_child(project, "Footage")
+            || (self.has_child(project, "Images") && !self.images_directory(project).exists());
+        let folders_missing = self.class_directories(project).iter().any(|d| !d.is_dir());
+        if has_document && !has_legacy && !old_layout && !folders_missing {
+            return Ok(false);
+        }
+        if !has_document {
+            let settings = self.settings(project)?;
+            self.write_document(project, settings)?;
+        }
+        self.migrate_folders(project)?;
+        self.make_folders(project)?;
+        if has_legacy {
+            std::fs::remove_file(&legacy).map_err(|source| EditorError::Io {
+                path: legacy,
+                source,
+            })?;
+        }
+        Ok(true)
     }
 
     /// What a project declares (3.15).
@@ -217,19 +539,35 @@ impl Projects {
     /// would compose every scene in it in the wrong space.
     pub fn settings(&self, project: &str) -> Result<ProjectSettings, EditorError> {
         self.require_project(project)?;
-        let path = self.settings_path(project);
+        let invalid = |detail: String| -> EditorError {
+            Refusal::ProjectSettingsInvalid {
+                project: project.to_owned(),
+                detail,
+            }
+            .into()
+        };
+        // The document wins; the old settings file is only for a project not yet upgraded.
+        let path = self.gpx_path(project);
         match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
-                Refusal::ProjectSettingsInvalid {
-                    project: project.to_owned(),
-                    detail: error.to_string(),
-                }
-                .into()
-            }),
+            Ok(bytes) => {
+                let document: ProjectDocument =
+                    serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
+                document.check(project).map_err(invalid)?;
+                return Ok(document.settings);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => return Err(EditorError::Io { path, source }),
+        }
+        let legacy = self.legacy_settings_path(project);
+        match std::fs::read(&legacy) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string())),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Ok(ProjectSettings::before_3_15())
             }
-            Err(source) => Err(EditorError::Io { path, source }),
+            Err(source) => Err(EditorError::Io {
+                path: legacy,
+                source,
+            }),
         }
     }
 
@@ -239,18 +577,28 @@ impl Projects {
         project: &str,
         scene: &SceneDocument,
     ) -> Result<(), EditorError> {
-        let declared: WorkingColorSpace = self.settings(project)?.working_color_space;
-        if scene.working_color_space == declared {
-            Ok(())
-        } else {
-            Err(Refusal::SceneWorkingSpaceMismatch {
+        let settings = self.settings(project)?;
+        let declared: WorkingColorSpace = settings.working_color_space;
+        if scene.working_color_space != declared {
+            return Err(Refusal::SceneWorkingSpaceMismatch {
                 project: project.to_owned(),
                 scene_id: scene.id.clone(),
                 scene: scene.working_color_space,
                 project_space: declared,
             }
-            .into())
+            .into());
         }
+        let depth: ColorDepth = settings.color_depth;
+        if scene.color_depth != depth {
+            return Err(Refusal::SceneColorDepthMismatch {
+                project: project.to_owned(),
+                scene_id: scene.id.clone(),
+                scene: scene.color_depth,
+                project_depth: depth,
+            }
+            .into());
+        }
+        Ok(())
     }
 
     /// Write a filled take-page instance into an existing project.
@@ -379,6 +727,7 @@ impl Projects {
         bytes: &[u8],
     ) -> Result<(), EditorError> {
         self.require_project(project)?;
+        self.upgrade_project(project)?;
         let hash = asset_hash(item)?;
         let actual = gx_asset_plane::content_hash(bytes);
         if actual != hash {
@@ -445,6 +794,12 @@ impl Projects {
             .iter()
             .map(|path| read_json::<AssetLibraryItem>(path))
             .collect::<Result<Vec<_>, _>>()?;
+        // What is filed in Assets and Fonts is the project's assets too.
+        items.extend(
+            self.project_files(project)?
+                .into_iter()
+                .map(|(item, _)| item),
+        );
         items.sort_by(|a, b| {
             a.name
                 .cmp(&b.name)
@@ -463,13 +818,18 @@ impl Projects {
         self.require_project(project)?;
         require_hash(hash)?;
         let prefix = format!("{}.", hash.0);
-        Ok(directory_paths(&self.assets_directory(project))?
+        let filed = directory_paths(&self.assets_directory(project))?
             .into_iter()
             .find(|path| {
                 path.file_name()
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".json"))
-            }))
+            });
+        match filed {
+            Some(path) => Ok(Some(path)),
+            // A file in Assets or Fonts is found by its content like any asset.
+            None => self.media_file_by_hash(project, hash),
+        }
     }
 
     /// The projects that exist, in directory order.
@@ -518,6 +878,7 @@ impl Projects {
     /// Write a scene into an existing project.
     pub fn write_scene(&self, project: &str, scene: &SceneDocument) -> Result<(), EditorError> {
         self.require_project(project)?;
+        self.upgrade_project(project)?;
         require_component(&scene.id, |id| Refusal::SceneIdInvalid { id })?;
         self.require_working_space(project, scene)?;
         let bytes = serde_json::to_vec_pretty(scene).map_err(EditorError::Serialize)?;
@@ -551,7 +912,7 @@ impl Projects {
     /// when the value drops, and by the operating system if the process dies.
     pub fn lock_scenes(&self, project: &str) -> Result<SceneLock, EditorError> {
         self.require_project(project)?;
-        let path = self.project_directory(project).join(".scenes.lock");
+        let path = self.project_directory(project).join(SCENES_LOCK_FILE);
         gx_fs::FileLock::exclusive(&path)
             .map(|held| SceneLock { _held: held })
             .map_err(|source| EditorError::Io { path, source })
@@ -609,6 +970,62 @@ impl Projects {
         let path = self.scene_path(project, scene_id);
         std::fs::remove_file(&path).map_err(|source| EditorError::Io { path, source })
     }
+}
+
+/// The lock file a project keeps while its scenes are being written; never part of a copy.
+const SCENES_LOCK_FILE: &str = ".scenes.lock";
+
+/// Copy a project folder into an empty one: files and folders only. The scene lock and the
+/// source's own document (`skip_document`, rewritten under the new name) are left behind, and a
+/// link or special file refuses by name, since following it could copy something outside the
+/// project and dropping it would lose it.
+fn copy_project_tree(
+    from: &Path,
+    to: &Path,
+    top: bool,
+    skip_document: &str,
+) -> Result<(), EditorError> {
+    let entries = std::fs::read_dir(from).map_err(|source| EditorError::Io {
+        path: from.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| EditorError::Io {
+            path: from.to_path_buf(),
+            source,
+        })?;
+        let name = entry.file_name();
+        if top && (name == SCENES_LOCK_FILE || name == skip_document) {
+            continue;
+        }
+        let source_path = entry.path();
+        let target = to.join(&name);
+        let kind = entry.file_type().map_err(|source| EditorError::Io {
+            path: source_path.clone(),
+            source,
+        })?;
+        if kind.is_dir() {
+            std::fs::create_dir(&target).map_err(|source| EditorError::Io {
+                path: target.clone(),
+                source,
+            })?;
+            copy_project_tree(&source_path, &target, false, skip_document)?;
+        } else if kind.is_file() {
+            std::fs::copy(&source_path, &target).map_err(|source| EditorError::Io {
+                path: source_path,
+                source,
+            })?;
+        } else {
+            return Err(EditorError::Io {
+                path: source_path,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "a link or special file cannot be copied into a project; remove it or replace it with the file itself",
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Refuse a project, scene or take-page id that is not one canonical filename.
@@ -725,6 +1142,7 @@ mod tests {
     fn scene(id: &str) -> SceneDocument {
         SceneDocument {
             working_color_space: WorkingColorSpace::NEW_PROJECT,
+            color_depth: ColorDepth::NEW_PROJECT,
             id: id.into(),
             name: id.into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -745,6 +1163,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: Vec::new(),
         }
     }
@@ -918,7 +1339,7 @@ mod tests {
         let projects = Projects::at_root(&root);
         projects.create_project("legacy").unwrap();
         // A project from before 11.39 is also from before 3.15: no settings file.
-        std::fs::remove_file(root.join("legacy").join(PROJECT_SETTINGS_FILE)).unwrap();
+        std::fs::remove_file(projects.gpx_path("legacy")).unwrap();
         let path = root.join("legacy").join("scenes").join("witness.json");
         std::fs::write(&path, FIXTURE).unwrap();
 
@@ -943,6 +1364,8 @@ mod tests {
         }
         assert_eq!(upgraded.working_color_space, WorkingColorSpace::BEFORE_3_15);
         after.as_object_mut().unwrap().remove("workingColorSpace");
+        assert_eq!(upgraded.color_depth, ColorDepth::BEFORE_DEPTH);
+        after.as_object_mut().unwrap().remove("colorDepth");
         assert_eq!(
             after, original,
             "the upgrade changed something the document stated"
@@ -958,14 +1381,15 @@ mod tests {
         // A scene from a newer build is refused by name, never read with
         // whatever it added dropped.
         let mut newer = original;
-        newer["version"] = serde_json::json!(4);
+        let supported = gx_contracts::scene::SCENE_SCHEMA_VERSION;
+        newer["version"] = serde_json::json!(supported + 1);
         std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
         assert!(matches!(
             projects.read_scene("legacy", "witness"),
             Err(EditorError::Refused(Refusal::SceneSchemaUnsupported {
-                actual: 4,
-                supported: 3
-            }))
+                actual,
+                supported: held
+            })) if actual == supported + 1 && held == supported
         ));
 
         std::fs::remove_dir_all(root).expect("clean up");
@@ -984,7 +1408,7 @@ mod tests {
         let root = scratch("pre-3.15");
         let projects = Projects::at_root(&root);
         projects.create_project("legacy").unwrap();
-        std::fs::remove_file(root.join("legacy").join(PROJECT_SETTINGS_FILE)).unwrap();
+        std::fs::remove_file(projects.gpx_path("legacy")).unwrap();
         assert_eq!(
             projects.settings("legacy").unwrap(),
             ProjectSettings::before_3_15()
@@ -1004,6 +1428,8 @@ mod tests {
         let mut after = serde_json::to_value(&upgraded).unwrap();
         after["version"] = original["version"].clone();
         after.as_object_mut().unwrap().remove("workingColorSpace");
+        assert_eq!(upgraded.color_depth, ColorDepth::BEFORE_DEPTH);
+        after.as_object_mut().unwrap().remove("colorDepth");
         assert_eq!(
             after, original,
             "the upgrade changed something the document stated"
@@ -1042,10 +1468,14 @@ mod tests {
         let root = scratch("working-space");
         let projects = Projects::at_root(&root);
         projects.create_project("show").unwrap();
-        let file = std::fs::read(root.join("show").join(PROJECT_SETTINGS_FILE)).unwrap();
+        let file = std::fs::read(projects.gpx_path("show")).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&file).unwrap(),
-            serde_json::json!({ "workingColorSpace": "srgb" })
+            serde_json::json!({
+                "schemaVersion": 1,
+                "name": "show",
+                "settings": { "workingColorSpace": "srgb", "colorDepth": "16" }
+            })
         );
         assert_eq!(
             projects.settings("show").unwrap().working_color_space,
@@ -1074,6 +1504,7 @@ mod tests {
                 "physical",
                 ProjectSettings {
                     working_color_space: WorkingColorSpace::LinearSrgb,
+                    color_depth: ColorDepth::NEW_PROJECT,
                 },
             )
             .unwrap();
@@ -1090,16 +1521,254 @@ mod tests {
             "creating a project again never rewrites what it declared"
         );
 
-        std::fs::write(
-            root.join("show").join(PROJECT_SETTINGS_FILE),
-            br#"{"workingColorSpace":"hdr"}"#,
-        )
-        .unwrap();
+        std::fs::write(projects.gpx_path("show"), br#"{"workingColorSpace":"hdr"}"#).unwrap();
         assert!(matches!(
             projects.settings("show"),
             Err(EditorError::Refused(Refusal::ProjectSettingsInvalid { .. }))
         ));
 
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// 11.43: a project is a named `.gpx` beside its supporting folders, like an XPression
+    /// project beside Images and Fonts.
+    #[test]
+    fn a_project_is_a_named_gpx_beside_its_assets_and_fonts() {
+        let root = scratch("gpx-layout");
+        let projects = Projects::at_root(&root);
+        projects.create_project("Finals").unwrap();
+        let folder = root.join("Finals");
+        assert!(folder.join("Finals.gpx").is_file());
+        for name in [
+            "Assets/Images",
+            "Assets/Videos",
+            "Assets/Audio",
+            "Assets/Models",
+            "Fonts",
+            "scenes",
+        ] {
+            assert!(folder.join(name).is_dir(), "{name}");
+        }
+        assert!(
+            !folder.join("Footage").exists(),
+            "footage is Assets/Videos now"
+        );
+        assert!(
+            !folder.join(PROJECT_SETTINGS_FILE).exists(),
+            "the settings live in the document, not a second file"
+        );
+        assert_eq!(
+            projects.images_directory("Finals"),
+            folder.join("Assets").join("Images")
+        );
+        assert_eq!(
+            projects.videos_directory("Finals"),
+            folder.join("Assets").join("Videos")
+        );
+        assert_eq!(
+            projects.audio_directory("Finals"),
+            folder.join("Assets").join("Audio")
+        );
+        assert_eq!(
+            projects.models_directory("Finals"),
+            folder.join("Assets").join("Models")
+        );
+        assert_eq!(projects.fonts_directory("Finals"), folder.join("Fonts"));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_project_made_before_the_gpx_upgrades_on_its_first_write_keeping_its_space() {
+        let root = scratch("gpx-upgrade");
+        let projects = Projects::at_root(&root);
+        // Two old shapes: one with a settings file (sRGB), one with none (linear, pre-3.15).
+        for (name, settings) in [
+            (
+                "declared",
+                Some(br#"{"workingColorSpace":"srgb"}"#.as_slice()),
+            ),
+            ("undeclared", None),
+        ] {
+            let folder = root.join(name);
+            std::fs::create_dir_all(folder.join("scenes")).unwrap();
+            if let Some(bytes) = settings {
+                std::fs::write(folder.join(PROJECT_SETTINGS_FILE), bytes).unwrap();
+            }
+        }
+        assert_eq!(
+            projects.settings("declared").unwrap().working_color_space,
+            WorkingColorSpace::Srgb,
+            "an old project reads without being changed"
+        );
+        assert!(
+            !projects.gpx_path("declared").exists(),
+            "a read writes nothing"
+        );
+
+        // No depth in an old settings file means the 32-bit float it rendered in.
+        assert_eq!(
+            projects.settings("declared").unwrap().color_depth,
+            ColorDepth::BEFORE_DEPTH
+        );
+        let mut before_depth = scene("a");
+        before_depth.color_depth = ColorDepth::BEFORE_DEPTH;
+        projects.write_scene("declared", &before_depth).unwrap();
+        assert!(projects.gpx_path("declared").is_file());
+        assert!(!root.join("declared").join(PROJECT_SETTINGS_FILE).exists());
+        assert!(root.join("declared").join("Assets").join("Images").is_dir());
+        assert_eq!(
+            projects.settings("declared").unwrap().working_color_space,
+            WorkingColorSpace::Srgb
+        );
+        assert_eq!(
+            projects.settings("declared").unwrap().color_depth,
+            ColorDepth::BEFORE_DEPTH,
+            "the upgrade keeps the depth the project had"
+        );
+        assert!(
+            !projects.upgrade_project("declared").unwrap(),
+            "already current"
+        );
+
+        assert!(projects.upgrade_project("undeclared").unwrap());
+        assert_eq!(
+            projects.settings("undeclared").unwrap(),
+            ProjectSettings::before_3_15(),
+            "a project with no settings keeps the linear light it was made in, now written down"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// File > Open: a project is opened from its `.gpx`, and only from one that is a project.
+    #[test]
+    fn a_project_opens_from_its_gpx_path_and_nothing_else_opens() {
+        let root = scratch("gpx-open");
+        let chosen = root.join("My Shows");
+        let projects = Projects::at_root(&chosen);
+        projects.create_project("Finals").unwrap();
+        projects.write_scene("Finals", &scene("a")).unwrap();
+
+        let (opened, name) = Projects::open_gpx(&projects.gpx_path("Finals")).unwrap();
+        assert_eq!(name, "Finals");
+        assert_eq!(opened.root(), chosen);
+        assert_eq!(opened.list_scenes("Finals").unwrap(), ["a"]);
+
+        // A renamed copy, a scene file that also ends in .gpx, a missing file and a bare name.
+        let copy = chosen.join("Finals").join("Copy of Finals.gpx");
+        std::fs::copy(projects.gpx_path("Finals"), &copy).unwrap();
+        assert!(Projects::open_gpx(&copy).is_err(), "named after its folder");
+        let scene_file = chosen.join("Finals").join("Finals.gpx.bak");
+        std::fs::write(&scene_file, b"{}").unwrap();
+        assert!(Projects::open_gpx(&scene_file).is_err());
+        assert!(Projects::open_gpx(&chosen.join("Nothing").join("Nothing.gpx")).is_err());
+        assert!(Projects::open_gpx(Path::new("Finals.gpx")).is_err());
+        std::fs::write(projects.gpx_path("Finals"), br#"{"scene":true}"#).unwrap();
+        assert!(
+            Projects::open_gpx(&projects.gpx_path("Finals")).is_err(),
+            "a file that is not a project document does not open as one"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// File > New: a project is made in the folder the user chose, never over another.
+    #[test]
+    fn a_project_is_created_in_the_chosen_folder_and_never_over_another() {
+        let root = scratch("create-in");
+        let chosen = root.join("My Shows");
+        std::fs::create_dir_all(&chosen).unwrap();
+        let projects = Projects::create_in(&chosen, "Finals").unwrap();
+        assert!(chosen.join("Finals").join("Finals.gpx").is_file());
+        assert_eq!(projects.root(), chosen);
+        // It can be opened again from the file.
+        let (_, name) = Projects::open_gpx(&projects.gpx_path("Finals")).unwrap();
+        assert_eq!(name, "Finals");
+
+        assert!(
+            matches!(
+                Projects::create_in(&chosen, "Finals"),
+                Err(EditorError::Refused(Refusal::ProjectAlreadyExists { .. }))
+            ),
+            "a project already there is never overwritten"
+        );
+        for bad in ["", "a/b", "..", "CON", "x:y"] {
+            assert!(Projects::create_in(&chosen, bad).is_err(), "{bad:?}");
+        }
+        assert!(
+            matches!(
+                Projects::create_in(&root.join("not made"), "X"),
+                Err(EditorError::Refused(
+                    Refusal::PlatformDirectoryUnavailable { .. }
+                ))
+            ),
+            "the folder is picked, so it must exist"
+        );
+        assert!(
+            !root.join("not made").exists(),
+            "nothing was created on the way"
+        );
+        assert!(Projects::create_in(Path::new("relative"), "X").is_err());
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_folder_made_before_the_gpx_opens_after_a_lossless_upgrade() {
+        let root = scratch("open-folder");
+        let folder = root.join("old");
+        std::fs::create_dir_all(folder.join("scenes")).unwrap();
+        std::fs::write(
+            folder.join(PROJECT_SETTINGS_FILE),
+            br#"{"workingColorSpace":"srgb"}"#,
+        )
+        .unwrap();
+        let (projects, name) = Projects::open_folder(&folder).unwrap();
+        assert_eq!(name, "old");
+        assert_eq!(
+            projects.settings("old").unwrap().working_color_space,
+            WorkingColorSpace::Srgb
+        );
+        assert!(projects.gpx_path("old").is_file());
+        assert!(!folder.join(PROJECT_SETTINGS_FILE).exists());
+        assert!(Projects::open_folder(&root.join("nothing")).is_err());
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_document_wins_over_a_stale_settings_file_and_a_bad_document_refuses() {
+        let root = scratch("gpx-wins");
+        let projects = Projects::at_root(&root);
+        projects.create_project("show").unwrap();
+        // A crash between writing the document and removing the old file leaves both.
+        std::fs::write(
+            root.join("show").join(PROJECT_SETTINGS_FILE),
+            br#"{"workingColorSpace":"linearSrgb"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            projects.settings("show").unwrap().working_color_space,
+            WorkingColorSpace::Srgb
+        );
+        assert!(projects.upgrade_project("show").unwrap());
+        assert!(!root.join("show").join(PROJECT_SETTINGS_FILE).exists());
+
+        let invalid = |bytes: &[u8]| {
+            std::fs::write(projects.gpx_path("show"), bytes).unwrap();
+            matches!(
+                projects.settings("show"),
+                Err(EditorError::Refused(Refusal::ProjectSettingsInvalid { .. }))
+            )
+        };
+        assert!(invalid(
+            br#"{"schemaVersion":2,"name":"show","settings":{"workingColorSpace":"srgb"}}"#
+        ));
+        assert!(
+            invalid(
+                br#"{"schemaVersion":1,"name":"other","settings":{"workingColorSpace":"srgb"}}"#
+            ),
+            "a document that names another project is refused"
+        );
+        assert!(invalid(
+            br#"{"schemaVersion":1,"name":"show","settings":{"workingColorSpace":"srgb"},"hdr":true}"#
+        ));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -1203,7 +1872,7 @@ mod tests {
         // Named by hash with the library path's extension; the record sits beside it.
         let file = root
             .join("news")
-            .join("assets")
+            .join("Sources")
             .join(format!("{}.png", hash.0));
         assert_eq!(std::fs::read(&file).unwrap(), bytes);
         assert!(projects.has_asset("news", &hash).unwrap());
@@ -1216,7 +1885,7 @@ mod tests {
         // Adopting the same asset again is the same file, not a second copy.
         projects.adopt_asset("news", &item, &bytes).unwrap();
         assert_eq!(
-            std::fs::read_dir(root.join("news").join("assets"))
+            std::fs::read_dir(root.join("news").join("Sources"))
                 .unwrap()
                 .count(),
             2
@@ -1271,7 +1940,7 @@ mod tests {
         let hash = odd.checksum.take().unwrap();
         assert!(root
             .join("news")
-            .join("assets")
+            .join("Sources")
             .join(format!("{}.bin", hash.0))
             .exists());
         std::fs::remove_dir_all(root).expect("clean up");
@@ -1285,7 +1954,7 @@ mod tests {
         let item = asset_item("Logo", "assets/images/abc.png", b"logo");
         projects.adopt_asset("news", &item, b"logo").unwrap();
 
-        let assets = root.join("news").join("assets");
+        let assets = root.join("news").join("Sources");
         std::fs::write(assets.join("broken.json"), b"{ not json").unwrap();
         let error = projects.project_assets("news").unwrap_err();
         assert!(

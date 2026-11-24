@@ -4,6 +4,124 @@
   "$id": "urn:grapix:schema:edits:SetEffects",
   "title": "SetEffects",
   "$defs": {
+    "Arithmetic": {
+      "description": "Arithmetic: combines each colour channel with a value of your choice, on the colour as it was\nbefore its alpha. Alpha is left alone.",
+      "properties": {
+        "blueValue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "clip": {
+          "default": true,
+          "description": "Keep every result between 0 and 1. Off, results may go above 1 but never below 0.",
+          "type": "boolean"
+        },
+        "greenValue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "operator": {
+          "$ref": "#/$defs/ArithmeticOperator",
+          "default": "add"
+        },
+        "redValue": {
+          "default": 0.0,
+          "description": "0-255 on each channel.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ArithmeticOperator": {
+      "description": "What Arithmetic does to each colour channel with the value set for that channel.\n\nAnd, Or and Xor work on the 8-bit values of the channel and the setting (0 to 255), as After\nEffects does; the rest work on the values themselves, so a pixel above 1 stays above 1.",
+      "oneOf": [
+        {
+          "enum": [
+            "and",
+            "or",
+            "xor",
+            "add",
+            "subtract",
+            "difference",
+            "min",
+            "max",
+            "multiply",
+            "screen"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "block-above",
+          "description": "A channel above the value goes to 0; one at or below it stays.",
+          "type": "string"
+        },
+        {
+          "const": "block-below",
+          "description": "A channel below the value goes to 0; one at or above it stays.",
+          "type": "string"
+        },
+        {
+          "const": "slice",
+          "description": "1 where the channel reaches the value, 0 where it does not.",
+          "type": "string"
+        }
+      ]
+    },
+    "BlackWhite": {
+      "description": "Black & White: a greyscale whose brightness per hue is set by six weights (red, yellow,\ngreen, cyan, blue, magenta, interpolated round the wheel), optionally tinted.",
+      "properties": {
+        "blues": {
+          "default": 0.2,
+          "format": "double",
+          "type": "number"
+        },
+        "cyans": {
+          "default": 0.6,
+          "format": "double",
+          "type": "number"
+        },
+        "greens": {
+          "default": 0.4,
+          "format": "double",
+          "type": "number"
+        },
+        "magentas": {
+          "default": 0.8,
+          "format": "double",
+          "type": "number"
+        },
+        "reds": {
+          "default": 0.4,
+          "description": "-2-3 each; 0.5 leaves the luminance alone, more brightens that hue, less darkens it.",
+          "format": "double",
+          "type": "number"
+        },
+        "tint": {
+          "default": false,
+          "description": "Colour the greyscale with the hue and saturation of `tint_color`.",
+          "type": "boolean"
+        },
+        "tintColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.6,
+            "g": 0.76,
+            "r": 0.88,
+            "space": "srgb"
+          }
+        },
+        "yellows": {
+          "default": 0.6,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "BlurDimensions": {
       "description": "Which axes a blur or glow spreads along.",
       "enum": [
@@ -57,6 +175,701 @@
           "default": false,
           "description": "After Effects' legacy linear formula, which clips; otherwise tone\ncurves that keep black and white fixed.",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "BroadcastAction": {
+      "description": "What Broadcast Colors does to a colour whose signal is too high.",
+      "oneOf": [
+        {
+          "const": "reduce-luminance",
+          "description": "Scale the whole colour down.",
+          "type": "string"
+        },
+        {
+          "const": "reduce-saturation",
+          "description": "Pull the colour towards grey until it fits.",
+          "type": "string"
+        },
+        {
+          "const": "key-out-unsafe",
+          "description": "Make the unsafe pixels transparent.",
+          "type": "string"
+        },
+        {
+          "const": "key-out-safe",
+          "description": "Make the safe pixels transparent.",
+          "type": "string"
+        }
+      ]
+    },
+    "BroadcastColors": {
+      "description": "Broadcast Colors: finds colours whose luma plus chroma goes over the maximum signal\namplitude of the chosen standard, and reduces or keys them.",
+      "properties": {
+        "howToMakeSafe": {
+          "$ref": "#/$defs/BroadcastAction",
+          "default": "reduce-luminance"
+        },
+        "locale": {
+          "$ref": "#/$defs/BroadcastLocale",
+          "default": "ntsc"
+        },
+        "maxSignal": {
+          "default": 110.0,
+          "description": "IRE, 90-120.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "BroadcastLocale": {
+      "description": "The broadcast standard Broadcast Colors measures against.",
+      "oneOf": [
+        {
+          "const": "ntsc",
+          "description": "NTSC: 7.5 IRE setup, chroma as I and Q.",
+          "type": "string"
+        },
+        {
+          "const": "pal",
+          "description": "PAL: no setup, chroma as U and V.",
+          "type": "string"
+        }
+      ]
+    },
+    "CcColorNeutralizer": {
+      "description": "CC Color Neutralizer: moves the shadows, midtones and highlights each by the difference between\na balance colour and an unbalance colour (the cast to take out and the colour it should be).",
+      "properties": {
+        "blendWithOriginal": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "brights": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "contrast": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "darks": {
+          "default": 0.0,
+          "description": "-1 to 1.",
+          "format": "double",
+          "type": "number"
+        },
+        "highlightsBalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "highlightsUnbalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "midtonesBalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.5,
+            "g": 0.5,
+            "r": 0.5,
+            "space": "srgb"
+          }
+        },
+        "midtonesUnbalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.5,
+            "g": 0.5,
+            "r": 0.5,
+            "space": "srgb"
+          }
+        },
+        "pinning": {
+          "default": 0.0,
+          "description": "0-1: keeps pure black and pure white where they are.",
+          "format": "double",
+          "type": "number"
+        },
+        "shadowsBalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "shadowsUnbalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        }
+      },
+      "type": "object"
+    },
+    "CcColorOffset": {
+      "description": "CC Color Offset: adds a phase to each channel (a full turn is the whole range), so a colour\ncycles through the range.",
+      "properties": {
+        "bluePhase": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "greenPhase": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "overflow": {
+          "$ref": "#/$defs/ColorOverflow",
+          "default": "wrap"
+        },
+        "redPhase": {
+          "default": 0.0,
+          "description": "Degrees: 360 is a whole turn of the range.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcThreshold": {
+      "description": "CC Threshold: black and white by whether the chosen channel reaches the level.",
+      "properties": {
+        "blend": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "channel": {
+          "$ref": "#/$defs/ThresholdChannel",
+          "default": "luminance"
+        },
+        "invert": {
+          "default": false,
+          "type": "boolean"
+        },
+        "threshold": {
+          "default": 127.0,
+          "description": "0-255, as the level is set on an 8-bit picture.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcThresholdRgb": {
+      "description": "CC Threshold RGB: each of red, green and blue made 0 or 1 at its own level.",
+      "properties": {
+        "blend": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "blueThreshold": {
+          "default": 127.0,
+          "format": "double",
+          "type": "number"
+        },
+        "greenThreshold": {
+          "default": 127.0,
+          "format": "double",
+          "type": "number"
+        },
+        "invertBlue": {
+          "default": false,
+          "type": "boolean"
+        },
+        "invertGreen": {
+          "default": false,
+          "type": "boolean"
+        },
+        "invertRed": {
+          "default": false,
+          "type": "boolean"
+        },
+        "redThreshold": {
+          "default": 127.0,
+          "description": "0-255 each.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcToner": {
+      "description": "CC Toner: maps the luminance of each pixel onto two, three or five colours, `blend` of the way\nback to the original.",
+      "properties": {
+        "blend": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "brights": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.64,
+            "g": 0.78,
+            "r": 0.86,
+            "space": "srgb"
+          }
+        },
+        "darktones": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.1,
+            "g": 0.18,
+            "r": 0.26,
+            "space": "srgb"
+          }
+        },
+        "highlights": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "midtones": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.28,
+            "g": 0.43,
+            "r": 0.55,
+            "space": "srgb"
+          }
+        },
+        "shadows": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "tones": {
+          "$ref": "#/$defs/TonerTones",
+          "default": "tritone"
+        }
+      },
+      "type": "object"
+    },
+    "ChangeColor": {
+      "description": "Change Color: shifts the hue, lightness and saturation of the pixels that match one colour,\nsoftly at the edge of the match.",
+      "properties": {
+        "colorToChange": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.2,
+            "g": 0.2,
+            "r": 0.8,
+            "space": "srgb"
+          }
+        },
+        "hueTransform": {
+          "default": 0.0,
+          "description": "Degrees; hue wraps.",
+          "format": "double",
+          "type": "number"
+        },
+        "invertMask": {
+          "default": false,
+          "description": "Change everything but the match.",
+          "type": "boolean"
+        },
+        "lightnessTransform": {
+          "default": 0.0,
+          "description": "-1-1: a share of the way to white (or to black).",
+          "format": "double",
+          "type": "number"
+        },
+        "matchColors": {
+          "$ref": "#/$defs/ChangeMatch",
+          "default": "hue"
+        },
+        "matchingSoftness": {
+          "default": 0.0,
+          "description": "0-1: the fade from a full match to none, past the tolerance.",
+          "format": "double",
+          "type": "number"
+        },
+        "matchingTolerance": {
+          "default": 0.15,
+          "description": "0-1: how far from the colour a pixel may be and still match fully.",
+          "format": "double",
+          "type": "number"
+        },
+        "saturationTransform": {
+          "default": 0.0,
+          "description": "-1-1: a share of the way to full (or no) saturation.",
+          "format": "double",
+          "type": "number"
+        },
+        "view": {
+          "$ref": "#/$defs/ChangeColorView",
+          "default": "corrected-layer"
+        }
+      },
+      "type": "object"
+    },
+    "ChangeColorView": {
+      "description": "What Change Color shows.",
+      "oneOf": [
+        {
+          "const": "corrected-layer",
+          "description": "The picture with the change applied.",
+          "type": "string"
+        },
+        {
+          "const": "color-correction-mask",
+          "description": "The matte of what matches, white on black.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeMatch": {
+      "description": "How Change Color decides a pixel is the colour to change.",
+      "oneOf": [
+        {
+          "const": "rgb",
+          "description": "Distance in RGB.",
+          "type": "string"
+        },
+        {
+          "const": "hue",
+          "description": "Distance in hue only (greys match no hue).",
+          "type": "string"
+        },
+        {
+          "const": "chroma",
+          "description": "Distance in chromaticity, whatever the brightness.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChannelMixer": {
+      "description": "Channel Mixer: each output channel is a weighted sum of the input channels. With\n`monochrome` the red row drives all three.",
+      "properties": {
+        "blue": {
+          "$ref": "#/$defs/MixerRow",
+          "default": {
+            "blue": 1.0,
+            "constant": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        },
+        "green": {
+          "$ref": "#/$defs/MixerRow",
+          "default": {
+            "blue": 0.0,
+            "constant": 0.0,
+            "green": 1.0,
+            "red": 0.0
+          }
+        },
+        "monochrome": {
+          "default": false,
+          "type": "boolean"
+        },
+        "red": {
+          "$ref": "#/$defs/MixerRow",
+          "default": {
+            "blue": 0.0,
+            "constant": 0.0,
+            "green": 0.0,
+            "red": 1.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "ChannelSource": {
+      "description": "Where Shift Channels takes a channel's value from.",
+      "enum": [
+        "alpha",
+        "red",
+        "green",
+        "blue",
+        "luminance",
+        "hue",
+        "lightness",
+        "saturation",
+        "full-on",
+        "half-on",
+        "full-off"
+      ],
+      "type": "string"
+    },
+    "ColorBalance": {
+      "description": "Color Balance: shifts the shadows, midtones and highlights (by luminance) toward a colour.",
+      "properties": {
+        "highlights": {
+          "$ref": "#/$defs/ColorShift",
+          "default": {
+            "blue": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        },
+        "midtones": {
+          "$ref": "#/$defs/ColorShift",
+          "default": {
+            "blue": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        },
+        "preserveLuminosity": {
+          "default": true,
+          "description": "Keep each pixel's luminance and change only its colour.",
+          "type": "boolean"
+        },
+        "shadows": {
+          "$ref": "#/$defs/ColorShift",
+          "default": {
+            "blue": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "ColorBalanceHls": {
+      "description": "Color Balance (HLS): shifts hue, lightness and saturation of every pixel. Lightness and\nsaturation move a share of the way to the extreme (or to zero); hue wraps.",
+      "properties": {
+        "hue": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "lightness": {
+          "default": 0.0,
+          "description": "-1-1.",
+          "format": "double",
+          "type": "number"
+        },
+        "saturation": {
+          "default": 0.0,
+          "description": "-1-1.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ColorDiffView": {
+      "description": "Which stage of Color Difference Key Color Difference Key shows. (EffectCraft also has a\nfour-up view; it needs each pixel's position, so it comes with the coordinate pass.)",
+      "oneOf": [
+        {
+          "enum": [
+            "uncorrected-matte-a",
+            "corrected-matte-a",
+            "uncorrected-matte-b",
+            "corrected-matte-b",
+            "uncorrected-matte",
+            "corrected-matte"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "source",
+          "description": "The picture as it came in.",
+          "type": "string"
+        },
+        {
+          "const": "final-output",
+          "description": "The picture with the key applied.",
+          "type": "string"
+        }
+      ]
+    },
+    "ColorDifferenceKey": {
+      "description": "Color Difference Key: the difference between the key colour's strongest channel and each of\nthe other two is a partial matte (A against the first other channel, B against the second);\nthe larger of the two, after their own levels, is the matte, which has levels of its own.",
+      "properties": {
+        "colorMatchingAccuracy": {
+          "$ref": "#/$defs/MatchAccuracy",
+          "default": "faster"
+        },
+        "keyColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "matteBlack": {
+          "default": 0.0,
+          "description": "The matte's own levels (its output stays 0 to 255): input black and white, and gamma.",
+          "format": "double",
+          "type": "number"
+        },
+        "matteGamma": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "matteWhite": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "partialA": {
+          "$ref": "#/$defs/MatteLevels",
+          "default": {
+            "gamma": 1.0,
+            "inBlack": 0.0,
+            "inWhite": 255.0,
+            "outBlack": 0.0,
+            "outWhite": 255.0
+          }
+        },
+        "partialB": {
+          "$ref": "#/$defs/MatteLevels",
+          "default": {
+            "gamma": 1.0,
+            "inBlack": 0.0,
+            "inWhite": 255.0,
+            "outBlack": 0.0,
+            "outWhite": 255.0
+          }
+        },
+        "view": {
+          "$ref": "#/$defs/ColorDiffView",
+          "default": "final-output"
+        }
+      },
+      "type": "object"
+    },
+    "ColorOverflow": {
+      "description": "What CC Color Offset does with a channel pushed past white.",
+      "oneOf": [
+        {
+          "const": "wrap",
+          "description": "Start again from black.",
+          "type": "string"
+        },
+        {
+          "const": "solarize",
+          "description": "Fold back down from white.",
+          "type": "string"
+        },
+        {
+          "const": "polarize",
+          "description": "Snap to black or white.",
+          "type": "string"
+        }
+      ]
+    },
+    "ColorRange": {
+      "description": "Color Range: keys out every pixel inside a box in a colour space, fading over the fuzziness\npast the box. All bounds are on the 0 to 255 scale of the space chosen, whose three axes are\nnamed L, a, b for Lab; Y, U, V for YUV; and R, G, B for RGB.",
+      "properties": {
+        "colorSpace": {
+          "$ref": "#/$defs/RangeSpace",
+          "default": "lab"
+        },
+        "fuzziness": {
+          "default": 0.0,
+          "description": "0-255: the fade past the box, in the same units. 0 is a hard edge.",
+          "format": "double",
+          "type": "number"
+        },
+        "maxA": {
+          "default": 100.0,
+          "format": "double",
+          "type": "number"
+        },
+        "maxB": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "maxL": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "minA": {
+          "default": 0.0,
+          "description": "On the second axis (a, U or G).",
+          "format": "double",
+          "type": "number"
+        },
+        "minB": {
+          "default": 128.0,
+          "description": "On the third axis (b, V or B).",
+          "format": "double",
+          "type": "number"
+        },
+        "minL": {
+          "default": 0.0,
+          "description": "The box's lower and upper bound on the first axis (L, Y or R).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ColorShift": {
+      "description": "A colour shift for one tonal range, -1-1 per channel.",
+      "properties": {
+        "blue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "green": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "red": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
         }
       },
       "type": "object"
@@ -487,6 +1300,344 @@
             "effect"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Tritone",
+          "properties": {
+            "effect": {
+              "const": "tritone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ChannelMixer",
+          "properties": {
+            "effect": {
+              "const": "channel-mixer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorBalance",
+          "properties": {
+            "effect": {
+              "const": "color-balance",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/GammaPedestalGain",
+          "properties": {
+            "effect": {
+              "const": "gamma-pedestal-gain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorBalanceHls",
+          "properties": {
+            "effect": {
+              "const": "color-balance-hls",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BlackWhite",
+          "properties": {
+            "effect": {
+              "const": "black-white",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PhotoFilter",
+          "properties": {
+            "effect": {
+              "const": "photo-filter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LeaveColor",
+          "properties": {
+            "effect": {
+              "const": "leave-color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/VideoLimiter",
+          "properties": {
+            "effect": {
+              "const": "video-limiter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BroadcastColors",
+          "properties": {
+            "effect": {
+              "const": "broadcast-colors",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcToner",
+          "properties": {
+            "effect": {
+              "const": "cc-toner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcColorOffset",
+          "properties": {
+            "effect": {
+              "const": "cc-color-offset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcThreshold",
+          "properties": {
+            "effect": {
+              "const": "cc-threshold",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcThresholdRgb",
+          "properties": {
+            "effect": {
+              "const": "cc-threshold-rgb",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ChangeColor",
+          "properties": {
+            "effect": {
+              "const": "change-color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ShiftChannels",
+          "properties": {
+            "effect": {
+              "const": "shift-channels",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LinearColorKey",
+          "properties": {
+            "effect": {
+              "const": "linear-color-key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RemoveColorMatting",
+          "properties": {
+            "effect": {
+              "const": "remove-color-matting",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Extract",
+          "properties": {
+            "effect": {
+              "const": "extract",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcColorNeutralizer",
+          "properties": {
+            "effect": {
+              "const": "cc-color-neutralizer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Unmult",
+          "properties": {
+            "effect": {
+              "const": "unmult",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SpillSuppressor",
+          "properties": {
+            "effect": {
+              "const": "spill-suppressor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorRange",
+          "properties": {
+            "effect": {
+              "const": "color-range",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Arithmetic",
+          "properties": {
+            "effect": {
+              "const": "arithmetic",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorDifferenceKey",
+          "properties": {
+            "effect": {
+              "const": "color-difference-key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SelectiveColor",
+          "properties": {
+            "effect": {
+              "const": "selective-color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -498,6 +1649,16 @@
           "default": true,
           "description": "A disabled effect is skipped entirely. Keyframable with hold keys.",
           "type": "boolean"
+        },
+        "maskIds": {
+          "description": "Mask Reference (3.28): the ids of masks of the same object that limit\nthis effect. The effect shows only where they cover, the rest of the\nlayer keeps what it was before this effect. Absent or empty: the whole\nlayer. A referenced mask counts even in mode `none`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -547,6 +1708,53 @@
       },
       "type": "object"
     },
+    "Extract": {
+      "description": "Extract: keeps the pixels whose chosen channel lies between the black and white points (0 to\n255) and fades the rest over the softness.",
+      "properties": {
+        "blackPoint": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "blackSoftness": {
+          "default": 0.0,
+          "description": "0-255: the fade below the black point.",
+          "format": "double",
+          "type": "number"
+        },
+        "channel": {
+          "$ref": "#/$defs/ExtractChannel",
+          "default": "luminance"
+        },
+        "invert": {
+          "default": false,
+          "type": "boolean"
+        },
+        "whitePoint": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "whiteSoftness": {
+          "default": 0.0,
+          "description": "0-255: the fade above the white point.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ExtractChannel": {
+      "description": "What Extract measures.",
+      "enum": [
+        "luminance",
+        "red",
+        "green",
+        "blue",
+        "alpha"
+      ],
+      "type": "string"
+    },
     "Fill": {
       "description": "Paints the layer's pixels with a colour, keeping their coverage.",
       "properties": {
@@ -565,6 +1773,66 @@
           "description": "0–1: how much of the colour replaces the layer's own.",
           "format": "double",
           "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "GammaChannel": {
+      "description": "One channel of Gamma/Pedestal/Gain: `pedestal + (gain - pedestal) * v^gamma`.",
+      "properties": {
+        "gain": {
+          "default": 1.0,
+          "description": "0-10, the value white maps to.",
+          "format": "double",
+          "type": "number"
+        },
+        "gamma": {
+          "default": 1.0,
+          "description": "0.01-10; 1 is linear.",
+          "format": "double",
+          "type": "number"
+        },
+        "pedestal": {
+          "default": 0.0,
+          "description": "-1-1, the value black maps to.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "GammaPedestalGain": {
+      "description": "Gamma/Pedestal/Gain, per colour channel, with a Black Stretch that lifts low values.",
+      "properties": {
+        "blackStretch": {
+          "default": 0.0,
+          "description": "0-10: lifts the dark end of every channel; 0 is off.",
+          "format": "double",
+          "type": "number"
+        },
+        "blue": {
+          "$ref": "#/$defs/GammaChannel",
+          "default": {
+            "gain": 1.0,
+            "gamma": 1.0,
+            "pedestal": 0.0
+          }
+        },
+        "green": {
+          "$ref": "#/$defs/GammaChannel",
+          "default": {
+            "gain": 1.0,
+            "gamma": 1.0,
+            "pedestal": 0.0
+          }
+        },
+        "red": {
+          "$ref": "#/$defs/GammaChannel",
+          "default": {
+            "gain": 1.0,
+            "gamma": 1.0,
+            "pedestal": 0.0
+          }
         }
       },
       "type": "object"
@@ -710,6 +1978,32 @@
       },
       "type": "object"
     },
+    "InkShift": {
+      "description": "One colour range's adjustment in print inks, -1 to 1 each (-100% to 100%). Positive adds the\nink, negative removes it. `black` moves all three colour channels together.",
+      "properties": {
+        "black": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "cyan": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "magenta": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "yellow": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "Invert": {
       "description": "Invert: `1 - v` on the chosen channels, blended back toward the original.",
       "properties": {
@@ -781,6 +2075,103 @@
         }
       },
       "type": "object"
+    },
+    "KeyMatch": {
+      "description": "How Linear Color Key measures how far a pixel is from the key colour.",
+      "enum": [
+        "rgb",
+        "hue",
+        "chroma"
+      ],
+      "type": "string"
+    },
+    "KeyOperation": {
+      "description": "Which side of the key Linear Color Key makes transparent.",
+      "oneOf": [
+        {
+          "const": "key-colors",
+          "description": "The colours that match go transparent.",
+          "type": "string"
+        },
+        {
+          "const": "keep-colors",
+          "description": "Only the colours that match stay.",
+          "type": "string"
+        }
+      ]
+    },
+    "KeyView": {
+      "description": "What a keyer shows.",
+      "oneOf": [
+        {
+          "const": "final-output",
+          "description": "The picture with the key applied.",
+          "type": "string"
+        },
+        {
+          "const": "source-only",
+          "description": "The picture as it came in.",
+          "type": "string"
+        },
+        {
+          "const": "matte-only",
+          "description": "The matte: white where the picture is kept, on opaque black.",
+          "type": "string"
+        }
+      ]
+    },
+    "LeaveColor": {
+      "description": "Leave Color: greys everything but one colour. `tolerance` is how far a pixel may be from it and\nkeep its colour; `edge_softness` fades the rest in over that much more.",
+      "properties": {
+        "amount": {
+          "default": 0.0,
+          "description": "0-1: how much of the greying is applied; 0 leaves the picture alone.",
+          "format": "double",
+          "type": "number"
+        },
+        "color": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "edgeSoftness": {
+          "default": 0.0,
+          "description": "0-1.",
+          "format": "double",
+          "type": "number"
+        },
+        "matchColors": {
+          "$ref": "#/$defs/LeaveMatch",
+          "default": "rgb"
+        },
+        "tolerance": {
+          "default": 0.15,
+          "description": "0-1.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "LeaveMatch": {
+      "description": "How Leave Color decides a pixel is the colour to keep.",
+      "oneOf": [
+        {
+          "const": "rgb",
+          "description": "Distance in RGB.",
+          "type": "string"
+        },
+        {
+          "const": "hue",
+          "description": "Distance in hue only (greys match no hue).",
+          "type": "string"
+        }
+      ]
     },
     "Levels": {
       "description": "Levels: the RGB controls map every colour channel, then each channel's\nown; the alpha controls map coverage where the layer drew.",
@@ -879,6 +2270,88 @@
       },
       "type": "object"
     },
+    "LimiterCompression": {
+      "description": "How far below the clip level the soft knee starts.",
+      "enum": [
+        "none",
+        "3",
+        "5",
+        "10",
+        "20"
+      ],
+      "type": "string"
+    },
+    "LimiterLevel": {
+      "description": "The level Video Limiter clips to, as a share of white.",
+      "enum": [
+        "90",
+        "95",
+        "100",
+        "105",
+        "109"
+      ],
+      "type": "string"
+    },
+    "LimiterMethod": {
+      "description": "What Video Limiter limits: brightness, colour, or both.",
+      "oneOf": [
+        {
+          "const": "luma",
+          "description": "Compress the luminance, keep each channel's offset from it.",
+          "type": "string"
+        },
+        {
+          "const": "chroma",
+          "description": "Pull the colour towards its luminance until every channel fits.",
+          "type": "string"
+        },
+        {
+          "const": "smart-limit",
+          "description": "Both, luminance first.",
+          "type": "string"
+        }
+      ]
+    },
+    "LinearColorKey": {
+      "description": "Linear Color Key: makes the pixels near one colour transparent (or keeps only them), fading\nover the softness past the tolerance.",
+      "properties": {
+        "keyColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "keyOperation": {
+          "$ref": "#/$defs/KeyOperation",
+          "default": "key-colors"
+        },
+        "matchColors": {
+          "$ref": "#/$defs/KeyMatch",
+          "default": "rgb"
+        },
+        "softness": {
+          "default": 0.1,
+          "description": "0-1: the fade past the tolerance.",
+          "format": "double",
+          "type": "number"
+        },
+        "tolerance": {
+          "default": 0.1,
+          "description": "0-1: how far from the key a pixel may be and still be keyed out fully.",
+          "format": "double",
+          "type": "number"
+        },
+        "view": {
+          "$ref": "#/$defs/KeyView",
+          "default": "final-output"
+        }
+      },
+      "type": "object"
+    },
     "LinearWipe": {
       "properties": {
         "angle": {
@@ -901,6 +2374,132 @@
         }
       },
       "type": "object"
+    },
+    "MatchAccuracy": {
+      "description": "How exactly Color Difference Key measures colour: on the values as they are, or on light.",
+      "enum": [
+        "faster",
+        "more-accurate"
+      ],
+      "type": "string"
+    },
+    "MatteLevels": {
+      "description": "A levels control on a matte: input black and white and output black and white on a 0 to 255\nscale, and a gamma.",
+      "properties": {
+        "gamma": {
+          "default": 1.0,
+          "description": "0.01-10; 1 is linear.",
+          "format": "double",
+          "type": "number"
+        },
+        "inBlack": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "inWhite": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "outBlack": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "outWhite": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "MixerRow": {
+      "description": "One output channel's mix: how much of each input channel it takes, plus a constant.",
+      "properties": {
+        "blue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "constant": {
+          "default": 0.0,
+          "description": "-2-2, added after the mix.",
+          "format": "double",
+          "type": "number"
+        },
+        "green": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "red": {
+          "default": 0.0,
+          "description": "-2-2 each, 1 is the whole channel.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "PhotoFilter": {
+      "description": "Photo Filter: multiplies the picture by a filter colour, `density` of the way, optionally\nkeeping the pixel's luminance.",
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.09,
+            "g": 0.54,
+            "r": 0.93,
+            "space": "srgb"
+          },
+          "description": "Used when `filter` is `custom`."
+        },
+        "density": {
+          "default": 0.25,
+          "description": "0-1.",
+          "format": "double",
+          "type": "number"
+        },
+        "filter": {
+          "$ref": "#/$defs/PhotoFilterPreset",
+          "default": "warming-85"
+        },
+        "preserveLuminosity": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "PhotoFilterPreset": {
+      "description": "The camera and colour filters Photo Filter offers. `Custom` uses the effect's own colour.",
+      "enum": [
+        "warming-85",
+        "warming-lba",
+        "warming-81",
+        "cooling-80",
+        "cooling-lbb",
+        "cooling-82",
+        "red",
+        "orange",
+        "yellow",
+        "green",
+        "cyan",
+        "blue",
+        "violet",
+        "magenta",
+        "sepia",
+        "deep-red",
+        "deep-blue",
+        "deep-emerald",
+        "deep-yellow",
+        "underwater",
+        "custom"
+      ],
+      "type": "string"
     },
     "Posterize": {
       "description": "Posterize: each colour channel snaps to `level` evenly spaced values.",
@@ -955,6 +2554,47 @@
       ],
       "type": "string"
     },
+    "RangeSpace": {
+      "description": "The colour space Color Range measures a pixel in. Lab is the default.",
+      "oneOf": [
+        {
+          "const": "lab",
+          "description": "CIE Lab, scaled so L runs 0 to 255 and a and b are centred on 128.",
+          "type": "string"
+        },
+        {
+          "const": "yuv",
+          "description": "Y, U and V, with U and V centred on 128.",
+          "type": "string"
+        },
+        {
+          "const": "rgb",
+          "description": "Red, green and blue, 0 to 255.",
+          "type": "string"
+        }
+      ]
+    },
+    "RemoveColorMatting": {
+      "description": "Remove Color Matting: takes a background colour back out of a picture that was matted against\nit, so its edges stop carrying a halo.",
+      "properties": {
+        "backgroundColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "clipHdr": {
+          "default": true,
+          "description": "Keep every channel at or under the alpha.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Rgba": {
       "description": "A colour, with the space it was authored in.\n\nComponents are 0–1 floats rather than 8-bit bytes because the working\nspace is linear and 8 bits of linear has visible banding in the shadows.",
       "properties": {
@@ -988,6 +2628,127 @@
       ],
       "type": "object"
     },
+    "SelectiveColor": {
+      "description": "Selective Color: changes the amount of cyan, magenta, yellow and black ink in one range of\ncolours without touching the others. A pixel belongs to the primary and secondary range its\nhue falls in, to whites by how light its darkest channel is, to blacks by how dark its\nlightest channel is, and to neutrals by how close it sits to mid grey; the ranges' shifts are\nsummed by those weights.",
+      "properties": {
+        "blacks": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "blues": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "cyans": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "greens": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "magentas": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "method": {
+          "$ref": "#/$defs/SelectiveMethod",
+          "default": "relative"
+        },
+        "neutrals": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "reds": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "whites": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "yellows": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "SelectiveMethod": {
+      "description": "How Selective Color reads its adjustments: a share of the ink a pixel already has\n(Relative), or a flat amount (Absolute).",
+      "enum": [
+        "relative",
+        "absolute"
+      ],
+      "type": "string"
+    },
+    "ShiftChannels": {
+      "description": "Shift Channels: each of alpha, red, green and blue takes its value from any channel of the\npixel (or a constant). The defaults take each from itself.",
+      "properties": {
+        "takeAlphaFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "alpha"
+        },
+        "takeBlueFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "blue"
+        },
+        "takeGreenFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "green"
+        },
+        "takeRedFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "red"
+        }
+      },
+      "type": "object"
+    },
     "SourceColorSpace": {
       "description": "What a colour or a texture was authored in. There is no `Unknown`: an\nuntagged source is a defect the importer must refuse, not a value a\nrenderer may guess at (B.1, \"never infer\").",
       "oneOf": [
@@ -1014,6 +2775,47 @@
         }
       ]
     },
+    "SpillAccuracy": {
+      "description": "How exactly Spill Suppressor finds the spill.",
+      "oneOf": [
+        {
+          "const": "faster",
+          "description": "The key's strongest channel is held to the larger of the other two.",
+          "type": "string"
+        },
+        {
+          "const": "better",
+          "description": "The part of each pixel that points along the key's colour is removed.",
+          "type": "string"
+        }
+      ]
+    },
+    "SpillSuppressor": {
+      "description": "Spill Suppressor: takes the cast of a keyed screen's colour out of the picture.",
+      "properties": {
+        "colorAccuracy": {
+          "$ref": "#/$defs/SpillAccuracy",
+          "default": "faster"
+        },
+        "colorToSuppress": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "suppression": {
+          "default": 1.0,
+          "description": "0-2: how much of the spill goes.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "Threshold": {
       "description": "Threshold: pixels at or above `level` luminance become white, the rest black.",
       "properties": {
@@ -1025,6 +2827,28 @@
         }
       },
       "type": "object"
+    },
+    "ThresholdChannel": {
+      "description": "What CC Threshold compares with the level.",
+      "oneOf": [
+        {
+          "enum": [
+            "luminance",
+            "saturation"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "rgb",
+          "description": "Each of red, green and blue on its own.",
+          "type": "string"
+        },
+        {
+          "const": "alpha",
+          "description": "The coverage: the result is hard-edged.",
+          "type": "string"
+        }
+      ]
     },
     "Tint": {
       "description": "Maps luminance to a colour ramp between two colours.",
@@ -1058,6 +2882,112 @@
       },
       "type": "object"
     },
+    "TonerTones": {
+      "description": "How many colours CC Toner maps the tones of the picture to.",
+      "oneOf": [
+        {
+          "const": "duotone",
+          "description": "Shadows and highlights.",
+          "type": "string"
+        },
+        {
+          "const": "tritone",
+          "description": "Shadows, midtones and highlights.",
+          "type": "string"
+        },
+        {
+          "const": "pentone",
+          "description": "Shadows, darktones, midtones, brights and highlights.",
+          "type": "string"
+        }
+      ]
+    },
+    "Tritone": {
+      "description": "Tritone: luminance maps to a ramp shadows, midtones, highlights; `blend_with_original`\nbrings the original colour back. The colours' alpha is not used.",
+      "properties": {
+        "blendWithOriginal": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back; 0 is the full ramp.",
+          "format": "double",
+          "type": "number"
+        },
+        "highlights": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "midtones": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.5,
+            "g": 0.5,
+            "r": 0.5,
+            "space": "srgb"
+          }
+        },
+        "shadows": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        }
+      },
+      "type": "object"
+    },
+    "Unmult": {
+      "description": "Unmult: turns the distance from a black or white background into coverage, and (by default)\ntakes the background back out of the colour.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/UnmultBackground",
+          "default": "black"
+        },
+        "blackLevel": {
+          "default": 0.0,
+          "description": "0-1: how bright a pixel on a black background has to be to start to show.",
+          "format": "double",
+          "type": "number"
+        },
+        "clipHdr": {
+          "default": true,
+          "type": "boolean"
+        },
+        "removeColorMatting": {
+          "default": true,
+          "type": "boolean"
+        },
+        "softness": {
+          "default": 1.0,
+          "description": "0-1: the ramp from clear to solid.",
+          "format": "double",
+          "type": "number"
+        },
+        "whiteLevel": {
+          "default": 1.0,
+          "description": "0-1: how far from white a pixel on a white background has to be to start to show.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "UnmultBackground": {
+      "description": "The colour Unmult takes out of the picture.",
+      "enum": [
+        "black",
+        "white"
+      ],
+      "type": "string"
+    },
     "Vibrance": {
       "description": "Vibrance: saturation weighted `(1 - s) * min(s, 0.5)`: a grey and a fully\nsaturated colour are left alone, and a half-saturated one gains most.",
       "properties": {
@@ -1072,6 +3002,38 @@
           "description": "-1–1, weighted toward low-saturation pixels.",
           "format": "double",
           "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "VideoLimiter": {
+      "description": "Video Limiter: keeps every pixel inside a legal range, softly bending the highlights first;\noptionally paints the pixels it had to change in a warning colour.",
+      "properties": {
+        "clipLevel": {
+          "$ref": "#/$defs/LimiterLevel",
+          "default": "100"
+        },
+        "clipMethod": {
+          "$ref": "#/$defs/LimiterMethod",
+          "default": "smart-limit"
+        },
+        "compressionBeforeClipping": {
+          "$ref": "#/$defs/LimiterCompression",
+          "default": "5"
+        },
+        "gamutWarning": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gamutWarningColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
         }
       },
       "type": "object"

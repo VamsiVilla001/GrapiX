@@ -1,0 +1,146 @@
+{
+ "input": {
+  "state": {
+   "decision": "Three design choices in the identifiers contract (build plan row 1.13), made while coding on 24 Nov 2026 and put to Jev and Laya afterwards.",
+   "owner_decision": "The owner decided on 24 Nov 2026: a Scene ID is a label shown and edited in both the Editor and Playout; a Take ID (renamed Cue ID the same day) exists only in Playout, is typed by the operator, is unique in the show, and is how other systems (TCP, UDP, HTTP, custom scripts) call a cue. Live on air belongs to Playout only.",
+   "row_text": "The contract has an internal scene key (never typed), a Scene ID (a label that starts at 1, is editable and is shown in both applications) and a Cue ID (typed by the Playout operator, unique within a show, locked while on air). Every reference uses the internal key and the content hash. Tests: renaming a Scene ID breaks no cue; a duplicate Cue ID is refused by name; editing a Cue ID on air is refused.",
+   "context": "GrapiX is a broadcast graphics system used by operators in India and elsewhere; names of people already accept letters of any script. The control protocol has a wire field named takeId that today carries the scene's internal key (a canonical file name). Renaming a wire field changes the protocol that the Editor, Playout, the MCP tools and the conformance suite all speak; the protocol has a version number and a check that fails on unannounced changes.",
+   "what_was_built": "Cue IDs are compared without regard to case (Open and open are the same Cue ID). A Cue ID is 1 to 64 characters: letters of any script with their combining marks, digits and . - _, starting with a letter or digit, no spaces, stored in Unicode NFC. The wire field takeId was not renamed; the plan rows say it carries the scene key."
+  },
+  "questions": {
+   "case": {
+    "type": "choice",
+    "instructions": "How should a show decide that two Cue IDs are the same one, given operators type them and other systems call them over TCP, UDP and HTTP?",
+    "criteria": {
+     "A": "Without regard to case: Open and open are one Cue ID, so the second is refused as a duplicate, and a call by either spelling finds it.",
+     "B": "Exactly as typed: Open and open are two different Cue IDs."
+    }
+   },
+   "characters": {
+    "type": "choice",
+    "instructions": "Which characters should a Cue ID allow?",
+    "criteria": {
+     "A": "Letters of any script with their combining marks, digits and . - _, no spaces, normalised to NFC (what was built).",
+     "B": "ASCII letters, digits and . - _ only, so every external system can type it.",
+     "C": "Any printable text, spaces included, as the operator types it."
+    }
+   },
+   "wire_rename": {
+    "type": "choice",
+    "instructions": "Should the wire field takeId be renamed now that a Take ID is called a Cue ID and the field carries the scene key?",
+    "criteria": {
+     "A": "Not now: keep takeId on the wire, document that it carries the scene key, and rename it when the protocol is next versioned.",
+     "B": "Now: rename it to sceneKey in this change, across the Editor, Playout, MCP tools and conformance, with a protocol version bump."
+    }
+   },
+   "contract_done": {
+    "type": "noul",
+    "instructions": "Row 1.13 is a contract row. With the types, the cue table, the refusals and the three tests the row names in the shared contract, but no screen showing a Scene ID or taking a Cue ID yet, is the row done?",
+    "criteria": {
+     "true": "Yes: the row asks for the contract and its tests; screens are other rows.",
+     "false": "No: it stays active until a screen uses it."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "case": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.86,
+    "probabilities": {
+     "A": 0.93,
+     "B": 0.07
+    }
+   },
+   "characters": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.96,
+    "probabilities": {
+     "A": 0.97,
+     "B": 0.03,
+     "C": 0
+    }
+   },
+   "wire_rename": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.86,
+    "probabilities": {
+     "A": 0.93,
+     "B": 0.07
+    }
+   },
+   "contract_done": {
+    "type": "noul",
+    "noul": 0.77
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 2044,
+   "output_tokens": 0,
+   "state_tokens": 421,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "case": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6866,
+     "B": 0.3134
+    },
+    "confidence": 0.1029,
+    "answer_confidence": 0.6866,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "characters": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6972,
+     "B": 0.1623,
+     "C": 0.1405
+    },
+    "confidence": 0.2516,
+    "answer_confidence": 0.6972,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "wire_rename": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5718,
+     "B": 0.4282
+    },
+    "confidence": 0.0149,
+    "answer_confidence": 0.5718,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "contract_done": {
+    "type": "noul",
+    "noul": 0.9602,
+    "confidence": 0.9602,
+    "answer_confidence": 0.9602,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

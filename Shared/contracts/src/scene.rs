@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::color::{ColorValue, Rgba, SourceColorSpace, WorkingColorSpace};
+use crate::color::{ColorDepth, ColorValue, Rgba, SourceColorSpace, WorkingColorSpace};
 use crate::font::FontDefinition;
 use crate::material::{BlendMode, CullMode, FitMode, MaterialBinding};
 use crate::provenance::AssetProvenance;
@@ -60,6 +60,7 @@ use crate::{ContentHash, RationalRate, Refusal, Revision};
 pub enum AssetKind {
     Image,
     Video,
+    Audio,
     Svg,
     Font,
     Model,
@@ -171,6 +172,10 @@ pub struct SceneTimeline {
     /// keeps a scene authored before phases existed valid and unphased.
     #[serde(default)]
     pub phases: Vec<crate::phases::TimelinePhase>,
+    /// Animated paths (11.112): keys that are whole paths with stable vertex
+    /// ids. Empty on a scene with none, and then absent from its JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_channels: Vec<crate::path_anim::PathChannel>,
 }
 
 /// The live data a scene's bindings resolve against. Opaque here — the
@@ -180,6 +185,26 @@ pub type DataContext = serde_json::Map<String, serde_json::Value>;
 // ---------------------------------------------------------------------------
 // Objects — the lean union. Adding a kind is an additive, reviewed change.
 // ---------------------------------------------------------------------------
+
+/// Which way a guide runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum GuideAxis {
+    /// A vertical line at an x position.
+    X,
+    /// A horizontal line at a y position.
+    Y,
+}
+
+/// A guide: an infinite line on the canvas at `position` pixels along its axis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Guide {
+    /// Stable within the scene; the lowest free number is given to a new one.
+    pub id: u32,
+    pub axis: GuideAxis,
+    pub position: f64,
+}
 
 /// A 2D point in scene coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
@@ -297,11 +322,18 @@ pub struct ObjectBase {
     pub masks: Option<Vec<Mask>>,
     /// The layer's track matte (3.19, user decisions 15 Nov 2026): another
     /// object, named by id, whose alpha or luma shapes this layer each frame,
-    /// at the source's own opacity. The source is a matte only and is never
-    /// drawn itself, whatever its visible flag; several layers may share it.
+    /// at the source's own opacity. The source always mattes, whatever its
+    /// visible flag, and is also drawn when it is visible (3.30); several
+    /// layers may share it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub track_matte: Option<TrackMatte>,
+    /// Preserve Underlying Transparency (3.28): the layer is drawn only where
+    /// what is already composited below it is opaque, in proportion to that
+    /// alpha, as After Effects' switch does. Absent and false are the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub preserve_underlying_transparency: Option<bool>,
     /// The layer's effect stack (3.22), applied in order to its own pixels
     /// before it is transformed and blended. Read it through
     /// [`ObjectBase::effects`]; absent and empty both mean none.
@@ -450,6 +482,11 @@ pub struct TrackMatte {
 }
 
 impl ObjectBase {
+    /// Whether the layer keeps to the transparency of what is below it (3.28).
+    pub fn preserves_underlying_transparency(&self) -> bool {
+        self.preserve_underlying_transparency == Some(true)
+    }
+
     /// The layer's track matte, if it has one (3.19).
     pub fn track_matte(&self) -> Option<&TrackMatte> {
         self.track_matte.as_ref()
@@ -471,14 +508,59 @@ pub enum MaskMode {
     Subtract,
     /// Keeps only where it overlaps the masks above.
     Intersect,
-    /// Keeps where exactly one of it and the masks above covers.
+    /// Keeps where exactly one of it and the masks above covers; on soft
+    /// coverage the absolute difference of the two (the Masking spec v2's
+    /// baseline, `|a - c|`).
     Difference,
+    /// Keeps the larger of its coverage and the masks above's.
+    Lighten,
+    /// Keeps the smaller of its coverage and the masks above's.
+    Darken,
 }
+
+/// How a mask's feather falls off across its edge (3.27, Masking spec v2).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum MaskFalloff {
+    /// A Gaussian: the edge ramps like an S, softest at the ends.
+    #[default]
+    Smooth,
+    /// A box of the feather's width: the edge ramps in a straight line.
+    Linear,
+}
+
+/// A point of a mask's variable feather (11.108, Masking spec v2 4.6): where on the mask's path it sits (segment `segment`, parameter `t`),
+/// how far the edge softens there and how smoothly that blends into the next point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FeatherPoint {
+    /// The segment of the mask's path the point is on.
+    pub segment: u32,
+    /// Where on that segment, 0 to 1.
+    pub t: f64,
+    /// Signed, in pixels of the layer: positive softens the edge outward, negative inward; the transition spans `|radius|` on that
+    /// side only. Zero is a hard edge there.
+    pub radius: f64,
+    /// 0 to 1: how the radius changes toward the next point: 0 in a straight line, 1 smoothly (smoothstep).
+    #[serde(default)]
+    pub tension: f64,
+}
+
+/// Most feather points one mask holds.
+pub const MOST_FEATHER_POINTS: usize = 64;
 
 /// One layer mask (3.19): a closed path in the object's own coordinates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Mask {
+    /// A name that stays with the mask when the stack is reordered or renamed,
+    /// which an effect's mask reference points at (3.28). Absent for a mask
+    /// nothing refers to; unique within the object when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub id: Option<String>,
     pub path: BezierPath,
     #[serde(default)]
     pub mode: MaskMode,
@@ -486,6 +568,21 @@ pub struct Mask {
     /// (the blur's standard deviation is half of it).
     #[serde(default)]
     pub feather: f64,
+    /// The feather across the other axis, in pixels; absent, the same as
+    /// `feather` (3.27). Both are in the object's own pixels, so the viewer's
+    /// zoom never changes them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub feather_y: Option<f64>,
+    /// How the feather falls off (3.27); a Gaussian when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub falloff: Option<MaskFalloff>,
+    /// Variable feather (11.108): when there are points, the edge softens by the amount the points give along the path (blended around
+    /// the closed contour by distance along it) instead of by `feather`, which then does nothing. Absent or empty: the uniform feather.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub feather_points: Option<Vec<FeatherPoint>>,
     /// Grows (positive) or shrinks (negative) the mask outward from its
     /// path, in pixels.
     #[serde(default)]
@@ -494,6 +591,13 @@ pub struct Mask {
     pub opacity: f64,
     #[serde(default)]
     pub inverted: bool,
+}
+
+impl Mask {
+    /// The feather along y: `feather_y`, or the same as `feather`.
+    pub fn feather_across(&self) -> f64 {
+        self.feather_y.unwrap_or(self.feather)
+    }
 }
 
 /// Most masks one object may have (3.19).
@@ -558,6 +662,7 @@ impl ObjectBase {
             blend_mode: None,
             masks: None,
             track_matte: None,
+            preserve_underlying_transparency: None,
             effects: None,
         }
     }
@@ -818,6 +923,41 @@ pub struct BezierPath {
     pub vertices: Vec<Vec2>,
     pub in_tangents: Vec<Vec2>,
     pub out_tangents: Vec<Vec2>,
+    /// A stable id per vertex (11.112), parallel to `vertices`; absent on old
+    /// scenes (the vertex index then stands for it). Ids survive inserts,
+    /// deletes, reversal and undo, so two keys of an animated path correspond
+    /// by id, never by index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vertex_ids: Option<Vec<u32>>,
+    /// The kind of each vertex (11.113), parallel to `vertices`; absent means
+    /// "inferred from the handles" as before. An `auto` vertex's stored handles
+    /// are ignored: [`BezierPath::effective`] derives them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vertex_kinds: Option<Vec<VertexKind>>,
+    /// Tension of the `auto` handles, 0 to 1 (default 0.5: centripetal
+    /// Catmull-Rom). Absent means the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub auto_tension: Option<f64>,
+}
+
+/// How a path vertex's handles behave (11.113, pen spec v2 section 4).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum VertexKind {
+    /// Handles move independently (or are absent).
+    #[default]
+    Corner,
+    /// Handles stay collinear and opposite; each keeps its own length.
+    Smooth,
+    /// Handles stay collinear, opposite and of equal length.
+    Symmetric,
+    /// Handles are derived from the neighbours; stored ones are ignored.
+    Auto,
 }
 
 /// An After-Effects-style shape layer: a bezier path with fill and stroke
@@ -861,6 +1001,12 @@ pub struct ShapeObject {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub trim_offset: Option<f64>,
+    /// A stable id per subpath (11.112, the spec's `contourId`): `path` is the first, then `compound_paths` in order. Absent until
+    /// something needs it (a path channel, a link, removing a subpath); ids survive edits, undo and save, and a subpath taken
+    /// out takes its id with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub contour_ids: Option<Vec<u32>>,
 }
 
 #[derive(
@@ -1699,8 +1845,15 @@ fn apply(m: (f64, f64, f64, f64, f64, f64), x: f64, y: f64) -> (f64, f64) {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneDocument {
+    /// The scene key (1.13): the internal address, a canonical file name. Never typed as a name and never changed by renaming the scene or
+    /// its Scene ID; every reference holds it.
     pub id: String,
     pub name: String,
+    /// The Scene ID (1.13): the label a person edits and both applications show. Not an address: changing it changes nothing that points
+    /// at the scene. Absent until one is set; a new scene is offered the first free number from 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scene_label: Option<String>,
     /// Schema version: [`SCENE_SCHEMA_VERSION`] when this build writes it.
     /// The reader upgrades an older version it knows and refuses any other
     /// by name (`SceneSchemaUnsupported`).
@@ -1713,6 +1866,13 @@ pub struct SceneDocument {
     /// (3.15). Required from schema 3; an older document upgrades to
     /// [`WorkingColorSpace::BEFORE_3_15`], the space it was authored in.
     pub working_color_space: WorkingColorSpace,
+    /// Bits per channel this scene composites at: its project's declared
+    /// depth. Required from schema 4; an older document upgrades to
+    /// [`ColorDepth::BEFORE_DEPTH`], the 32-bit float it rendered in; a
+    /// document that omits it (a saved journal, an older save) reads as that
+    /// too, because that is what it meant.
+    #[serde(default = "before_depth")]
+    pub color_depth: ColorDepth,
     /// The camera Program renders through. Absent selects the documented
     /// synthetic 2D orthographic camera; a present id must resolve to a
     /// `CameraObject` in this scene.
@@ -1747,16 +1907,28 @@ pub struct SceneDocument {
     /// Older documents omit this list and reopen with no saved styles.
     #[serde(default)]
     pub text_styles: Vec<crate::text_style::TextStyle>,
+    /// Paths that several objects share (11.112): a shape and a mask, or two masks, with one revision. Absent
+    /// from the JSON of a scene with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_links: Vec<crate::path_link::PathLink>,
+    /// Guides the author put on the canvas (11.44, Pen spec v2 section 9): a line along x or y a point snaps to, outranking the generic
+    /// lines. Kept with the scene, so they save and load with it. Absent from the JSON of a scene with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<Guide>,
     /// The scene graph, in draw order.
     #[serde(default)]
     pub objects: Vec<SceneObject>,
 }
 
+const fn before_depth() -> ColorDepth {
+    ColorDepth::BEFORE_DEPTH
+}
+
 /// The scene document schema this build writes. Version 2 (11.39) added a
 /// provenance record to every asset; version 3 (3.15) added the working
-/// colour space. [`parse_scene_document`] upgrades version 1 and 2
+/// colour space; version 4 added the colour depth. [`parse_scene_document`] upgrades version 1 and 2
 /// documents as it reads them.
-pub const SCENE_SCHEMA_VERSION: u32 = 3;
+pub const SCENE_SCHEMA_VERSION: u32 = 4;
 
 /// Construct the Editor's default empty authored document.
 ///
@@ -1771,6 +1943,7 @@ pub fn new_scene(id: &str, name: &str, working_color_space: WorkingColorSpace) -
         version: SCENE_SCHEMA_VERSION,
         revision: None,
         working_color_space,
+        color_depth: ColorDepth::NEW_PROJECT,
         active_camera_id: None,
         canvas: SceneCanvas {
             width: 1920,
@@ -1790,6 +1963,9 @@ pub fn new_scene(id: &str, name: &str, working_color_space: WorkingColorSpace) -
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects: Vec::new(),
     }
 }
@@ -1949,6 +2125,9 @@ pub fn parse_scene_document(bytes: &[u8]) -> Result<SceneDocument, Refusal> {
 ///   linear light, so that is what the document meant, and it renders
 ///   exactly as before.
 ///
+/// - Versions 1 to 3 (before depth): the document gains `colorDepth: "32"`,
+///   because every result was then a 32-bit float.
+///
 /// Any other version refuses `SceneSchemaUnsupported`: a newer document read
 /// by an older build is exactly the case that must not render with what it
 /// added silently dropped. A missing or non-numeric version is left to the
@@ -1984,6 +2163,11 @@ fn upgrade_scene_json(raw: &mut serde_json::Value) -> Result<(), Refusal> {
     if let Some(document) = raw.as_object_mut() {
         document.entry("workingColorSpace").or_insert_with(|| {
             serde_json::to_value(WorkingColorSpace::BEFORE_3_15).expect("a unit enum serialises")
+        });
+    }
+    if let Some(document) = raw.as_object_mut() {
+        document.entry("colorDepth").or_insert_with(|| {
+            serde_json::to_value(ColorDepth::BEFORE_DEPTH).expect("a unit enum serialises")
         });
     }
     raw["version"] = serde_json::Value::from(SCENE_SCHEMA_VERSION);
@@ -2198,6 +2382,7 @@ mod parse_tests {
         // path. A false positive here would make publishing impossible.
         let document = SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "scene_1".into(),
             name: "Catalogue".into(),
             version: SCENE_SCHEMA_VERSION,
@@ -2218,6 +2403,9 @@ mod parse_tests {
             materials: vec![],
             controls: vec![],
             text_styles: vec![],
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: super::tests::catalogue(),
         };
         let bytes = serde_json::to_vec(&document).unwrap();
@@ -2386,6 +2574,9 @@ mod tests {
                     vertices: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 10.0, y: 0.0 }],
                     in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: -2.0, y: 0.0 }],
                     out_tangents: vec![Vec2 { x: 2.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
                 },
                 compound_paths: None,
                 fill_enabled: true,
@@ -2394,6 +2585,7 @@ mod tests {
                 trim_start: Some(0.0),
                 trim_end: Some(60.0),
                 trim_offset: Some(10.0),
+                contour_ids: None,
             }),
             SceneObject::Paint(PaintObject {
                 base: populated_base("paint"),
@@ -2501,6 +2693,7 @@ mod tests {
 
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "scene_1".into(),
             name: "Lower Third".into(),
             version: SCENE_SCHEMA_VERSION,
@@ -2532,6 +2725,9 @@ mod tests {
             materials: vec![],
             controls: vec![],
             text_styles: vec![],
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: vec![
                 SceneObject::Rect(RectObject {
                     base: bg,
@@ -3051,5 +3247,58 @@ mod tests {
         assert_eq!(resolution.effective.len(), 3);
         assert!(resolution.effective[1..].iter().all(|o| o.x == 1.0));
         assert_eq!(resolution.diagnostics.len(), 0);
+    }
+
+    /// The fixture the Editor's `effectivePlacement` is held to (11.107, invariant 22): a scene of nested groups at odd
+    /// transforms and what `resolve_hierarchy` says each object's effective place is. Rewritten with `GX_WRITE_FIXTURES=1`.
+    #[test]
+    fn the_effective_placement_fixture_holds_the_engines_answers() {
+        let group = |id: &str, children: &[&str], x: f64, y: f64, rotation: f64, sx: f64, sy: f64, anchor: Option<(f64, f64)>| {
+            let mut base = ObjectBase::new(id, id);
+            (base.x, base.y, base.rotation, base.scale_x, base.scale_y) = (x, y, rotation, sx, sy);
+            base.anchor = anchor.map(|(x, y)| Vec2 { x, y });
+            SceneObject::Group(GroupObject {
+                base,
+                child_ids: children.iter().map(|c| (*c).into()).collect(),
+                clip_child_id: None,
+            })
+        };
+        let rect = |id: &str, x: f64, y: f64, rotation: f64, sx: f64, sy: f64, anchor: Option<(f64, f64)>| {
+            let mut base = ObjectBase::new(id, id);
+            (base.x, base.y, base.rotation, base.scale_x, base.scale_y) = (x, y, rotation, sx, sy);
+            base.width = 40.0;
+            base.height = 20.0;
+            base.anchor = anchor.map(|(x, y)| Vec2 { x, y });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        let objects = vec![
+            group("outer", &["inner", "leaf-a"], 120.0, 60.0, 30.0, 2.0, 1.5, Some((10.0, 5.0))),
+            group("inner", &["leaf-b", "deep"], -15.0, 22.0, -75.0, 0.5, 3.0, None),
+            group("deep", &["leaf-c"], 7.0, -3.0, 200.0, 1.25, 1.25, Some((-4.0, 9.0))),
+            rect("leaf-a", 33.0, 12.0, 10.0, 1.0, 1.0, None),
+            rect("leaf-b", -8.0, 40.0, 45.0, 2.0, 0.5, Some((20.0, 10.0))),
+            rect("leaf-c", 3.5, 3.5, -30.0, 1.0, -1.0, Some((1.0, 2.0))),
+            rect("alone", 300.0, 200.0, 12.0, 1.5, 1.5, Some((5.0, 5.0))),
+        ];
+        let resolved = resolve_hierarchy(&objects).effective;
+        let expected: Vec<serde_json::Value> = resolved
+            .iter()
+            .map(|r| {
+                let anchor = objects.iter().find(|o| o.base().id == r.id).and_then(|o| o.base().anchor);
+                serde_json::json!({
+                    "id": r.id, "x": r.x, "y": r.y, "rotation": r.rotation_z,
+                    "scaleX": r.scale_x, "scaleY": r.scale_y,
+                    "anchorX": anchor.map_or(0.0, |a| a.x), "anchorY": anchor.map_or(0.0, |a| a.y),
+                })
+            })
+            .collect();
+        let text = serde_json::to_string_pretty(&serde_json::json!({ "objects": objects, "effective": expected })).unwrap() + "
+";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/effective-placement.json");
+        if std::env::var_os("GX_WRITE_FIXTURES").is_some() {
+            std::fs::write(&path, &text).unwrap();
+        }
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+        assert_eq!(on_disk, text, "run with GX_WRITE_FIXTURES=1 to rewrite fixtures/effective-placement.json");
     }
 }

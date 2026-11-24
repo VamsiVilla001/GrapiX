@@ -1,0 +1,2600 @@
+[
+ {
+  "key": "file.new",
+  "menu": "File",
+  "label": "New project",
+  "hand": {
+   "label": "New project",
+   "menu": "File",
+   "verdict": "built",
+   "note": "Start screen, New project dialog (22 Nov), run in the real window 23 Nov",
+   "rows": [
+    "11.43"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.03,
+     "planned": 0.09,
+     "partial": 0.39,
+     "missing": 0.49
+    }
+   },
+   "core_for_broadcast": 0.86
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.1655,
+     "planned": 0.4123,
+     "partial": 0.2091,
+     "missing": 0.2132
+    }
+   },
+   "core_for_broadcast": 0.8099
+  },
+  "laya_tokens": 205
+ },
+ {
+  "key": "file.open",
+  "menu": "File",
+  "label": "Open Project and Open Recent",
+  "hand": {
+   "label": "Open Project and Open Recent",
+   "menu": "File",
+   "verdict": "built",
+   "note": "Open project and the recent list are built",
+   "rows": [
+    "11.43"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.04,
+     "partial": 0.75,
+     "missing": 0.19
+    }
+   },
+   "core_for_broadcast": 0.84
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.1508,
+     "planned": 0.3035,
+     "partial": 0.3159,
+     "missing": 0.2298
+    }
+   },
+   "core_for_broadcast": 0.7913
+  },
+  "laya_tokens": 206
+ },
+ {
+  "key": "file.revert",
+  "menu": "File",
+  "label": "Revert",
+  "hand": {
+   "label": "Revert",
+   "menu": "File",
+   "verdict": "missing",
+   "note": "No row names revert; 11.30 is save only",
+   "rows": [
+    "11.30",
+    "11.43"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.01,
+     "partial": 0.13,
+     "missing": 0.86
+    }
+   },
+   "core_for_broadcast": 0.7
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.101,
+     "planned": 0.3798,
+     "partial": 0.2011,
+     "missing": 0.3182
+    }
+   },
+   "core_for_broadcast": 0.6777
+  },
+  "laya_tokens": 309
+ },
+ {
+  "key": "file.import_project",
+  "menu": "File",
+  "label": "Import > From Project/File",
+  "hand": {
+   "label": "Import > From Project/File",
+   "menu": "File",
+   "verdict": "missing",
+   "note": "7.2 imports design sources (SVG, Figma), not another GrapiX project's scenes",
+   "rows": [
+    "7.2",
+    "11.43",
+    "11.64"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.35,
+     "planned": 0.04,
+     "partial": 0.53,
+     "missing": 0.08
+    }
+   },
+   "core_for_broadcast": 0.82
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.093,
+     "planned": 0.3536,
+     "partial": 0.1704,
+     "missing": 0.383
+    }
+   },
+   "core_for_broadcast": 0.8282
+  },
+  "laya_tokens": 329
+ },
+ {
+  "key": "file.save",
+  "menu": "File",
+  "label": "Save, Save As, Increment And Save",
+  "hand": {
+   "label": "Save, Save As, Increment And Save",
+   "menu": "File",
+   "verdict": "partial",
+   "note": "Save As built 23 Nov; Save in place and Increment And Save are 11.30, pending",
+   "rows": [
+    "11.30",
+    "11.43"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.1,
+     "partial": 0.89,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.88
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.111,
+     "planned": 0.212,
+     "partial": 0.2064,
+     "missing": 0.4706
+    }
+   },
+   "core_for_broadcast": 0.846
+  },
+  "laya_tokens": 319
+ },
+ {
+  "key": "file.export_package",
+  "menu": "File",
+  "label": "Export Package",
+  "hand": {
+   "label": "Export Package",
+   "menu": "File",
+   "verdict": "partial",
+   "note": "Package format, build, verify and publish exist (1.8, 7.6); no menu command or dialog",
+   "rows": [
+    "1.8",
+    "7.6",
+    "7.7"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.94,
+     "planned": 0,
+     "partial": 0.05,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.76
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1392,
+     "planned": 0.1894,
+     "partial": 0.2087,
+     "missing": 0.4627
+    }
+   },
+   "core_for_broadcast": 0.8874
+  },
+  "laya_tokens": 228
+ },
+ {
+  "key": "file.project_server",
+  "menu": "File",
+  "label": "Project Server: Publish, Deploy, Setup",
+  "hand": {
+   "label": "Project Server: Publish, Deploy, Setup",
+   "menu": "File",
+   "verdict": "partial",
+   "note": "Published library, publish by route and Playout library exist; no deploy to several Playout machines, no server setup UI",
+   "rows": [
+    "6.1",
+    "7.6",
+    "5.10",
+    "12.2"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.03,
+     "planned": 0.02,
+     "partial": 0.94,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.85
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.155,
+     "planned": 0.0794,
+     "partial": 0.1729,
+     "missing": 0.5927
+    }
+   },
+   "core_for_broadcast": 0.9615
+  },
+  "laya_tokens": 435
+ },
+ {
+  "key": "file.exit",
+  "menu": "File",
+  "label": "Exit",
+  "hand": {
+   "label": "Exit",
+   "menu": "File",
+   "verdict": "built",
+   "note": "Window close; the shell exits in order (2.16)",
+   "rows": []
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0,
+     "planned": 0,
+     "partial": 0,
+     "missing": 1
+    }
+   },
+   "core_for_broadcast": 0.77
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1045,
+     "planned": 0.2805,
+     "partial": 0.3074,
+     "missing": 0.3075
+    }
+   },
+   "core_for_broadcast": 0.9067
+  },
+  "laya_tokens": 92
+ },
+ {
+  "key": "file.takelist_io",
+  "menu": "File (Sequence)",
+  "label": "Take Item List: import and export XML, Insert Take Item",
+  "hand": {
+   "label": "Take Item List: import and export XML, Insert Take Item",
+   "menu": "File (Sequence)",
+   "verdict": "partial",
+   "note": "Rundown and take list are planned (6.4 done, 12.3 pending); no import or export format",
+   "rows": [
+    "6.4",
+    "12.3",
+    "11.57"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.03,
+     "planned": 0.19,
+     "partial": 0.64,
+     "missing": 0.14
+    }
+   },
+   "core_for_broadcast": 0.63
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1119,
+     "planned": 0.1746,
+     "partial": 0.2061,
+     "missing": 0.5074
+    }
+   },
+   "core_for_broadcast": 0.8461
+  },
+  "laya_tokens": 294
+ },
+ {
+  "key": "edit.undo",
+  "menu": "Edit",
+  "label": "Undo, Redo",
+  "hand": {
+   "label": "Undo, Redo",
+   "menu": "Edit",
+   "verdict": "built",
+   "note": "Command-log undo and redo are done",
+   "rows": [
+    "11.37"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.97,
+     "planned": 0,
+     "partial": 0.03,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.91
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0874,
+     "planned": 0.3161,
+     "partial": 0.2712,
+     "missing": 0.3253
+    }
+   },
+   "core_for_broadcast": 0.9078
+  },
+  "laya_tokens": 199
+ },
+ {
+  "key": "edit.undo_history",
+  "menu": "Edit",
+  "label": "Undo/Redo History",
+  "hand": {
+   "label": "Undo/Redo History",
+   "menu": "Edit",
+   "verdict": "missing",
+   "note": "The log exists in the command model; no history panel or menu",
+   "rows": [
+    "11.37",
+    "11.35"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.7,
+     "planned": 0.01,
+     "partial": 0.24,
+     "missing": 0.05
+    }
+   },
+   "core_for_broadcast": 0.83
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0368,
+     "planned": 0.1185,
+     "partial": 0.2302,
+     "missing": 0.6145
+    }
+   },
+   "core_for_broadcast": 0.9247
+  },
+  "laya_tokens": 270
+ },
+ {
+  "key": "edit.transform_tools",
+  "menu": "Edit",
+  "label": "Select, Move, Rotate, Scale, Pivot tools",
+  "hand": {
+   "label": "Select, Move, Rotate, Scale, Pivot tools",
+   "menu": "Edit",
+   "verdict": "partial",
+   "note": "Selection and creation tools exist; move, rotate, scale and pivot gizmos are 11.44, pending",
+   "rows": [
+    "11.7",
+    "11.44"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.35,
+     "partial": 0.63,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.9
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1195,
+     "planned": 0.2916,
+     "partial": 0.2561,
+     "missing": 0.3328
+    }
+   },
+   "core_for_broadcast": 0.9148
+  },
+  "laya_tokens": 255
+ },
+ {
+  "key": "edit.align",
+  "menu": "Edit",
+  "label": "Object Align",
+  "hand": {
+   "label": "Object Align",
+   "menu": "Edit",
+   "verdict": "missing",
+   "note": "No row for align, distribute or snapping",
+   "rows": [
+    "11.44",
+    "11.45",
+    "11.9"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.04,
+     "partial": 0.21,
+     "missing": 0.73
+    }
+   },
+   "core_for_broadcast": 0.79
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.124,
+     "planned": 0.2664,
+     "partial": 0.1911,
+     "missing": 0.4185
+    }
+   },
+   "core_for_broadcast": 0.8235
+  },
+  "laya_tokens": 332
+ },
+ {
+  "key": "edit.hid",
+  "menu": "Edit",
+  "label": "Human Interface Devices",
+  "hand": {
+   "label": "Human Interface Devices",
+   "menu": "Edit",
+   "verdict": "missing",
+   "note": "No row for physical control devices",
+   "rows": [
+    "11.31"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.17,
+     "partial": 0.07,
+     "missing": 0.76
+    }
+   },
+   "core_for_broadcast": 0.36
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0823,
+     "planned": 0.2596,
+     "partial": 0.1707,
+     "missing": 0.4874
+    }
+   },
+   "core_for_broadcast": 0.8511
+  },
+  "laya_tokens": 188
+ },
+ {
+  "key": "edit.scripting",
+  "menu": "Edit",
+  "label": "Scripting",
+  "hand": {
+   "label": "Scripting",
+   "menu": "Edit",
+   "verdict": "planned",
+   "note": "Script sandbox, logic, After Effects scripts and ScriptUI panels are all pending",
+   "rows": [
+    "16.4",
+    "11.55",
+    "16.14",
+    "16.15"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.89,
+     "partial": 0.1,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.77
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1064,
+     "planned": 0.1611,
+     "partial": 0.2439,
+     "missing": 0.4885
+    }
+   },
+   "core_for_broadcast": 0.7687
+  },
+  "laya_tokens": 460
+ },
+ {
+  "key": "edit.media_setup",
+  "menu": "Edit",
+  "label": "OpenMAM Setup and Clip Store Setup",
+  "hand": {
+   "label": "OpenMAM Setup and Clip Store Setup",
+   "menu": "Edit",
+   "verdict": "missing",
+   "note": "Video decode and a video layer are planned; no media server or MAM connection",
+   "rows": [
+    "16.1",
+    "11.52",
+    "11.49"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.06,
+     "partial": 0.77,
+     "missing": 0.17
+    }
+   },
+   "core_for_broadcast": 0.72
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0678,
+     "planned": 0.1671,
+     "partial": 0.3101,
+     "missing": 0.455
+    }
+   },
+   "core_for_broadcast": 0.6623
+  },
+  "laya_tokens": 385
+ },
+ {
+  "key": "edit.keyboard_gpi",
+  "menu": "Edit",
+  "label": "Keyboard / GPI Mapping",
+  "hand": {
+   "label": "Keyboard / GPI Mapping",
+   "menu": "Edit",
+   "verdict": "partial",
+   "note": "One command registry is planned (11.31); no mapping UI, no GPI; automation triggers are deferred (6.6)",
+   "rows": [
+    "11.31",
+    "6.6",
+    "11.30"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.21,
+     "partial": 0.39,
+     "missing": 0.38
+    }
+   },
+   "core_for_broadcast": 0.79
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.0454,
+     "planned": 0.4189,
+     "partial": 0.1358,
+     "missing": 0.3999
+    }
+   },
+   "core_for_broadcast": 0.7783
+  },
+  "laya_tokens": 334
+ },
+ {
+  "key": "edit.tessera",
+  "menu": "Edit",
+  "label": "Tessera (camera tracking, virtual studio)",
+  "hand": {
+   "label": "Tessera (camera tracking, virtual studio)",
+   "menu": "Edit",
+   "verdict": "missing",
+   "note": "3D cameras exist; no tracking data input and no virtual set",
+   "rows": [
+    "3.7",
+    "11.48",
+    "16.8"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.07,
+     "partial": 0.85,
+     "missing": 0.07
+    }
+   },
+   "core_for_broadcast": 0.44
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.133,
+     "planned": 0.3231,
+     "partial": 0.2264,
+     "missing": 0.3175
+    }
+   },
+   "core_for_broadcast": 0.7026
+  },
+  "laya_tokens": 291
+ },
+ {
+  "key": "edit.hardware_setup",
+  "menu": "Edit",
+  "label": "Hardware Setup",
+  "hand": {
+   "label": "Hardware Setup",
+   "menu": "Edit",
+   "verdict": "partial",
+   "note": "Output configuration and status exist; hardware I/O, timecode, GPI and tally are parked (X2)",
+   "rows": [
+    "6.5",
+    "12.7",
+    "15.1",
+    "15.2",
+    "15.4",
+    "15.5"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.07,
+     "partial": 0.9,
+     "missing": 0.02
+    }
+   },
+   "core_for_broadcast": 0.83
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.127,
+     "planned": 0.1065,
+     "partial": 0.2532,
+     "missing": 0.5133
+    }
+   },
+   "core_for_broadcast": 0.805
+  },
+  "laya_tokens": 390
+ },
+ {
+  "key": "edit.preferences",
+  "menu": "Edit",
+  "label": "Preferences",
+  "hand": {
+   "label": "Preferences",
+   "menu": "Edit",
+   "verdict": "missing",
+   "note": "No settings dialog or settings store",
+   "rows": [
+    "11.43",
+    "2.4",
+    "2.8"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.03,
+     "planned": 0,
+     "partial": 0.79,
+     "missing": 0.18
+    }
+   },
+   "core_for_broadcast": 0.84
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1407,
+     "planned": 0.2297,
+     "partial": 0.1952,
+     "missing": 0.4344
+    }
+   },
+   "core_for_broadcast": 0.5936
+  },
+  "laya_tokens": 301
+ },
+ {
+  "key": "windows.menu",
+  "menu": "Windows",
+  "label": "Windows menu, docking layouts",
+  "hand": {
+   "label": "Windows menu, docking layouts",
+   "menu": "Windows",
+   "verdict": "partial",
+   "note": "Dockable workspace done; Window menu lists panels; saved layouts and named workspaces pending",
+   "rows": [
+    "11.33",
+    "11.5",
+    "11.76",
+    "11.75"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.1,
+     "planned": 0.35,
+     "partial": 0.55,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.89
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.1389,
+     "planned": 0.1969,
+     "partial": 0.3504,
+     "missing": 0.3139
+    }
+   },
+   "core_for_broadcast": 0.8763
+  },
+  "laya_tokens": 437
+ },
+ {
+  "key": "projects.settings",
+  "menu": "Projects",
+  "label": "Convert Project Mode and project settings",
+  "hand": {
+   "label": "Convert Project Mode and project settings",
+   "menu": "Projects",
+   "verdict": "partial",
+   "note": "Colour space and bit depth are project settings; resolution and frame rate are per scene",
+   "rows": [
+    "11.43",
+    "3.15",
+    "1.1"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.06,
+     "planned": 0.06,
+     "partial": 0.87,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.84
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.0945,
+     "planned": 0.2462,
+     "partial": 0.4347,
+     "missing": 0.2245
+    }
+   },
+   "core_for_broadcast": 0.7895
+  },
+  "laya_tokens": 347
+ },
+ {
+  "key": "projects.reveal",
+  "menu": "Projects",
+  "label": "Display project path in Explorer",
+  "hand": {
+   "label": "Display project path in Explorer",
+   "menu": "Projects",
+   "verdict": "missing",
+   "note": "Small, no row",
+   "rows": [
+    "11.43"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.01,
+     "partial": 0.09,
+     "missing": 0.9
+    }
+   },
+   "core_for_broadcast": 0.43
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1652,
+     "planned": 0.2669,
+     "partial": 0.2769,
+     "missing": 0.291
+    }
+   },
+   "core_for_broadcast": 0.851
+  },
+  "laya_tokens": 206
+ },
+ {
+  "key": "anim.controller",
+  "menu": "Animation",
+  "label": "Animation Controller, Set Keyframe",
+  "hand": {
+   "label": "Animation Controller, Set Keyframe",
+   "menu": "Animation",
+   "verdict": "built",
+   "note": "Editable animation contract and keyframes are done",
+   "rows": [
+    "11.20",
+    "11.21",
+    "11.68"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.54,
+     "planned": 0.04,
+     "partial": 0.42,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.9
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0764,
+     "planned": 0.3309,
+     "partial": 0.2493,
+     "missing": 0.3435
+    }
+   },
+   "core_for_broadcast": 0.7196
+  },
+  "laya_tokens": 357
+ },
+ {
+  "key": "anim.scene_director",
+  "menu": "Animation",
+  "label": "Scene Director",
+  "hand": {
+   "label": "Scene Director",
+   "menu": "Animation",
+   "verdict": "partial",
+   "note": "Timeline and named phases done; stop points and looping hold (11.53) pending",
+   "rows": [
+    "11.25",
+    "11.53",
+    "11.10"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.17,
+     "planned": 0.13,
+     "partial": 0.7,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.88
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0753,
+     "planned": 0.2424,
+     "partial": 0.1916,
+     "missing": 0.4907
+    }
+   },
+   "core_for_broadcast": 0.2484
+  },
+  "laya_tokens": 342
+ },
+ {
+  "key": "anim.key_graph",
+  "menu": "Animation",
+  "label": "Key Graph Editor",
+  "hand": {
+   "label": "Key Graph Editor",
+   "menu": "Animation",
+   "verdict": "built",
+   "note": "Speed graph and curve editing done; infinity modes (11.78) pending",
+   "rows": [
+    "11.11",
+    "11.23",
+    "11.78"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.42,
+     "planned": 0.02,
+     "partial": 0.56,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.88
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0466,
+     "planned": 0.1866,
+     "partial": 0.1818,
+     "missing": 0.5849
+    }
+   },
+   "core_for_broadcast": 0.7213
+  },
+  "laya_tokens": 309
+ },
+ {
+  "key": "display.project_manager",
+  "menu": "Display",
+  "label": "Project Manager panel",
+  "hand": {
+   "label": "Project Manager panel",
+   "menu": "Display",
+   "verdict": "partial",
+   "note": "Start screen and Scene Manager; asset manager (11.52) pending",
+   "rows": [
+    "11.43",
+    "11.52",
+    "11.64"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.38,
+     "planned": 0.05,
+     "partial": 0.54,
+     "missing": 0.03
+    }
+   },
+   "core_for_broadcast": 0.89
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0939,
+     "planned": 0.1408,
+     "partial": 0.2526,
+     "missing": 0.5127
+    }
+   },
+   "core_for_broadcast": 0.9087
+  },
+  "laya_tokens": 385
+ },
+ {
+  "key": "display.scene_manager",
+  "menu": "Display",
+  "label": "Scene Manager panel",
+  "hand": {
+   "label": "Scene Manager panel",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Scene Manager done; dense list active",
+   "rows": [
+    "11.64",
+    "11.72"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.34,
+     "planned": 0.21,
+     "partial": 0.45,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.9
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1316,
+     "planned": 0.1208,
+     "partial": 0.1544,
+     "missing": 0.5933
+    }
+   },
+   "core_for_broadcast": 0.9065
+  },
+  "laya_tokens": 275
+ },
+ {
+  "key": "display.object_manager",
+  "menu": "Display",
+  "label": "Object Manager panel",
+  "hand": {
+   "label": "Object Manager panel",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Treegrid done; command-model parenting pending",
+   "rows": [
+    "11.8",
+    "11.45"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.41,
+     "planned": 0.15,
+     "partial": 0.44,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.92
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0852,
+     "planned": 0.1593,
+     "partial": 0.2225,
+     "missing": 0.533
+    }
+   },
+   "core_for_broadcast": 0.6985
+  },
+  "laya_tokens": 233
+ },
+ {
+  "key": "display.material_manager",
+  "menu": "Display",
+  "label": "Material Manager panel",
+  "hand": {
+   "label": "Material Manager panel",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Material manager done",
+   "rows": [
+    "11.12",
+    "11.50"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.79,
+     "planned": 0.03,
+     "partial": 0.17,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.79
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0707,
+     "planned": 0.2857,
+     "partial": 0.1464,
+     "missing": 0.4973
+    }
+   },
+   "core_for_broadcast": 0.6394
+  },
+  "laya_tokens": 223
+ },
+ {
+  "key": "display.inspector",
+  "menu": "Display",
+  "label": "Object Inspector panel",
+  "hand": {
+   "label": "Object Inspector panel",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Type-aware inspector done",
+   "rows": [
+    "11.9",
+    "11.46"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.54,
+     "planned": 0.13,
+     "partial": 0.32,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.87
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0769,
+     "planned": 0.1554,
+     "partial": 0.2921,
+     "missing": 0.4756
+    }
+   },
+   "core_for_broadcast": 0.8433
+  },
+  "laya_tokens": 240
+ },
+ {
+  "key": "display.widgets",
+  "menu": "Display",
+  "label": "Widgets panel",
+  "hand": {
+   "label": "Widgets panel",
+   "menu": "Display",
+   "verdict": "planned",
+   "note": "Widgets row pending",
+   "rows": [
+    "11.56"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.96,
+     "partial": 0.04,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.7
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1479,
+     "planned": 0.1813,
+     "partial": 0.202,
+     "missing": 0.4688
+    }
+   },
+   "core_for_broadcast": 0.861
+  },
+  "laya_tokens": 196
+ },
+ {
+  "key": "display.stagger",
+  "menu": "Display",
+  "label": "Stagger Animations",
+  "hand": {
+   "label": "Stagger Animations",
+   "menu": "Display",
+   "verdict": "planned",
+   "note": "Pending",
+   "rows": [
+    "11.77"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.99,
+     "partial": 0.01,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.54
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.0826,
+     "planned": 0.2235,
+     "partial": 0.474,
+     "missing": 0.22
+    }
+   },
+   "core_for_broadcast": 0.5614
+  },
+  "laya_tokens": 193
+ },
+ {
+  "key": "display.effects",
+  "menu": "Display",
+  "label": "Effects panel",
+  "hand": {
+   "label": "Effects panel",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Effects & Presets and Effect Controls are active with 46 effects",
+   "rows": [
+    "11.69",
+    "11.70",
+    "11.79",
+    "3.25"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.07,
+     "planned": 0.05,
+     "partial": 0.88,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.93
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0747,
+     "planned": 0.1186,
+     "partial": 0.2203,
+     "missing": 0.5864
+    }
+   },
+   "core_for_broadcast": 0.9587
+  },
+  "laya_tokens": 493
+ },
+ {
+  "key": "display.clip_browser",
+  "menu": "Display",
+  "label": "Clip Browser",
+  "hand": {
+   "label": "Clip Browser",
+   "menu": "Display",
+   "verdict": "missing",
+   "note": "Video layer and decoder are planned; no clip browser panel or clip cueing",
+   "rows": [
+    "11.49",
+    "16.1",
+    "11.52"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.36,
+     "partial": 0.59,
+     "missing": 0.05
+    }
+   },
+   "core_for_broadcast": 0.8
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.0984,
+     "planned": 0.1597,
+     "partial": 0.4191,
+     "missing": 0.3229
+    }
+   },
+   "core_for_broadcast": 0.8544
+  },
+  "laya_tokens": 379
+ },
+ {
+  "key": "display.server_channels",
+  "menu": "Display",
+  "label": "Server Channels",
+  "hand": {
+   "label": "Server Channels",
+   "menu": "Display",
+   "verdict": "missing",
+   "note": "Hardware and server channels are parked",
+   "rows": [
+    "15.2",
+    "15.3",
+    "6.5"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.13,
+     "planned": 0.05,
+     "partial": 0.29,
+     "missing": 0.53
+    }
+   },
+   "core_for_broadcast": 0.69
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1081,
+     "planned": 0.2875,
+     "partial": 0.2118,
+     "missing": 0.3926
+    }
+   },
+   "core_for_broadcast": 0.7244
+  },
+  "laya_tokens": 223
+ },
+ {
+  "key": "display.pbus",
+  "menu": "Display",
+  "label": "PBus Mapping",
+  "hand": {
+   "label": "PBus Mapping",
+   "menu": "Display",
+   "verdict": "partial",
+   "note": "Data bindings and template controls exist; no external parameter mapping",
+   "rows": [
+    "11.19",
+    "11.26",
+    "11.54"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.53,
+     "planned": 0.02,
+     "partial": 0.42,
+     "missing": 0.03
+    }
+   },
+   "core_for_broadcast": 0.79
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0211,
+     "planned": 0.0435,
+     "partial": 0.047,
+     "missing": 0.8884
+    }
+   },
+   "core_for_broadcast": 0.8357
+  },
+  "laya_tokens": 351
+ },
+ {
+  "key": "display.object_library",
+  "menu": "Display",
+  "label": "Object Library",
+  "hand": {
+   "label": "Object Library",
+   "menu": "Display",
+   "verdict": "planned",
+   "note": "2D and 3D libraries and a component registry are pending",
+   "rows": [
+    "11.47",
+    "11.48",
+    "11.40",
+    "6.1"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.17,
+     "planned": 0.31,
+     "partial": 0.52,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.84
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0817,
+     "planned": 0.1914,
+     "partial": 0.323,
+     "missing": 0.4039
+    }
+   },
+   "core_for_broadcast": 0.8989
+  },
+  "laya_tokens": 414
+ },
+ {
+  "key": "display.audio_files",
+  "menu": "Display",
+  "label": "Audio Files",
+  "hand": {
+   "label": "Audio Files",
+   "menu": "Display",
+   "verdict": "missing",
+   "note": "An Assets/Audio folder exists; no audio object, playback or mixing in any row",
+   "rows": [
+    "11.43",
+    "3.25"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.09,
+     "partial": 0.35,
+     "missing": 0.55
+    }
+   },
+   "core_for_broadcast": 0.74
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1071,
+     "planned": 0.2536,
+     "partial": 0.2118,
+     "missing": 0.4274
+    }
+   },
+   "core_for_broadcast": 0.8593
+  },
+  "laya_tokens": 294
+ },
+ {
+  "key": "display.sequencer_list",
+  "menu": "Display",
+  "label": "Sequencer List",
+  "hand": {
+   "label": "Sequencer List",
+   "menu": "Display",
+   "verdict": "planned",
+   "note": "Rundown persistence done; the Playout take list is pending",
+   "rows": [
+    "6.4",
+    "12.3"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.8,
+     "partial": 0.17,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.78
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.0915,
+     "planned": 0.5148,
+     "partial": 0.2807,
+     "missing": 0.1129
+    }
+   },
+   "core_for_broadcast": 0.7348
+  },
+  "laya_tokens": 170
+ },
+ {
+  "key": "display.output_monitors",
+  "menu": "Display",
+  "label": "Output Monitors",
+  "hand": {
+   "label": "Output Monitors",
+   "menu": "Display",
+   "verdict": "planned",
+   "note": "Confidence monitors pending; engine preview monitor in the Editor active",
+   "rows": [
+    "12.5",
+    "11.65",
+    "3.11"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.07,
+     "planned": 0.01,
+     "partial": 0.91,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.9
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1618,
+     "planned": 0.1396,
+     "partial": 0.2177,
+     "missing": 0.4809
+    }
+   },
+   "core_for_broadcast": 0.9063
+  },
+  "laya_tokens": 278
+ },
+ {
+  "key": "display.online_preview",
+  "menu": "Display",
+  "label": "Online Preview",
+  "hand": {
+   "label": "Online Preview",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Engine preview monitor active",
+   "rows": [
+    "11.65",
+    "3.21",
+    "8.9"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.46,
+     "planned": 0.03,
+     "partial": 0.49,
+     "missing": 0.02
+    }
+   },
+   "core_for_broadcast": 0.86
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1403,
+     "planned": 0.2178,
+     "partial": 0.1818,
+     "missing": 0.4602
+    }
+   },
+   "core_for_broadcast": 0.8274
+  },
+  "laya_tokens": 323
+ },
+ {
+  "key": "display.take_inspector",
+  "menu": "Display",
+  "label": "Take Inspector",
+  "hand": {
+   "label": "Take Inspector",
+   "menu": "Display",
+   "verdict": "planned",
+   "note": "Operator fill form pending",
+   "rows": [
+    "12.3",
+    "12.8",
+    "11.27"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.04,
+     "planned": 0.16,
+     "partial": 0.37,
+     "missing": 0.43
+    }
+   },
+   "core_for_broadcast": 0.76
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0833,
+     "planned": 0.3188,
+     "partial": 0.2542,
+     "missing": 0.3437
+    }
+   },
+   "core_for_broadcast": 0.9284
+  },
+  "laya_tokens": 315
+ },
+ {
+  "key": "display.object_toolbar",
+  "menu": "Display",
+  "label": "Object Toolbar",
+  "hand": {
+   "label": "Object Toolbar",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Layer creation tools in the Editor",
+   "rows": [
+    "11.32",
+    "11.7"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.46,
+     "partial": 0.38,
+     "missing": 0.14
+    }
+   },
+   "core_for_broadcast": 0.86
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0597,
+     "planned": 0.2734,
+     "partial": 0.2619,
+     "missing": 0.405
+    }
+   },
+   "core_for_broadcast": 0.8547
+  },
+  "laya_tokens": 242
+ },
+ {
+  "key": "display.status_log",
+  "menu": "Display",
+  "label": "Status Log",
+  "hand": {
+   "label": "Status Log",
+   "menu": "Display",
+   "verdict": "built",
+   "note": "Activity log, JSON log and live telemetry",
+   "rows": [
+    "2.11",
+    "2.27",
+    "11.74"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.42,
+     "planned": 0.12,
+     "partial": 0.32,
+     "missing": 0.14
+    }
+   },
+   "core_for_broadcast": 0.51
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0573,
+     "planned": 0.2637,
+     "partial": 0.2317,
+     "missing": 0.4472
+    }
+   },
+   "core_for_broadcast": 0.8453
+  },
+  "laya_tokens": 393
+ },
+ {
+  "key": "tools.flush",
+  "menu": "Tools",
+  "label": "Advanced > Flush",
+  "hand": {
+   "label": "Advanced > Flush",
+   "menu": "Tools",
+   "verdict": "missing",
+   "note": "No row for cache control",
+   "rows": [
+    "11.58",
+    "2.27"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0,
+     "planned": 0,
+     "partial": 0.01,
+     "missing": 0.99
+    }
+   },
+   "core_for_broadcast": 0.39
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1466,
+     "planned": 0.2188,
+     "partial": 0.1999,
+     "missing": 0.4347
+    }
+   },
+   "core_for_broadcast": 0.9045
+  },
+  "laya_tokens": 258
+ },
+ {
+  "key": "tools.debug",
+  "menu": "Tools",
+  "label": "Debug > Video Cache Monitor",
+  "hand": {
+   "label": "Debug > Video Cache Monitor",
+   "menu": "Tools",
+   "verdict": "partial",
+   "note": "Diagnostics bundle and telemetry done; console and debugger pending",
+   "rows": [
+    "11.58",
+    "2.27",
+    "2.14"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.06,
+     "planned": 0.02,
+     "partial": 0.42,
+     "missing": 0.5
+    }
+   },
+   "core_for_broadcast": 0.39
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0477,
+     "planned": 0.1531,
+     "partial": 0.1447,
+     "missing": 0.6545
+    }
+   },
+   "core_for_broadcast": 0.8253
+  },
+  "laya_tokens": 353
+ },
+ {
+  "key": "tools.input_grabber",
+  "menu": "Tools",
+  "label": "Input Grabber",
+  "hand": {
+   "label": "Input Grabber",
+   "menu": "Tools",
+   "verdict": "missing",
+   "note": "No live video input row; hardware parked",
+   "rows": [
+    "15.2",
+    "15.4",
+    "11.49"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.56,
+     "partial": 0.33,
+     "missing": 0.11
+    }
+   },
+   "core_for_broadcast": 0.71
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.2154,
+     "planned": 0.2945,
+     "partial": 0.3023,
+     "missing": 0.1878
+    }
+   },
+   "core_for_broadcast": 0.9212
+  },
+  "laya_tokens": 269
+ },
+ {
+  "key": "tools.record",
+  "menu": "Tools",
+  "label": "Record Client",
+  "hand": {
+   "label": "Record Client",
+   "menu": "Tools",
+   "verdict": "partial",
+   "note": "Recording output adapter exists in the engine; no operator command or UI",
+   "rows": [
+    "3.10",
+    "14.5"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.47,
+     "planned": 0.04,
+     "partial": 0.3,
+     "missing": 0.19
+    }
+   },
+   "core_for_broadcast": 0.3
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1578,
+     "planned": 0.1654,
+     "partial": 0.2462,
+     "missing": 0.4305
+    }
+   },
+   "core_for_broadcast": 0.9232
+  },
+  "laya_tokens": 178
+ },
+ {
+  "key": "help.topics",
+  "menu": "Help",
+  "label": "Help Topics",
+  "hand": {
+   "label": "Help Topics",
+   "menu": "Help",
+   "verdict": "missing",
+   "note": "Only a diagnostic bundle in Help; no in-app help",
+   "rows": [
+    "2.14"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.04,
+     "planned": 0,
+     "partial": 0.02,
+     "missing": 0.94
+    }
+   },
+   "core_for_broadcast": 0.54
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.0828,
+     "planned": 0.376,
+     "partial": 0.2241,
+     "missing": 0.3171
+    }
+   },
+   "core_for_broadcast": 0.2444
+  },
+  "laya_tokens": 184
+ },
+ {
+  "key": "seq.rundown",
+  "menu": "Sequence",
+  "label": "Sequencer: ordered take items, cue, take, out, run order",
+  "hand": {
+   "label": "Sequencer: ordered take items, cue, take, out, run order",
+   "menu": "Sequence",
+   "verdict": "planned",
+   "note": "Engine side done; Playout UI pending",
+   "rows": [
+    "6.4",
+    "12.3",
+    "12.4",
+    "12.8",
+    "12.9"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.35,
+     "planned": 0.05,
+     "partial": 0.6,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.88
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0721,
+     "planned": 0.3363,
+     "partial": 0.2341,
+     "missing": 0.3575
+    }
+   },
+   "core_for_broadcast": 0.9087
+  },
+  "laya_tokens": 396
+ },
+ {
+  "key": "seq.asrun",
+  "menu": "Sequence",
+  "label": "As-run log",
+  "hand": {
+   "label": "As-run log",
+   "menu": "Sequence",
+   "verdict": "built",
+   "note": "Active; recorded",
+   "rows": [
+    "12.11"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.07,
+     "planned": 0.2,
+     "partial": 0.73,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.76
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1087,
+     "planned": 0.2104,
+     "partial": 0.1561,
+     "missing": 0.5248
+    }
+   },
+   "core_for_broadcast": 0.6909
+  },
+  "laya_tokens": 190
+ },
+ {
+  "key": "data.datalinq",
+  "menu": "Data",
+  "label": "DataLinq: live data from XML, CSV, Excel, databases and web",
+  "hand": {
+   "label": "DataLinq: live data from XML, CSV, Excel, databases and web",
+   "menu": "Data",
+   "verdict": "partial",
+   "note": "Bindings exist; every connector is parked in the Data Server (X4)",
+   "rows": [
+    "11.19",
+    "19.2",
+    "19.4",
+    "19.5",
+    "19.6",
+    "19.8"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.35,
+     "partial": 0.64,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.79
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1067,
+     "planned": 0.0919,
+     "partial": 0.168,
+     "missing": 0.6334
+    }
+   },
+   "core_for_broadcast": 0.6765
+  },
+  "laya_tokens": 578
+ },
+ {
+  "key": "ctl.external",
+  "menu": "Control",
+  "label": "External control protocol (RossTalk), automation, GPI and tally",
+  "hand": {
+   "label": "External control protocol (RossTalk), automation, GPI and tally",
+   "menu": "Control",
+   "verdict": "missing",
+   "note": "Automation trigger evaluation is explicitly deferred (6.6); the MCP surface is for agents, not station automation",
+   "rows": [
+    "6.6",
+    "8.11",
+    "2.23"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.18,
+     "planned": 0,
+     "partial": 0.39,
+     "missing": 0.43
+    }
+   },
+   "core_for_broadcast": 0.65
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1457,
+     "planned": 0.1183,
+     "partial": 0.1653,
+     "missing": 0.5707
+    }
+   },
+   "core_for_broadcast": 0.8449
+  },
+  "laya_tokens": 284
+ },
+ {
+  "key": "mos.newsroom",
+  "menu": "Integration",
+  "label": "MOS newsroom integration",
+  "hand": {
+   "label": "MOS newsroom integration",
+   "menu": "Integration",
+   "verdict": "missing",
+   "note": "No row",
+   "rows": [
+    "6.4",
+    "12.3"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.08,
+     "partial": 0.61,
+     "missing": 0.29
+    }
+   },
+   "core_for_broadcast": 0.42
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.1116,
+     "planned": 0.3502,
+     "partial": 0.2836,
+     "missing": 0.2546
+    }
+   },
+   "core_for_broadcast": 0.7621
+  },
+  "laya_tokens": 176
+ },
+ {
+  "key": "text.crawl_roll",
+  "menu": "Objects",
+  "label": "Crawl and roll (ticker, credits)",
+  "hand": {
+   "label": "Crawl and roll (ticker, credits)",
+   "menu": "Objects",
+   "verdict": "missing",
+   "note": "No scrolling text object in any row",
+   "rows": [
+    "11.51",
+    "11.55",
+    "12.10"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.06,
+     "planned": 0.04,
+     "partial": 0.87,
+     "missing": 0.03
+    }
+   },
+   "core_for_broadcast": 0.82
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0686,
+     "planned": 0.1734,
+     "partial": 0.1451,
+     "missing": 0.6129
+    }
+   },
+   "core_for_broadcast": 0.8588
+  },
+  "laya_tokens": 391
+ },
+ {
+  "key": "live.video",
+  "menu": "Objects",
+  "label": "Live video in a scene (camera feeds, picture in picture)",
+  "hand": {
+   "label": "Live video in a scene (camera feeds, picture in picture)",
+   "menu": "Objects",
+   "verdict": "missing",
+   "note": "Video file layer planned; live input not",
+   "rows": [
+    "11.49",
+    "16.1",
+    "15.4"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.88,
+     "partial": 0.11,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.77
+  },
+  "laya": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.1193,
+     "planned": 0.298,
+     "partial": 0.3136,
+     "missing": 0.2691
+    }
+   },
+   "core_for_broadcast": 0.6255
+  },
+  "laya_tokens": 319
+ },
+ {
+  "key": "audio.engine",
+  "menu": "Audio",
+  "label": "Audio: sound with graphics, levels, output",
+  "hand": {
+   "label": "Audio: sound with graphics, levels, output",
+   "menu": "Audio",
+   "verdict": "missing",
+   "note": "No row",
+   "rows": [
+    "11.43"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.01,
+     "partial": 0.2,
+     "missing": 0.78
+    }
+   },
+   "core_for_broadcast": 0.61
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.1637,
+     "planned": 0.487,
+     "partial": 0.1642,
+     "missing": 0.1851
+    }
+   },
+   "core_for_broadcast": 0.823
+  },
+  "laya_tokens": 207
+ },
+ {
+  "key": "outputs.keyfill",
+  "menu": "Outputs",
+  "label": "Key and fill video outputs, genlock, multiple channels",
+  "hand": {
+   "label": "Key and fill video outputs, genlock, multiple channels",
+   "menu": "Outputs",
+   "verdict": "planned",
+   "note": "Parked (X2); overlay channels active (12.10)",
+   "rows": [
+    "12.5",
+    "12.10",
+    "15.2",
+    "15.4",
+    "15.5"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.09,
+     "partial": 0.9,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.86
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.1252,
+     "planned": 0.1776,
+     "partial": 0.2539,
+     "missing": 0.4433
+    }
+   },
+   "core_for_broadcast": 0.9276
+  },
+  "laya_tokens": 378
+ },
+ {
+  "key": "tracking.camera",
+  "menu": "Virtual",
+  "label": "Camera tracking and virtual studio",
+  "hand": {
+   "label": "Camera tracking and virtual studio",
+   "menu": "Virtual",
+   "verdict": "missing",
+   "note": "No row; 3D camera parity is planned",
+   "rows": [
+    "3.7",
+    "16.8"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.01,
+     "planned": 0.14,
+     "partial": 0.79,
+     "missing": 0.06
+    }
+   },
+   "core_for_broadcast": 0.57
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0819,
+     "planned": 0.2418,
+     "partial": 0.2757,
+     "missing": 0.4007
+    }
+   },
+   "core_for_broadcast": 0.7386
+  },
+  "laya_tokens": 189
+ },
+ {
+  "key": "roles.security",
+  "menu": "Security",
+  "label": "Operator roles and permissions",
+  "hand": {
+   "label": "Operator roles and permissions",
+   "menu": "Security",
+   "verdict": "built",
+   "note": "Tokens, roles and scopes; named operator login active",
+   "rows": [
+    "2.9",
+    "2.15",
+    "5.7"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.29,
+     "planned": 0.02,
+     "partial": 0.69,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.81
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.0893,
+     "planned": 0.3501,
+     "partial": 0.2476,
+     "missing": 0.313
+    }
+   },
+   "core_for_broadcast": 0.5087
+  },
+  "laya_tokens": 369
+ },
+ {
+  "key": "i18n.localisation",
+  "menu": "Preferences",
+  "label": "Localisation and language",
+  "hand": {
+   "label": "Localisation and language",
+   "menu": "Preferences",
+   "verdict": "missing",
+   "note": "No row",
+   "rows": [
+    "11.42",
+    "1.1"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "built",
+    "probabilities": {
+     "built": 0.42,
+     "planned": 0.13,
+     "partial": 0.36,
+     "missing": 0.09
+    }
+   },
+   "core_for_broadcast": 0.63
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.0979,
+     "planned": 0.3563,
+     "partial": 0.2685,
+     "missing": 0.2772
+    }
+   },
+   "core_for_broadcast": 0.7255
+  },
+  "laya_tokens": 209
+ },
+ {
+  "key": "template.pages",
+  "menu": "Sequence",
+  "label": "Template pages for operators (fill fields, constraints)",
+  "hand": {
+   "label": "Template pages for operators (fill fields, constraints)",
+   "menu": "Sequence",
+   "verdict": "partial",
+   "note": "Field contract done; constraints and the fill form pending",
+   "rows": [
+    "11.26",
+    "11.54",
+    "12.8"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "partial",
+    "probabilities": {
+     "built": 0.02,
+     "planned": 0.18,
+     "partial": 0.8,
+     "missing": 0
+    }
+   },
+   "core_for_broadcast": 0.86
+  },
+  "laya": {
+   "coverage": {
+    "choice": "missing",
+    "probabilities": {
+     "built": 0.0393,
+     "planned": 0.1691,
+     "partial": 0.2555,
+     "missing": 0.5361
+    }
+   },
+   "core_for_broadcast": 0.9228
+  },
+  "laya_tokens": 366
+ },
+ {
+  "key": "transitions",
+  "menu": "Animation",
+  "label": "Scene transitions and transition effects",
+  "hand": {
+   "label": "Scene transitions and transition effects",
+   "menu": "Animation",
+   "verdict": "planned",
+   "note": "Pending",
+   "rows": [
+    "16.3",
+    "11.55"
+   ]
+  },
+  "jev": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0,
+     "planned": 0.86,
+     "partial": 0.13,
+     "missing": 0.01
+    }
+   },
+   "core_for_broadcast": 0.8
+  },
+  "laya": {
+   "coverage": {
+    "choice": "planned",
+    "probabilities": {
+     "built": 0.1122,
+     "planned": 0.3475,
+     "partial": 0.2121,
+     "missing": 0.3282
+    }
+   },
+   "core_for_broadcast": 0.7936
+  },
+  "laya_tokens": 227
+ }
+]

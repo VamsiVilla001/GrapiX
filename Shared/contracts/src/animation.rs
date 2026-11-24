@@ -1371,6 +1371,7 @@ mod tests {
     fn scene_with(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "motion".into(),
             name: "Motion".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,
@@ -1391,6 +1392,9 @@ mod tests {
             materials: vec![],
             controls: vec![],
             text_styles: vec![],
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects,
         }
     }
@@ -1448,6 +1452,32 @@ mod tests {
             Effect::Posterize(Posterize::default()),
             Effect::Threshold(Threshold::default()),
             Effect::Vibrance(Vibrance::default()),
+            Effect::Tritone(Tritone::default()),
+            Effect::ChannelMixer(ChannelMixer::default()),
+            Effect::ColorBalance(ColorBalance::default()),
+            Effect::GammaPedestalGain(GammaPedestalGain::default()),
+            Effect::ColorBalanceHls(ColorBalanceHls::default()),
+            Effect::BlackWhite(BlackWhite::default()),
+            Effect::PhotoFilter(PhotoFilter::default()),
+            Effect::LeaveColor(LeaveColor::default()),
+            Effect::VideoLimiter(VideoLimiter::default()),
+            Effect::BroadcastColors(BroadcastColors::default()),
+            Effect::CcToner(CcToner::default()),
+            Effect::CcColorOffset(CcColorOffset::default()),
+            Effect::CcThreshold(CcThreshold::default()),
+            Effect::CcThresholdRgb(CcThresholdRgb::default()),
+            Effect::ChangeColor(ChangeColor::default()),
+            Effect::ShiftChannels(ShiftChannels::default()),
+            Effect::LinearColorKey(LinearColorKey::default()),
+            Effect::RemoveColorMatting(RemoveColorMatting::default()),
+            Effect::Extract(Extract::default()),
+            Effect::CcColorNeutralizer(CcColorNeutralizer::default()),
+            Effect::Unmult(Unmult::default()),
+            Effect::SpillSuppressor(SpillSuppressor::default()),
+            Effect::ColorRange(ColorRange::default()),
+            Effect::Arithmetic(Arithmetic::default()),
+            Effect::ColorDifferenceKey(ColorDifferenceKey::default()),
+            Effect::SelectiveColor(SelectiveColor::default()),
         ];
         let mut checked = 0;
         for effect in all {

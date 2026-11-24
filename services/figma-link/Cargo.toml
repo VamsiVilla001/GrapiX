@@ -1,0 +1,19 @@
+[package]
+name = "gx-figma-link"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The Figma link (build plan 18.2): GrapiX as an MCP client of the Figma desktop app's
+# local MCP server. The user's open Figma session is the sign-in, so GrapiX holds no
+# token, no OAuth client and no keychain entry. Loopback only: a non-local address is
+# refused before a socket is opened. std networking, no HTTP client crate.
+
+[lib]
+name = "gx_figma_link"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+sha2 = { workspace = true }

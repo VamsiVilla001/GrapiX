@@ -191,7 +191,14 @@ pub fn editor_command_suite(report: &mut Report) {
     server.serve_in_background();
 
     let mut control = match Client::connect(control_address) {
-        Ok(client) => client,
+        Ok(mut client) => {
+            // 2.15: a Program command is sent for a signed-in operator.
+            client.set_operator(Some(
+                &gx_contracts::auth::OperatorName::parse("Conformance Operator")
+                    .expect("a valid name"),
+            ));
+            client
+        }
         Err(error) => {
             report.skip_unavailable(format!("cannot connect to the control plane: {error}"));
             return;

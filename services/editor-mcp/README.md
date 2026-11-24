@@ -12,6 +12,15 @@ printed on stderr). The endpoint is `/mcp`. `Host` must be `127.0.0.1` or
 `localhost`, and a request carrying any browser `Origin` is refused: the
 clients are local agents, not web pages.
 
+HTTP is a port any local process can reach, so it needs `--token <secret>`
+(the secret the control plane is started with) and refuses every request that
+does not carry `Authorization: Bearer <gx1 credential>` made with it: 401, the
+`unauthenticated` refusal as the body, nothing logged but the word for the
+fault. A call is gated by the scopes the credential grants, not by the ones the
+server was built with, and its record (`mcp.call`) names the credential's
+subject, never the credential. Without `--token`, `--http` refuses to start.
+Stdio is a process the launcher started and needs no credential.
+
 The wire is the official Rust SDK, rmcp (build plan 8.14). It speaks the
 2026-07-28 revision, where there is no `initialize` and each request carries
 `_meta` with `io.modelcontextprotocol/protocolVersion` and

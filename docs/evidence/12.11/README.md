@@ -1,0 +1,21 @@
+# 12.11 As-run record: first slice
+
+**Slice 1 built 19 November 2026; the row stays active.** ADR-0004 section 5 and the 16 Nov 2026 amendment: a separate as-run file per channel and day, each record synced before the operator sees the result, each carrying the SHA-256 of the record before it, naming the signed-in operator (2.15); if it cannot be written, Program commands are still accepted.
+
+## What was built
+- **`gx_control_transport::as_run`** (new): `<log root>/as-run/<channel>-<date>.jsonl`, one JSON object per line: `seq`, `prev` (SHA-256 lower-case hex of the exact previous line; 64 zeros for the first of a file), `ts` (UTC, microseconds), `channel` (`program`), `layer` (null until 12.10), `request`, `operator`, `subject` (the credential's subject, never the credential), `role`, `result` (`accepted`/`refused`), `refusal` (code name), `page`, `revision`, `contentHash`, `phase`, `committedFrame`. Each record is written, flushed and `sync_data`'d. A restart continues the day's chain from what is on disk; a new day starts a new file and chain. `verify(path)` names the first line that does not follow its predecessor.
+- **Written where the engine answers:** the control server records every Program command it hands the engine (cue, take, clear, phase, configure output), accepted or refused, after the engine replies and before the reply leaves, with the operator (2.15), the credential's subject and role, what the command named, and the frame the engine committed. A command refused before the engine (no operator, no scope, no credential) is not a record: it never reached it.
+- **If it cannot be written:** the record is counted (`AsRunLog::failures`), `asrun.write_failed` is on the log as an error, and the command is not undone; the next one is still accepted, and the log reopens from disk on the next record. The engine opens the log under `GX_LOG_DIR` or the platform log root; if it cannot, `asrun.unavailable` is on the log and the engine runs without one.
+
+## Evidence
+- `as_run` unit tests 11 (the fields; the file name; an edited line is found at the next line; a removed line where it was; swapped lines; a removed last line reads as a shorter chain; a restart continues the chain; a refusal is a record; a failed write is counted and the log recovers; a new day is a new file and chain; the civil date), `tests/as_run.rs` 4 over a real server, client and mock engine (each command is a record with operator, subject, role, page, revision, hash and the frame the engine returned; a refusal is a record; a phase names its phase; no credential or secret is written; a command with no operator is not a record; an edited record is found at its line), and **the real engine binary** (`gx-render-worker`, `tests/bind.rs`): a refused take leaves one verified record naming the operator and subject.
+- Mutants, one at a time: 15 (chain not advanced, sequence, verify ignoring the chain, the genesis, a restart forgetting the chain, failures not counted, a date change ignored, the committed frame, the refusal name, the operator, page, hash and phase not recorded, a record written for a command refused before the engine). 14 each failed a named test. One survives: the phase's committed frame (the mock engine refuses a phase, so the accepted-phase arm runs only on a real scene; the code is the same shape as the cue's).
+- Gate: fmt, clippy `-D warnings`, `npm run check` exit 0: 135 Node, 547 Editor, 1,201 Rust (38 ignored), conformance 632 passed, 0 failed, 9 skipped.
+
+## Not done (the row stays open)
+- The row's channel/layer target (12.10 is not built; `layer` is always null and `channel` is `program`).
+- Playout's own events on the record (output started or stopped, a device error, a late or missed frame while a graphic was up) and "Update, Continue, Out" as separate commands (the engine has Cue, Take, Clear and Phase today).
+- The operator being told at once that a record failed: it is on the log and counted, not yet shown to the operator.
+- "Replaying a fixture show's records matches the engine's committed events exactly": no replay test yet.
+- A removed whole day file is not detected (each day's chain starts afresh); a removed last line cannot be told from a shorter day by the chain alone.
+- The accepted-phase arm under a real published scene.

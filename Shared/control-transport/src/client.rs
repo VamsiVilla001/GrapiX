@@ -47,6 +47,10 @@ pub struct Client {
     events: Arc<Mutex<Vec<EngineEvent>>>,
     seq: Sequence,
     request_count: u64,
+    /// The signed-in operator (2.15): sent with every Program command, and with nothing else.
+    operator: Option<String>,
+    /// Where on Program this client aims its commands (12.10); none is the main layer.
+    target: Option<gx_control_plane::message::OutputTarget>,
 }
 
 impl Drop for Client {
@@ -110,6 +114,8 @@ impl Client {
             events,
             seq: Sequence(0),
             request_count: 0,
+            operator: None,
+            target: None,
         };
         if let Some(token) = token {
             match client.request(ClientRequest::Authenticate {
@@ -171,7 +177,12 @@ impl Client {
                     detail: error.to_string(),
                 }
             })?;
+        // The person is still signed in: a redial is the same operator on a new socket (2.15).
+        let operator = self.operator.take();
+        let target = self.target.take();
         *self = fresh;
+        self.operator = operator;
+        self.target = target;
         let program = match self.request(ClientRequest::Status)? {
             EngineReply::Status(status) => status.program,
             EngineReply::Refused(refusal) => return Err(refusal),
@@ -188,6 +199,30 @@ impl Client {
         })
     }
 
+    /// Who is operating this client (2.15). Every Program command sent from now on names them;
+    /// `None` signs out, and the engine then refuses a Program command by name
+    /// (`OperatorRequired`).
+    pub fn set_operator(&mut self, operator: Option<&gx_contracts::auth::OperatorName>) {
+        self.operator = operator.map(|name| name.as_str().to_owned());
+    }
+
+    /// The operator this client is sending Program commands for.
+    pub fn operator(&self) -> Option<&str> {
+        self.operator.as_deref()
+    }
+
+    /// Aim every targeted command (cue, take, clear, phase) from now on at `target`, a channel
+    /// and a layer on it (12.10); `None` is the Program channel's main layer.
+    pub fn set_target(&mut self, target: Option<gx_control_plane::message::OutputTarget>) {
+        self.target = target;
+    }
+
+    /// For tests that must send a name the rules refuse, as a raw peer could.
+    #[doc(hidden)]
+    pub fn set_operator_unchecked_for_test(&mut self, operator: Option<String>) {
+        self.operator = operator;
+    }
+
     #[doc(hidden)]
     pub fn replace_token_for_test(&mut self, token: Token) {
         self.token = Some(token);
@@ -197,12 +232,16 @@ impl Client {
     pub fn request(&mut self, request: ClientRequest) -> Result<EngineReply, Refusal> {
         self.seq = self.seq.next();
         self.request_count += 1;
+        let operator = operator_for(&request, self.operator.as_deref());
+        let target = request.is_targeted().then(|| self.target.clone()).flatten();
         let envelope = Envelope::new(
             // 2.13: a request made inside a correlation scope carries its id.
             MessageId::request(self.request_count, gx_telemetry::corr::current().as_deref()),
             self.seq,
             request,
-        );
+        )
+        .with_operator(operator)
+        .with_target(target);
         let frame = encode(&envelope).map_err(|error| Refusal::TransportFailed {
             detail: error.to_string(),
         })?;
@@ -222,6 +261,15 @@ impl Client {
             }),
         }
     }
+}
+
+/// 2.15: only a Program command names the operator; a read, an authentication or a stop
+/// carries none, so the name is on the wire exactly where it is judged and recorded.
+fn operator_for(request: &ClientRequest, operator: Option<&str>) -> Option<String> {
+    request
+        .is_program_command()
+        .then(|| operator.map(str::to_owned))
+        .flatten()
 }
 
 impl EnginePeer for Client {
@@ -297,5 +345,36 @@ fn placeholder_capability() -> EngineCapability {
         live_allowed: false,
         media: Vec::new(),
         material: gx_contracts::material::MaterialSupport::none(),
+    }
+}
+
+#[cfg(test)]
+mod operator_tests {
+    use gx_control_plane::intent::{ClearRequest, TakeAt};
+    use gx_control_plane::message::ClientRequest;
+
+    use super::operator_for;
+
+    #[test]
+    fn the_operator_rides_a_program_command_and_nothing_else() {
+        let clear = ClientRequest::Clear(ClearRequest {
+            at: TakeAt::NextOpportunity,
+        });
+        assert_eq!(operator_for(&clear, Some("Ada")), Some("Ada".to_owned()));
+        assert_eq!(operator_for(&clear, None), None);
+        for request in [
+            ClientRequest::Status,
+            ClientRequest::Performance,
+            ClientRequest::Stop,
+            ClientRequest::capability(),
+            ClientRequest::Authenticate { token: "x".into() },
+        ] {
+            assert_eq!(
+                operator_for(&request, Some("Ada")),
+                None,
+                "{}",
+                request.name()
+            );
+        }
     }
 }

@@ -30,10 +30,19 @@ pub(crate) struct GpuDrawer {
     /// 3.19: the mask passes (`mask.wgsl`): init, shape, blur_h, blur_v,
     /// fold, apply.
     mask_layout: wgpu::BindGroupLayout,
-    mask: [wgpu::ComputePipeline; 6],
+    mask: [wgpu::ComputePipeline; 7],
+    /// 3.27: the side, in texels, a layer is drawn in tiles of; `None` takes `TILE_SIDE`. Tests set a small one.
+    tile_side: Option<u32>,
 }
 
-const MASK_BYTES: u64 = 48;
+/// A layer drawn in one buffer must fit this many bytes (and the device's binding limit); a larger one is drawn tile by tile, so an 8K layer
+/// with a feather never asks the GPU for one buffer of its whole size.
+const TILE_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The side of a tile, in texels.
+const TILE_SIDE: u32 = 2048;
+
+const MASK_BYTES: u64 = 64;
 
 const FIT_BYTES: u64 = 16 * 8;
 
@@ -207,7 +216,7 @@ impl GpuDrawer {
             bind_group_layouts: &[Some(&mask_layout)],
             immediate_size: 0,
         });
-        let mask = ["init", "shape", "blur_h", "blur_v", "fold", "apply"].map(|entry| {
+        let mask = ["init", "shape", "blur_h", "blur_v", "fold", "apply", "variable"].map(|entry| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&mask_pipeline_layout),
@@ -225,7 +234,14 @@ impl GpuDrawer {
             fit,
             mask_layout,
             mask,
+            tile_side: None,
         }
+    }
+
+    /// Draw in tiles of `side` texels even when the layer would fit (tests of 3.27); `None` goes back to the budget.
+    #[cfg(test)]
+    pub(crate) fn set_tile_side(&mut self, side: Option<u32>) {
+        self.tile_side = side;
     }
 
     /// Vello GPU coverage of `outline` over a `width` x `height` target whose
@@ -312,6 +328,11 @@ impl GpuDrawer {
         if masks.is_empty() {
             return Ok(());
         }
+        // The passes work over the layer grown by the feather's reach on each side and the last one crops (3.27).
+        let (pad_x, pad_y) = crate::rasterise::mask::mask_pad(masks);
+        let (layer_width, layer_height) = (width, height);
+        let (width, height) = (layer_width + 2 * pad_x, layer_height + 2 * pad_y);
+        let origin = [origin[0] - f64::from(pad_x), origin[1] - f64::from(pad_y)];
         let texels = u64::from(width) * u64::from(height);
         // Handles, so the closures below hold no borrow of `self` while the
         // coverage targets are drawn.
@@ -336,7 +357,8 @@ impl GpuDrawer {
             let words = [width, height, stride, mode]
                 .into_iter()
                 .chain(flags)
-                .chain([values[0].to_bits(), values[1].to_bits(), 0, 0]);
+                .chain([values[0].to_bits(), values[1].to_bits(), 0, 0])
+                .chain([layer_width, layer_height, pad_x, pad_y]);
             for (word, dest) in words.zip(bytes.chunks_exact_mut(4)) {
                 dest.copy_from_slice(&word.to_le_bytes());
             }
@@ -422,25 +444,56 @@ impl GpuDrawer {
                 ],
             })
         };
-        let dispatch = |encoder: &mut wgpu::CommandEncoder,
-                        pipeline: &wgpu::ComputePipeline,
-                        bind: &wgpu::BindGroup| {
+        let dispatch_over = |encoder: &mut wgpu::CommandEncoder,
+                             pipeline: &wgpu::ComputePipeline,
+                             bind: &wgpu::BindGroup,
+                             (w, h): (u32, u32)| {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("gx-mask"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind, &[]);
-            pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
+            pass.dispatch_workgroups(w.div_ceil(16), h.div_ceil(16), 1);
+        };
+        let dispatch = |encoder: &mut wgpu::CommandEncoder,
+                        pipeline: &wgpu::ComputePipeline,
+                        bind: &wgpu::BindGroup| {
+            dispatch_over(encoder, pipeline, bind, (width, height));
         };
         let no_weights = weights_buffer(&[]);
         let initial = crate::rasterise::mask::initial_alpha(masks);
+        let modes = crate::rasterise::mask::fold_modes(masks);
         let outer = params(0, [0; 4], [0.0, initial]);
         let outer_group = group(&blank, &blank, &no_weights, &outer);
         let mut encoder = device.create_command_encoder(&Default::default());
         dispatch(&mut encoder, &pipelines[0], &outer_group);
         queue.submit([encoder.finish()]);
-        for mask in masks.iter().filter(|m| m.mode != MaskMode::None) {
+        for (mask, &fold_mode) in masks
+            .iter()
+            .zip(&modes)
+            .filter(|(m, _)| m.mode != MaskMode::None)
+        {
+            let mode = match fold_mode {
+                MaskMode::None => 0,
+                MaskMode::Add => 1,
+                MaskMode::Subtract => 2,
+                MaskMode::Intersect => 3,
+                MaskMode::Difference => 4,
+                MaskMode::Lighten => 5,
+                MaskMode::Darken => 6,
+            };
+            // 11.108: a variable feather draws the coverage from the distance to the path, texel by texel, then folds as any mask does.
+            if let Some(variable) = &mask.variable {
+                let packed = weights_buffer(&variable.pack(origin));
+                let uniform = params(mode, [0, 0, u32::from(mask.inverted), 0], [mask.opacity, initial]);
+                let bind = group(&blank, &blank, &packed, &uniform);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                dispatch(&mut encoder, &pipelines[6], &bind);
+                dispatch(&mut encoder, &pipelines[4], &bind);
+                queue.submit([encoder.finish()]);
+                continue;
+            }
             let fill =
                 self.coverage_texture(device, queue, object, &mask.fill, origin, width, height)?;
             let band = match &mask.band {
@@ -457,37 +510,42 @@ impl GpuDrawer {
                     height,
                 )?,
             };
-            let mode = match mask.mode {
-                MaskMode::None => 0,
-                MaskMode::Add => 1,
-                MaskMode::Subtract => 2,
-                MaskMode::Intersect => 3,
-                MaskMode::Difference => 4,
-            };
-            let radius = (mask.weights.len() / 2) as u32;
-            let uniform = params(
-                mode,
-                [
-                    u32::from(mask.grow),
-                    u32::from(mask.band.is_some()),
-                    u32::from(mask.inverted),
-                    radius,
-                ],
-                [mask.opacity, initial],
+            // 3.27: the feather has its own weights along each axis; an axis
+            // without one takes the identity tap so both passes always run.
+            let (across_x, across_y) = (
+                crate::rasterise::mask::axis_weights(&mask.weights),
+                crate::rasterise::mask::axis_weights(&mask.weights_y),
             );
-            let weights = weights_buffer(&mask.weights);
-            let bind = group(&fill, &band, &weights, &uniform);
+            let uniform_for = |radius: u32| {
+                params(
+                    mode,
+                    [
+                        u32::from(mask.grow),
+                        u32::from(mask.band.is_some()),
+                        u32::from(mask.inverted),
+                        radius,
+                    ],
+                    [mask.opacity, initial],
+                )
+            };
+            let (uniform_x, uniform_y) = (
+                uniform_for((across_x.len() / 2) as u32),
+                uniform_for((across_y.len() / 2) as u32),
+            );
+            let (weights_x, weights_y) = (weights_buffer(&across_x), weights_buffer(&across_y));
+            let bind_x = group(&fill, &band, &weights_x, &uniform_x);
+            let bind_y = group(&fill, &band, &weights_y, &uniform_y);
             let mut encoder = device.create_command_encoder(&Default::default());
-            dispatch(&mut encoder, &pipelines[1], &bind);
-            if !mask.weights.is_empty() {
-                dispatch(&mut encoder, &pipelines[2], &bind);
-                dispatch(&mut encoder, &pipelines[3], &bind);
+            dispatch(&mut encoder, &pipelines[1], &bind_x);
+            if !mask.weights.is_empty() || !mask.weights_y.is_empty() {
+                dispatch(&mut encoder, &pipelines[2], &bind_x);
+                dispatch(&mut encoder, &pipelines[3], &bind_y);
             }
-            dispatch(&mut encoder, &pipelines[4], &bind);
+            dispatch(&mut encoder, &pipelines[4], &bind_x);
             queue.submit([encoder.finish()]);
         }
         let mut encoder = device.create_command_encoder(&Default::default());
-        dispatch(&mut encoder, &pipelines[5], &outer_group);
+        dispatch_over(&mut encoder, &pipelines[5], &outer_group, (layer_width, layer_height));
         queue.submit([encoder.finish()]);
         Ok(())
     }
@@ -658,6 +716,9 @@ impl GpuDrawer {
     /// Draw `paths` into a new working-space float texture of `width` x
     /// `height` whose texel (0, 0) corner is scene point `origin`. The texture
     /// can be sampled and copied; nothing waits for the GPU.
+    ///
+    /// 3.27: a layer too large for one drawing buffer is drawn in tiles, each with its own padded mask window, and copied into the texture
+    /// at its place; the result is the same as drawing it whole.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
@@ -669,7 +730,113 @@ impl GpuDrawer {
         width: u32,
         height: u32,
         masks: &[crate::rasterise::mask::PreparedMask],
+        into: Option<&wgpu::Texture>,
     ) -> Result<wgpu::Texture, Refusal> {
+        let refuse = |detail: String| Refusal::VectorTessellationFailed {
+            object: object.into(),
+            detail,
+        };
+        let whole_stride = width.div_ceil(16) * 16;
+        let whole_bytes = u64::from(whole_stride) * u64::from(height) * 16;
+        let limit = device
+            .limits()
+            .max_storage_buffer_binding_size
+            .min(TILE_BUDGET_BYTES);
+        let tiled = self.tile_side.is_some() || whole_bytes > limit;
+        let side = self.tile_side.unwrap_or(TILE_SIDE).max(16);
+        let texture = match into {
+            Some(target) => {
+                if (target.width(), target.height()) != (width, height)
+                    || target.format() != wgpu::TextureFormat::Rgba32Float
+                {
+                    return Err(refuse(format!(
+                        "the layer {width}x{height} is not the texture it redraws into"
+                    )));
+                }
+                target.clone()
+            }
+            None => {
+                crate::render_work::gpu_build();
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("gx-draw-source"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                })
+            }
+        };
+        let (cols, rows) = if tiled {
+            (width.div_ceil(side), height.div_ceil(side))
+        } else {
+            (1, 1)
+        };
+        for row in 0..rows {
+            for col in 0..cols {
+                let (x0, y0) = if tiled { (col * side, row * side) } else { (0, 0) };
+                let (w, h) = if tiled {
+                    ((width - x0).min(side), (height - y0).min(side))
+                } else {
+                    (width, height)
+                };
+                let tile_origin = [origin[0] + f64::from(x0), origin[1] + f64::from(y0)];
+                let (layer, stride) = self.fill_region(
+                    device, queue, object, paths, tile_origin, w, h, masks,
+                )?;
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("gx-draw-copy"),
+                    });
+                encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &layer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(stride * 16),
+                            rows_per_image: Some(h),
+                        },
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: x0, y: y0, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                queue.submit([encoder.finish()]);
+            }
+        }
+        Ok(texture)
+    }
+
+    /// Draw `paths` and apply `masks` over one region of `width` x `height` texels whose corner is scene point `origin`, into a new buffer
+    /// of rows padded to `stride` texels.
+    #[allow(clippy::too_many_arguments)]
+    fn fill_region(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        object: &str,
+        paths: &[&PreparedPath],
+        origin: [f64; 2],
+        width: u32,
+        height: u32,
+        masks: &[crate::rasterise::mask::PreparedMask],
+    ) -> Result<(wgpu::Buffer, u32), Refusal> {
         let refuse = |detail: String| Refusal::VectorTessellationFailed {
             object: object.into(),
             detail,
@@ -790,40 +957,7 @@ impl GpuDrawer {
         self.apply_masks(
             device, queue, object, &layer, stride, width, height, origin, masks,
         )?;
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("gx-draw-copy"),
-        });
-        crate::render_work::gpu_build();
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("gx-draw-source"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        encoder.copy_buffer_to_texture(
-            wgpu::TexelCopyBufferInfo {
-                buffer: &layer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(stride * 16),
-                    rows_per_image: Some(height),
-                },
-            },
-            texture.as_image_copy(),
-            texture.size(),
-        );
-        queue.submit([encoder.finish()]);
-        Ok(texture)
+        Ok((layer, stride))
     }
 }
 
@@ -1003,7 +1137,7 @@ mod tests {
             let refs: Vec<&PreparedPath> = paths.iter().collect();
             let mut drawer = GpuDrawer::new(device);
             let texture = drawer
-                .draw(device, queue, "shape", &refs, origin, width, height, &[])
+                .draw(device, queue, "shape", &refs, origin, width, height, &[], None)
                 .unwrap();
             let gpu_px = read_float(device, queue, &texture);
             let mut surface = RasterSurface::window(width, height, origin);
@@ -1110,6 +1244,183 @@ mod tests {
         }
     }
 
+    /// 11.108: the variable feather on the GPU is the CPU twin's, texel by texel (to two 8-bit steps), for a mask whose feather differs along
+    /// its edge, with expansion, inversion, opacity, both falloffs, and folded after another mask.
+    #[test]
+    #[ignore = "requires hardware GPU; explicit 11.108 variable feather gate"]
+    fn gpu_variable_feather_matches_the_cpu_twin() {
+        use crate::rasterise::mask::{apply_masks, PreparedMask};
+        use crate::rasterise::variable_feather::VariableFeather;
+        use gx_contracts::scene::MaskMode;
+        let gpu = crate::gpu::negotiate();
+        let (device, queue) = gpu.device_queue().expect("a hardware GPU");
+        let mut drawer = GpuDrawer::new(device);
+        let (width, height, origin) = (160_u32, 120_u32, [-7.0, 11.0]);
+        let layer = PreparedPath::new(
+            "layer".into(),
+            PathPaint::Solid(WorkingRgba::opaque(0.9, 0.5, 0.2)),
+            vello_gpu::kurbo::Rect::new(origin[0], origin[1], origin[0] + 160.0, origin[1] + 120.0).to_path(0.01),
+            OutlineFill::NonZero,
+        );
+        // A rounded-ish diamond round the middle of the window, flattened; its feather is wide on one side and none on the other.
+        let (cx, cy) = (origin[0] + 80.0, origin[1] + 60.0);
+        let ring: Vec<(f64, f64)> = (0..48).map(|k| {
+            let a = k as f64 / 48.0 * std::f64::consts::TAU;
+            (cx + 55.0 * a.cos(), cy + 40.0 * a.sin())
+        }).collect();
+        let mut segments = Vec::new();
+        let mut arc = 0.0_f64;
+        for k in 0..ring.len() {
+            let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+            segments.push([a.0 as f32, a.1 as f32, b.0 as f32, b.1 as f32, arc as f32]);
+            arc += ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+        }
+        let make = |points: Vec<[f32; 3]>, expansion: f32, smooth: bool, inverted: bool, opacity: f32, mode: MaskMode| {
+            let mut m = crate::rasterise::mask::tests::rect_mask(0.0, 0.0, 1.0, 1.0, mode);
+            m.inverted = inverted;
+            m.opacity = opacity;
+            m.variable = Some(std::sync::Arc::new(VariableFeather { segments: segments.clone(), total: arc as f32, points, expansion, smooth }));
+            m
+        };
+        let total = arc as f32;
+        let wide_one_side = vec![[0.0, 18.0, 0.5], [total / 2.0, -12.0, 0.0]];
+        let cases: Vec<(&str, Vec<PreparedMask>)> = vec![
+            ("outward smooth", vec![make(vec![[0.0, 15.0, 0.0]], 0.0, true, false, 1.0, MaskMode::Add)]),
+            ("inward linear, expanded", vec![make(vec![[0.0, -20.0, 0.0]], 6.0, false, false, 1.0, MaskMode::Add)]),
+            ("wide on one side, none on the other, tension", vec![make(wide_one_side.clone(), 0.0, true, false, 1.0, MaskMode::Add)]),
+            ("inverted, half opacity", vec![make(wide_one_side.clone(), -3.0, true, true, 0.5, MaskMode::Add)]),
+            ("folded after another mask", vec![
+                crate::rasterise::mask::tests::rect_mask(origin[0] + 20.0, origin[1] + 10.0, origin[0] + 140.0, origin[1] + 100.0, MaskMode::Add),
+                make(wide_one_side, 0.0, true, false, 1.0, MaskMode::Subtract),
+            ]),
+        ];
+        for (name, masks) in cases {
+            let texture = drawer.draw(device, queue, "variable", &[&layer], origin, width, height, &masks, None).unwrap();
+            let gpu_px = read_float(device, queue, &texture);
+            let mut surface = RasterSurface::window(width, height, origin);
+            VelloCpuRasteriser.rasterise_into(&[&layer], &mut surface);
+            apply_masks(&masks, &mut surface);
+            let mut worst = 0.0_f32;
+            for (i, p) in surface.pixels().iter().enumerate() {
+                for (c, cpu) in [p.r, p.g, p.b, p.a].into_iter().enumerate() {
+                    worst = worst.max((gpu_px[i * 4 + c] - cpu).abs());
+                }
+            }
+            assert!(worst < 2.0 / 255.0, "{name}: GPU and CPU differ by {worst}");
+            let lit = surface.pixels().iter().filter(|p| p.a > 0.01).count();
+            assert!(lit > 100, "{name}: the mask drew something ({lit} texels)");
+        }
+    }
+
+    /// 3.27: a layer drawn in tiles is the layer drawn whole: a gradient layer under a feathered mask, and under a variable feather, at a
+    /// size no tile divides, so the edge tiles are partial and every feather reaches across tile borders.
+    #[test]
+    #[ignore = "requires hardware GPU; explicit 3.27 tiling gate"]
+    fn gpu_tiled_layer_equals_the_whole_layer() {
+        use crate::rasterise::mask::feather_weights;
+        use crate::rasterise::variable_feather::VariableFeather;
+        use gx_contracts::scene::MaskMode;
+        let gpu = crate::gpu::negotiate();
+        let (device, queue) = gpu.device_queue().expect("a hardware GPU");
+        let mut drawer = GpuDrawer::new(device);
+        let (width, height, origin) = (300_u32, 170_u32, [-13.0, 29.0]);
+        let (w, h) = (f64::from(width), f64::from(height));
+        let layer = PreparedPath::new(
+            "layer".into(),
+            PathPaint::Gradient(Box::new(PathGradient {
+                radial: false,
+                rows: [1.0 / w, 0.0, -origin[0] / w, 0.0, 0.0, 0.0],
+                spread: GradientSpread::Pad,
+                stops: vec![
+                    (0.0, WorkingRgba { r: 0.8, g: 0.2, b: 0.1, a: 1.0 }),
+                    (1.0, WorkingRgba { r: 0.0, g: 0.3, b: 0.6, a: 0.7 }),
+                ],
+            })),
+            vello_gpu::kurbo::Ellipse::new((origin[0] + w / 2.0, origin[1] + h / 2.0), (w / 2.0 - 4.0, h / 2.0 - 4.0), 0.0).to_path(0.01),
+            OutlineFill::NonZero,
+        );
+        let mut feathered = crate::rasterise::mask::tests::rect_mask(origin[0] + 30.0, origin[1] + 20.0, origin[0] + 270.0, origin[1] + 150.0, MaskMode::Add);
+        feathered.weights = feather_weights(22.0);
+        feathered.weights_y = feather_weights(14.0);
+        let (cx, cy) = (origin[0] + w / 2.0, origin[1] + h / 2.0);
+        let ring: Vec<(f64, f64)> = (0..64)
+            .map(|k| {
+                let a = k as f64 / 64.0 * std::f64::consts::TAU;
+                (cx + 110.0 * a.cos(), cy + 60.0 * a.sin())
+            })
+            .collect();
+        let mut segments = Vec::new();
+        let mut arc = 0.0_f64;
+        for k in 0..ring.len() {
+            let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+            segments.push([a.0 as f32, a.1 as f32, b.0 as f32, b.1 as f32, arc as f32]);
+            arc += ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+        }
+        let mut variable = crate::rasterise::mask::tests::rect_mask(0.0, 0.0, 1.0, 1.0, MaskMode::Add);
+        variable.variable = Some(std::sync::Arc::new(VariableFeather {
+            segments,
+            total: arc as f32,
+            points: vec![[0.0, 24.0, 0.5], [arc as f32 / 2.0, -16.0, 0.0]],
+            expansion: 0.0,
+            smooth: true,
+        }));
+        for (name, masks) in [("no mask", Vec::new()), ("feather", vec![feathered]), ("variable feather", vec![variable])] {
+            drawer.set_tile_side(None);
+            let whole = drawer.draw(device, queue, "tiles", &[&layer], origin, width, height, &masks, None).unwrap();
+            let whole_px = read_float(device, queue, &whole);
+            for side in [64_u32, 97, 128] {
+                drawer.set_tile_side(Some(side));
+                let tiled = drawer.draw(device, queue, "tiles", &[&layer], origin, width, height, &masks, None).unwrap();
+                let tiled_px = read_float(device, queue, &tiled);
+                assert_eq!(whole_px.len(), tiled_px.len());
+                let worst = whole_px.iter().zip(&tiled_px).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+                assert!(worst < 2.0 / 255.0, "{name}, tiles of {side}: the tiled layer differs from the whole one by {worst}");
+                let lit = whole_px.chunks(4).filter(|p| p[3] > 0.01).count();
+                assert!(lit > 1000, "{name}: the layer drew something ({lit} texels)");
+            }
+        }
+        drawer.set_tile_side(None);
+    }
+
+    /// 3.27: a mask that goes past the layer does not dim the layer's edge on the GPU, and the GPU agrees with the CPU twin.
+    #[test]
+    #[ignore = "requires hardware GPU; explicit 3.27 feather gate"]
+    fn gpu_feather_past_the_layer_does_not_dim_its_edge() {
+        use crate::rasterise::mask::{apply_masks, feather_weights};
+        use gx_contracts::scene::MaskMode;
+        let gpu = crate::gpu::negotiate();
+        let (device, queue) = gpu.device_queue().expect("a hardware GPU");
+        let mut drawer = GpuDrawer::new(device);
+        let (width, height, origin) = (40_u32, 20_u32, [3.0, -2.0]);
+        let layer = PreparedPath::new(
+            "layer".into(),
+            PathPaint::Solid(WorkingRgba::opaque(1.0, 1.0, 1.0)),
+            vello_gpu::kurbo::Rect::new(origin[0], origin[1], origin[0] + 40.0, origin[1] + 20.0).to_path(0.01),
+            OutlineFill::NonZero,
+        );
+        let mut big = crate::rasterise::mask::tests::rect_mask(-100.0, -100.0, 140.0, 120.0, MaskMode::Add);
+        big.weights = feather_weights(20.0);
+        big.weights_y = feather_weights(12.0);
+        let masks = [big];
+        let texture = drawer.draw(device, queue, "feather", &[&layer], origin, width, height, &masks, None).unwrap();
+        let gpu_px = read_float(device, queue, &texture);
+        let mut surface = RasterSurface::window(width, height, origin);
+        VelloCpuRasteriser.rasterise_into(&[&layer], &mut surface);
+        apply_masks(&masks, &mut surface);
+        for (x, y) in [(0_usize, 0_usize), (39, 0), (0, 19), (39, 19)] {
+            let a = gpu_px[(y * width as usize + x) * 4 + 3];
+            assert!(a > 0.995, "the corner ({x}, {y}) of the layer is dimmed by its own edge: {a}");
+        }
+        let worst = surface
+            .pixels()
+            .iter()
+            .enumerate()
+            .flat_map(|(i, p)| [p.r, p.g, p.b, p.a].into_iter().enumerate().map(move |(c, v)| (i, c, v)))
+            .map(|(i, c, v)| (gpu_px[i * 4 + c] - v).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(worst < 2.0 / 255.0, "GPU and CPU differ by {worst}");
+    }
+
     /// 3.19: the GPU mask passes and the CPU twin agree: a layer under five
     /// masks (every mode, feather, both expansions, inversion, opacity), at
     /// three sizes and origins, to within one 8-bit coverage step.
@@ -1164,9 +1475,11 @@ mod tests {
                 band: None,
                 grow: false,
                 weights: Vec::new(),
+                weights_y: Vec::new(),
                 inverted: false,
                 opacity: 1.0,
                 mode,
+                variable: None,
             };
             let (cx, cy) = at(0.4, 0.5);
             let mut first = mask(
@@ -1174,6 +1487,7 @@ mod tests {
                 MaskMode::Add,
             );
             first.weights = feather_weights(6.0);
+            first.weights_y = feather_weights(6.0);
             let (rx, ry) = at(0.5, 0.2);
             let mut grow = mask(
                 Rect::new(rx, ry, rx + w * 0.3, ry + h * 0.4).to_path(0.01),
@@ -1210,6 +1524,7 @@ mod tests {
                 MaskMode::Difference,
             );
             diff.weights = feather_weights(3.0);
+            diff.weights_y = feather_weights(3.0);
             let masks = [first, grow, shrink, inter, diff];
             let texture = drawer
                 .draw(
@@ -1221,6 +1536,7 @@ mod tests {
                     width,
                     height,
                     &masks,
+                    None,
                 )
                 .unwrap();
             let gpu_px = read_float(device, queue, &texture);

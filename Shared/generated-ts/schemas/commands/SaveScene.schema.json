@@ -53,6 +53,19 @@
             "path"
           ],
           "type": "object"
+        },
+        {
+          "description": "Save the session as the next numbered version of itself (11.30), and continue in it.\n\nA scene stored in a project is written, with its unsaved edits, as a new stored scene under\nthe next free id (`strap` gives `strap_v002`, `strap_v003` gives `strap_v004`, and a number\nalready taken is passed over) with the name numbered the same way. The version it came from\nis not written to: it stays exactly as it was last saved. The session then belongs to the\nnew scene and starts a fresh history, because the scene it edits has a new identity. A scene\nsaved to a file is written beside it as the next numbered file (`strap.json` gives\n`strap_v002.json`), and the session continues in that file with its history. A scene that has\nnever been saved has no version to number from and refuses `sessionUnbound`. A failed write\nchanges nothing.",
+          "properties": {
+            "to": {
+              "const": "nextVersion",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to"
+          ],
+          "type": "object"
         }
       ]
     },

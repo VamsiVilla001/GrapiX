@@ -16,7 +16,8 @@
 
 import type { CubicBezier, SceneEasing, SceneEdit } from "@grapix/contracts";
 import { wireFrame } from "../command-client";
-import { keyId, parseKeyId, type TimelineModel } from "./model";
+import { targetOfField } from "../path-anim";
+import { keyId, parseKeyId, type TimelineModel, type TimelineTrack } from "./model";
 import { countInSpan } from "./key-index";
 import { EASY_EASE_INFLUENCE, segmentControlPoints, type EasyEaseKind } from "./easing";
 
@@ -98,6 +99,20 @@ export function keysInSpan(
 // Gestures
 // ---------------------------------------------------------------------------
 
+/// A path key written again with another easing: the same path at the same frame (11.112).
+function pathKeyRewrite(track: TimelineTrack, frame: number, easing: SceneEasing, bezier?: CubicBezier): SceneEdit {
+  const key = track.pathKeys!.find((candidate) => Number(candidate.frame) === frame)!;
+  return {
+    edit: "setPathKey",
+    objectId: track.objectId,
+    target: track.pathTarget!,
+    frame: wireFrame(frame),
+    path: key.path,
+    easing,
+    ...(easing === "custom-bezier" && bezier !== undefined ? { bezier } : {}),
+  } as SceneEdit;
+}
+
 /// Move every selected key by `delta` frames.
 ///
 /// Refuses the whole gesture rather than part of it. A partial move would
@@ -157,13 +172,19 @@ export function planMove(
   );
 
   return {
-    edits: ordered.map((key) => ({
-      edit: "moveKeyframe",
-      objectId: key!.objectId,
-      property: key!.property,
-      fromFrame: wireFrame(key!.frame),
-      toFrame: wireFrame(key!.frame + delta),
-    })),
+    edits: ordered.map((key) => {
+      // 11.112: a path key moves with its own edit.
+      const target = targetOfField(key!.property);
+      return target === undefined
+        ? ({
+            edit: "moveKeyframe",
+            objectId: key!.objectId,
+            property: key!.property,
+            fromFrame: wireFrame(key!.frame),
+            toFrame: wireFrame(key!.frame + delta),
+          } as SceneEdit)
+        : ({ edit: "movePathKey", objectId: key!.objectId, target, fromFrame: wireFrame(key!.frame), toFrame: wireFrame(key!.frame + delta) } as SceneEdit);
+    }),
     label:
       selected.length === 1
         ? `Move key ${delta > 0 ? "+" : ""}${delta} frames`
@@ -178,12 +199,12 @@ export function planDelete(selected: readonly string[]): EditPlan {
   if (parsed.length !== selected.length) return { refused: "a selected key is unreadable" };
 
   return {
-    edits: parsed.map((key) => ({
-      edit: "removeKeyframe",
-      objectId: key!.objectId,
-      property: key!.property,
-      frame: wireFrame(key!.frame),
-    })),
+    edits: parsed.map((key) => {
+      const target = targetOfField(key!.property);
+      return target === undefined
+        ? ({ edit: "removeKeyframe", objectId: key!.objectId, property: key!.property, frame: wireFrame(key!.frame) } as SceneEdit)
+        : ({ edit: "removePathKey", objectId: key!.objectId, target, frame: wireFrame(key!.frame) } as SceneEdit);
+    }),
     label: selected.length === 1 ? "Delete key" : `Delete ${selected.length} keys`,
   };
 }
@@ -216,17 +237,21 @@ export function planSetEasing(
     if (!source) {
       return { refused: `no key on ${key.objectId}.${key.property} at frame ${key.frame}` };
     }
-    edits.push({
-      edit: "updateKeyframe",
-      objectId: key.objectId,
-      property: key.property,
-      keyframe: {
-        frame: wireFrame(key.frame),
-        value: source.value,
-        easing,
-        ...(easing === "custom-bezier" && bezier !== undefined ? { bezier } : {}),
-      },
-    });
+    edits.push(
+      track !== undefined && track.pathKeys !== undefined
+        ? pathKeyRewrite(track, key.frame, easing, easing === "custom-bezier" ? bezier : undefined)
+        : {
+            edit: "updateKeyframe",
+            objectId: key.objectId,
+            property: key.property,
+            keyframe: {
+              frame: wireFrame(key.frame),
+              value: source.value,
+              easing,
+              ...(easing === "custom-bezier" && bezier !== undefined ? { bezier } : {}),
+            },
+          },
+    );
   }
 
   return {
@@ -304,17 +329,21 @@ export function planEasyEase(
   const label =
     kind === "both" ? "Easy ease" : kind === "in" ? "Easy ease in" : "Easy ease out";
   return {
-    edits: [...segments.values()].map((segment) => ({
-      edit: "updateKeyframe",
-      objectId: segment.objectId,
-      property: segment.property,
-      keyframe: {
-        frame: wireFrame(segment.frame),
-        value: segment.value,
-        easing: "custom-bezier",
-        bezier: segment.bezier,
-      },
-    })),
+    edits: [...segments.values()].map((segment) => {
+      const track = model.tracks.find((candidate) => candidate.objectId === segment.objectId && candidate.property === segment.property);
+      if (track !== undefined && track.pathKeys !== undefined) return pathKeyRewrite(track, segment.frame, "custom-bezier", segment.bezier);
+      return {
+        edit: "updateKeyframe",
+        objectId: segment.objectId,
+        property: segment.property,
+        keyframe: {
+          frame: wireFrame(segment.frame),
+          value: segment.value,
+          easing: "custom-bezier",
+          bezier: segment.bezier,
+        },
+      } as SceneEdit;
+    }),
     label: selected.length === 1 ? label : `${label} on ${selected.length} keys`,
   };
 }
@@ -335,6 +364,9 @@ export function planSetSegmentBezier(
   );
   const source = track?.sourceKeys.find((candidate) => Number(candidate.frame) === segment);
   if (!source) return { refused: `no key on ${objectId}.${property} at frame ${segment}` };
+  if (track !== undefined && track.pathKeys !== undefined) {
+    return { edits: [pathKeyRewrite(track, segment, "custom-bezier", bezier)], label: "Edit curve" };
+  }
   return {
     edits: [
       {
@@ -374,7 +406,8 @@ export function planCopy(model: TimelineModel, selected: readonly string[]): Cli
         candidate.objectId === key!.objectId && candidate.property === key!.property,
     );
     const source = track?.sourceKeys.find((candidate) => Number(candidate.frame) === key!.frame);
-    if (!source) continue;
+    // 11.112: a path key is a whole path, not a number; copying keys carries numbers only.
+    if (!source || track?.pathKeys !== undefined) continue;
     copied.push({
       objectId: key!.objectId,
       property: key!.property,

@@ -1,0 +1,61 @@
+{
+  "state": {
+    "decision": "How GrapiX should keep saved workspaces (arrangements of panels) for the Editor and Playout: where files live, what the store checks, how a Reset and a Save behave on the shipped workspaces, and what happens to an unreadable file (rows 11.94 and 2.29).",
+    "what_exists_today": "The Editor keeps its one panel arrangement in the browser's local storage, as one value, with no names. A pure dock model now exists (a tree of splits and tab groups) with a strict reader, a validator and a migration from the older arrangement. A settings service already exists (2.28): typed files in two places, the user's roaming data folder for what follows the person and the machine's local folder for what belongs to this computer; atomic writes with a backup at each change; an unreadable file is set aside as .corrupt-<time> and defaults are used; a file from a newer version is refused and left untouched.",
+    "what_the_hand_off_asks": "Keep for each workspace: a shipped definition that never changes, the author's saved baseline, a session copy that follows each change after a short pause, and a last-known-good copy. Selecting a workspace loads its session copy if there is one, else its baseline. Save changes overwrites the baseline. Reset to saved discards the session. Reset to shipped is only for a shipped workspace. User workspaces can be renamed, duplicated, reordered and deleted; shipped ones cannot be deleted; the one in use cannot be deleted. A layout that cannot be read falls back to last known good, then to the shipped one, and the broken file is kept, never replaced silently. Floating windows keep a display hint and bounds that are per machine. Export and import as a checked portable file.",
+    "option_where_A": "Everything in the user's roaming data folder, one folder per application.",
+    "option_where_B": "Saved baselines in the roaming data folder (they follow the person to another computer); session copies, last-known-good copies and the name of the workspace in use in the machine's local folder (they hold window positions of this computer and change constantly).",
+    "option_check_A": "The store checks only the envelope: a safe file name for the id, a size limit, valid JSON that is an object, and a schema version it is allowed to overwrite. The dock rules (known panels, weights, no secrets) stay in the Editor's reader, which already holds them.",
+    "option_check_B": "The Rust store also validates the dock rules, so a bad layout can never reach disk.",
+    "option_shipped_save_A": "Save changes on a shipped workspace writes the author's own saved baseline beside the shipped one (an override). Reset to shipped removes the override and returns the shipped arrangement.",
+    "option_shipped_save_B": "A shipped workspace can never be overwritten: Save changes is refused with a message to use Save as new, which makes a user workspace.",
+    "option_corrupt_A": "An unreadable file is set aside under a dated name, the fallback chain is used (last known good, then shipped), the person is told in plain words which file was set aside and where, and the set-aside file is never deleted by the app.",
+    "option_corrupt_B": "An unreadable file stops the Editor from starting its layout and asks the person to choose.",
+    "option_save_pause": "The session copy is written after the person has stopped changing the layout for half a second, never during a drag, and once more when the window closes.",
+    "constraints": "Windows only. No internet. The hand-off says a failed write must keep the layout in memory and say so, not claim it was saved. Saving and switching a workspace must never touch a scene, the selection, undo or any output."
+  },
+  "questions": {
+    "best_where": {
+      "type": "choice",
+      "instructions": "Where should workspace files live?",
+      "criteria": {
+        "A": "Option A: everything in the roaming data folder.",
+        "B": "Option B: saved baselines roam; session copies, last-known-good and the workspace in use stay on this computer."
+      }
+    },
+    "best_check": {
+      "type": "choice",
+      "instructions": "How much should the Rust store check?",
+      "criteria": {
+        "A": "Option A: only the envelope (file name, size, valid JSON object, version).",
+        "B": "Option B: the dock rules as well."
+      }
+    },
+    "best_shipped_save": {
+      "type": "choice",
+      "instructions": "What should Save changes do on a workspace that ships with GrapiX?",
+      "criteria": {
+        "A": "Option A: write the author's own saved baseline beside it, and let Reset to shipped remove it.",
+        "B": "Option B: refuse, and point to Save as new."
+      }
+    },
+    "best_corrupt": {
+      "type": "choice",
+      "instructions": "What should happen when a saved layout file cannot be read?",
+      "criteria": {
+        "A": "Option A: set it aside under a dated name, fall back to last known good then shipped, and tell the person.",
+        "B": "Option B: stop and ask the person to choose."
+      }
+    },
+    "pause_is_right": {
+      "type": "noul",
+      "instructions": "Is writing the session copy after half a second without a change (never during a drag, and again on close) a sound way to keep it?",
+      "criteria": {"true": "Yes, it keeps work safe without writing on every pointer move.", "false": "No, it should write on every change or only on close."}
+    },
+    "validate_twice_is_waste": {
+      "type": "noul",
+      "instructions": "Would it be a mistake to copy the dock rules into the Rust store when the Editor's reader already holds them?",
+      "criteria": {"true": "Yes, two copies of the rules will drift apart.", "false": "No, validating in both is worth the cost."}
+    }
+  }
+}

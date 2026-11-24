@@ -120,7 +120,13 @@ fn serve() -> Result<(SocketAddr, Trace), String> {
 fn connect(addr: SocketAddr, role: Role, scopes: Vec<Scope>) -> Result<Client, String> {
     let token =
         Token::mint("conformance-scope", role, scopes, SECRET).map_err(|e| e.to_string())?;
-    Client::authenticate_only(addr, token).map_err(|e| e.to_string())
+    let mut client = Client::authenticate_only(addr, token).map_err(|e| e.to_string())?;
+    // 2.15: a Program command is sent for a signed-in operator; the scope is still
+    // judged first, so a credential that may not send it hears that.
+    client.set_operator(Some(
+        &gx_contracts::auth::OperatorName::parse("Conformance Operator").expect("a valid name"),
+    ));
+    Ok(client)
 }
 
 /// 5.7 against an engine this suite does not own (the real render worker,

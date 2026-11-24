@@ -45,9 +45,112 @@ import type {
   TimelinePhase,
 } from "@grapix/contracts";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import {
+  canCreate,
+  previewGpx,
+  projectSummary,
+  renderingLabel,
+  startRows,
+  suggestCopyName,
+  type DefaultProject,
+  type ListedRecent,
+  type OpenedProject,
+  type StartRow,
+} from "../src/project-start";
+import type { HistoryView, MachineSettings, SettingsScope, UserSettings } from "@grapix/contracts";
+import { historyRows, historySummary } from "../src/history-list";
+import { arrangeEdits, arrangeLabel, arrangeWords, isArrangeCommand, parentsOf, type ArrangeCommand } from "../src/arrange";
+import { effectivePlacement, pivotLabel, pivotPlan, type PivotRequest } from "../src/anchor-point";
+import { pivotView } from "../src/pivot-panel";
+import {
+  FIT,
+  ZOOM_STEP,
+  atPercent,
+  cameraTransform,
+  clampPan,
+  panBy,
+  wheelFactor,
+  zoomAt,
+  zoomLabel,
+  type Camera,
+  type Point as ViewPoint,
+  type Size as ViewSize,
+} from "../src/viewport-camera";
+import {
+  EMPTY_PEN,
+  addPoint,
+  closePath,
+  closeWithPull,
+  constrain,
+  moveLast,
+  nearFirst,
+  penEdits,
+  penLabel,
+  penMaskEdit,
+  penMaskLabel,
+  penPlan,
+  penPlanWords,
+  penSketch,
+  pullHandles,
+  removeLast,
+  resumeEdits,
+  resumeState,
+  type PenCreates,
+  type PenPlan,
+  type PenState,
+} from "../src/pen-tool";
+import {
+  PICK_RADIUS,
+  applyOp,
+  beginGesture,
+  canvasPointOf,
+  clickOp,
+  deleteSelected,
+  editPathEdit,
+  editTarget,
+  gestureOp,
+  isClick,
+  isSelected,
+  joinEdits,
+  kindEdits,
+  pathEditFrame,
+  pathEditRevision,
+  pathEditSketch,
+  pickPath,
+  verticesInBox,
+  type EditTarget,
+  type PathGesture,
+  type PathHit,
+  type Selected,
+} from "../src/path-edit";
+import type { BezierPath, PathOp, VertexKind } from "@grapix/contracts";
+import { animatesPath, linkUsersWords, linkedPathOf, pathChannelOf, pathKeyAt, pathLinkOf } from "../src/path-anim";
+import {
+  beginToolDrag,
+  previewDocument,
+  toolDragChanges,
+  toolDragEdits,
+  toolDragLabel,
+  type ToolDrag,
+  type ToolId,
+} from "../src/transform-tools";
+import { isFirstSave, saveRoute, versionLabel, type SaveState } from "../src/save-model";
+import { APP_MENUS, actionOf, menuTitle } from "../src/app-menu";
+import {
+  commandById,
+  decideKey,
+  refusalLine,
+  unavailable as commandUnavailable,
+  type CommandContext,
+  type KeyFocus,
+} from "../src/command-registry";
+import { MACHINE_FIELDS, toValue, USER_FIELDS, usageLine, type FieldSpec } from "../src/settings-form";
+import { renderAppMenus, type PanelEntry } from "../src/app-menu-view";
 import { presetBlocker, presetBrowserPanel } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
 import { GraphicPreviewRenderer } from "../src/graphic-preview";
+import { viewportSource, wantsEngineFrame, type ViewChoice } from "../src/viewport-source";
+import { backdropLabel, parseBackdrop, serialiseBackdrop, type Backdrop } from "../src/viewport-backdrop";
 import { createEnginePreview, statusWords, type Failure, type PreviewState } from "../src/engine-preview";
 import { renderNode } from "../src/agent-surface";
 import { BROADCAST_RATES, parseRateChoice, rateKey, sameRate } from "../src/frame-rate";
@@ -57,6 +160,43 @@ import {
   selectionRoots,
   setObjectExpanded,
 } from "../src/object-manager";
+import { snapPoint, snapTargets, type SnapHold } from "../src/path-snap";
+import { shapeSvgPath, writeSvgPath } from "../src/svg-path";
+import {
+  MASK_FALLOFFS,
+  MASK_MODES,
+  MASK_MODE_LABEL,
+  MATTE_MODES,
+  MATTE_MODE_LABEL,
+  addFeatherPointAt,
+  addMask,
+  clearMatte,
+  copyMaskToShape,
+  copyShapeToMask,
+  linkMaskToShape,
+  MATTE_VIEWS,
+  MATTE_VIEW_LABEL,
+  matteViewInfo,
+  matteWarning,
+  unlinkPath,
+  copyableShapes,
+  isRefused as isMaskRefused,
+  maskSketches,
+  maskStatus,
+  maskTarget,
+  matteSources,
+  moveMask,
+  patchMask,
+  removeMask,
+  setMatte,
+  setEffectMask,
+  setMatteMode,
+  setPreserve,
+  type MaskPatch,
+  type MaskTarget,
+  type MatteViewChoice,
+  MOST_FEATHER_POINTS,
+} from "../src/mask-edit";
 import {
   fieldEditLabel,
   inspectorEdits,
@@ -343,8 +483,33 @@ const ui = {
   importReportDialog: need<HTMLDialogElement>("import-report-dialog"),
   importReportMount: need<HTMLDivElement>("import-report-mount"),
   saveScene: need<HTMLButtonElement>("save-scene"),
-  projectSelect: need<HTMLSelectElement>("project-select"),
-  projectCreate: need<HTMLButtonElement>("project-create"),
+  projectClose: need<HTMLButtonElement>("project-close"),
+  projectSaveAs: need<HTMLButtonElement>("project-save-as"),
+  projectSummary: need<HTMLElement>("project-summary"),
+  settingsDialog: need<HTMLDialogElement>("settings-dialog"),
+  settingsBody: need<HTMLElement>("settings-body"),
+  settingsError: need<HTMLElement>("settings-error"),
+  settingsResetUser: need<HTMLButtonElement>("settings-reset-user"),
+  settingsResetMachine: need<HTMLButtonElement>("settings-reset-machine"),
+  startDialog: need<HTMLDialogElement>("start-dialog"),
+  startHome: need<HTMLElement>("start-home"),
+  startNew: need<HTMLButtonElement>("start-new"),
+  startOpen: need<HTMLButtonElement>("start-open"),
+  startList: need<HTMLUListElement>("start-list"),
+  startEmpty: need<HTMLElement>("start-empty"),
+  startError: need<HTMLElement>("start-error"),
+  startDismiss: need<HTMLButtonElement>("start-dismiss"),
+  startForm: need<HTMLFormElement>("start-new-form"),
+  startFormTitle: need<HTMLElement>("start-form-title"),
+  startDepthField: need<HTMLElement>("start-depth-field"),
+  startName: need<HTMLInputElement>("start-name"),
+  startDepth: need<HTMLSelectElement>("start-depth"),
+  startParent: need<HTMLInputElement>("start-parent"),
+  startChoose: need<HTMLButtonElement>("start-choose"),
+  startPreview: need<HTMLElement>("start-preview"),
+  startNewError: need<HTMLElement>("start-new-error"),
+  startBack: need<HTMLButtonElement>("start-back"),
+  startCreate: need<HTMLButtonElement>("start-create"),
   projectRefresh: need<HTMLButtonElement>("project-refresh"),
   projectSaveScene: need<HTMLButtonElement>("project-save-scene"),
   graphicCreate: need<HTMLButtonElement>("graphic-create"),
@@ -364,6 +529,14 @@ const ui = {
   sceneTabs: need<HTMLElement>("scene-tabs"),
   canvasSize: need<HTMLSpanElement>("canvas-size"),
   canvasRate: need<HTMLSelectElement>("canvas-rate"),
+  viewportView: need<HTMLSelectElement>("viewport-view"),
+  viewportGrid: need<HTMLButtonElement>("viewport-grid"),
+  viewportBg: need<HTMLInputElement>("viewport-bg"),
+  viewportBackdrop: need<HTMLDivElement>("viewport-backdrop"),
+  viewerZoomReadout: need<HTMLButtonElement>("viewer-zoom-readout"),
+  viewportNote: need<HTMLSpanElement>("viewport-note"),
+  viewportChip: need<HTMLSpanElement>("viewport-chip"),
+  viewportEngine: need<HTMLImageElement>("viewport-engine"),
   managerRate: need<HTMLSelectElement>("manager-create-rate"),
   managerRateRow: need<HTMLDivElement>("manager-create-rate-row"),
   managerCustomRate: need<HTMLDivElement>("manager-create-custom-rate"),
@@ -377,6 +550,21 @@ const ui = {
   objectDuplicate: need<HTMLButtonElement>("object-duplicate"),
   objectRename: need<HTMLButtonElement>("object-rename"),
   objectDelete: need<HTMLButtonElement>("object-delete"),
+  objectJoin: need<HTMLButtonElement>("object-join"),
+  objectCopySvg: need<HTMLButtonElement>("object-copy-svg"),
+  pathKeying: need<HTMLInputElement>("path-keying"),
+  pathKeySet: need<HTMLButtonElement>("path-key-set"),
+  pathKeyRemove: need<HTMLButtonElement>("path-key-remove"),
+  pathUnlink: need<HTMLButtonElement>("path-unlink"),
+  subpathRemove: need<HTMLButtonElement>("path-subpath-remove"),
+  autoTension: need<HTMLInputElement>("auto-tension"),
+  guideAxis: need<HTMLSelectElement>("guide-axis"),
+  guidePosition: need<HTMLInputElement>("guide-position"),
+  guideAdd: need<HTMLButtonElement>("guide-add"),
+  guideList: need<HTMLSelectElement>("guide-list"),
+  guideMove: need<HTMLButtonElement>("guide-move"),
+  guideRemove: need<HTMLButtonElement>("guide-remove"),
+  guideShow: need<HTMLInputElement>("guide-show"),
   bindings: need<HTMLDivElement>("bindings-mount"),
   sampleDataText: need<HTMLTextAreaElement>("sample-data-text"),
   sampleDataApply: need<HTMLButtonElement>("sample-data-apply"),
@@ -407,6 +595,19 @@ const ui = {
   effectsSummary: need<HTMLParagraphElement>("effects-summary"),
   effectControlsMount: need<HTMLDivElement>("effect-controls-mount"),
   effectControlsEmpty: need<HTMLParagraphElement>("effect-controls-empty"),
+  pivotBody: need<HTMLDivElement>("pivot-body"),
+  pivotEmpty: need<HTMLParagraphElement>("pivot-empty"),
+  pivotSummary: need<HTMLParagraphElement>("pivot-summary"),
+  pivotScope: need<HTMLSelectElement>("pivot-scope"),
+  pivotOffsetX: need<HTMLInputElement>("pivot-offset-x"),
+  pivotOffsetY: need<HTMLInputElement>("pivot-offset-y"),
+  pivotX: need<HTMLInputElement>("pivot-x"),
+  pivotY: need<HTMLInputElement>("pivot-y"),
+  pivotStep: need<HTMLInputElement>("pivot-step"),
+  pivotKeep: need<HTMLInputElement>("pivot-keep"),
+  pivotKeyedModify: need<HTMLInputElement>("pivot-keyed-modify"),
+  pivotReset: need<HTMLButtonElement>("pivot-reset"),
+  pivotError: need<HTMLParagraphElement>("pivot-error"),
   textStyleMount: need<HTMLDivElement>("text-style-mount"),
   textStyleEmpty: need<HTMLParagraphElement>("text-style-empty"),
   materialEmpty: need<HTMLParagraphElement>("material-empty"),
@@ -420,6 +621,9 @@ const ui = {
   takePageSelect: need<HTMLSelectElement>("take-page-select"),
   takePageOpen: need<HTMLButtonElement>("take-page-open"),
   inspector: need<HTMLDivElement>("inspector-mount"),
+  masks: need<HTMLDivElement>("masks-mount"),
+  penCreates: need<HTMLSelectElement>("pen-creates"),
+  penCreatesNote: need<HTMLSpanElement>("pen-creates-note"),
   animationFrame: need<HTMLInputElement>("animation-frame"),
   autoKey: need<HTMLInputElement>("auto-key"),
   animationMount: need<HTMLDivElement>("animation-mount"),
@@ -448,6 +652,12 @@ const ui = {
   phaseRemove: need<HTMLButtonElement>("phase-remove"),
   undo: need<HTMLButtonElement>("undo"),
   redo: need<HTMLButtonElement>("redo"),
+  historyOpen: need<HTMLButtonElement>("history-open"),
+  historyDialog: need<HTMLDialogElement>("history-dialog"),
+  historyClose: need<HTMLButtonElement>("history-close"),
+  historyLead: need<HTMLElement>("history-lead"),
+  historyList: need<HTMLOListElement>("history-list"),
+  historyError: need<HTMLElement>("history-error"),
   objectEmpty: need<HTMLParagraphElement>("object-empty"),
   unsupportedPanel: need<HTMLElement>("unsupported-panel"),
   unsupportedList: need<HTMLUListElement>("unsupported-list"),
@@ -590,10 +800,51 @@ let guides: OverlayGuide[] = [];
 let animationSurface: AnimationSurface | null = null;
 /// 11.65: the engine's picture of the open scene. One render in flight and one
 /// pending; a frame is current only when it is the latest request's.
+// Explicit guides (11.44): the lines the author put on the canvas, kept with the scene, snapped to before any other line.
+let guidesShown = true;
+
+function guideWords(guide: { readonly id: number | bigint; readonly axis: "x" | "y"; readonly position: number }): string {
+  return `${guide.axis === "x" ? "Vertical" : "Horizontal"} ${guide.position} (guide ${guide.id})`;
+}
+
+function renderGuides(document_: SceneDocument): void {
+  const chosen = ui.guideList.value;
+  ui.guideList.replaceChildren(...document_.guides.map((guide) => new Option(guideWords(guide), String(guide.id))));
+  if ([...ui.guideList.options].some((option) => option.value === chosen)) ui.guideList.value = chosen;
+  ui.guideList.disabled = document_.guides.length === 0;
+  ui.guideMove.disabled = ui.guideRemove.disabled = document_.guides.length === 0;
+}
+
+function guideEdit(kind: "add" | "move" | "remove"): void {
+  if (!scene) return;
+  const position = Number(ui.guidePosition.value);
+  if (kind !== "remove" && !Number.isFinite(position)) {
+    log("Guide: give the position as a number of pixels.", "bad");
+    return;
+  }
+  const id = Number(ui.guideList.value);
+  if (kind !== "add" && !Number.isFinite(id)) {
+    log("Guide: choose a guide first.", "bad");
+    return;
+  }
+  const edit =
+    kind === "add"
+      ? { edit: "addGuide", axis: ui.guideAxis.value, position }
+      : kind === "move"
+        ? { edit: "moveGuide", id, position }
+        : { edit: "removeGuide", id };
+  void runEdits([edit as unknown as SceneEdit], { label: kind === "add" ? `Added a guide at ${position}` : kind === "move" ? `Moved guide ${id} to ${position}` : `Removed guide ${id}` }, "viewport");
+}
+
+/** The matte view being looked at (3.30): the engine draws a changed copy of the scene that shows one layer's matte, and nothing authored changes. */
+let matteView: { readonly objectId: string; readonly view: "alpha" | "luma" | "applied" | "before" } | undefined;
+
 interface EngineFrameRequest {
   readonly endpoint: string;
   readonly target: SceneTarget;
   readonly frame: number;
+  /** A view of a layer's track matte instead of the scene (3.30). */
+  readonly matteView?: { readonly objectId: string; readonly view: "alpha" | "luma" | "applied" | "before" };
 }
 const sceneVersions = new WeakMap<object, number>();
 let sceneVersionCounter = 0;
@@ -606,8 +857,8 @@ function sceneVersion(document_: object): number {
   return version;
 }
 const enginePreview = createEnginePreview<EngineFrameRequest>({
-  render: async ({ endpoint, target, frame }) =>
-    new Uint8Array(await shell().invoke<ArrayBuffer>("cmd_engine_preview", { endpoint, target, frame })),
+  render: async ({ endpoint, target, frame, matteView }) =>
+    new Uint8Array(await shell().invoke<ArrayBuffer>("cmd_engine_preview", { endpoint, target, frame, ...(matteView === undefined ? {} : { matteView }) })),
   makeUrl: (bytes) => URL.createObjectURL(new Blob([bytes as BlobPart], { type: "image/png" })),
   revokeUrl: (url) => URL.revokeObjectURL(url),
   onState: (state) => renderEngineFrame(state),
@@ -618,7 +869,91 @@ const enginePreview = createEnginePreview<EngineFrameRequest>({
   },
 });
 
+let lastPreviewState: PreviewState = { status: "idle" };
+const VIEW_KEY = "grapix.editor.viewportView";
+
+/// The main viewport shows the engine's frame (effects included) or the Draft canvas:
+/// see viewport-source.ts for the rules. The overlay and its handles never change.
+const BACKDROP_KEY = "grapix.editor.viewportBackdrop";
+let backdrop: Backdrop = (() => {
+  try {
+    return parseBackdrop(localStorage.getItem(BACKDROP_KEY));
+  } catch {
+    return parseBackdrop(null);
+  }
+})();
+
+/// The grid or the solid colour behind the composition, sized to the composition's own box.
+function applyBackdrop(): void {
+  const surface = ui.canvas.closest<HTMLElement>(".viewport-surface");
+  if (surface) surface.dataset.backdrop = backdrop.grid ? "grid" : "solid";
+  ui.viewportBackdrop.style.setProperty("--viewport-bg", backdrop.color);
+  ui.viewportGrid.setAttribute("aria-pressed", String(backdrop.grid));
+  ui.viewportGrid.title = backdropLabel(backdrop);
+  ui.viewportBg.value = backdrop.color;
+  ui.viewportBg.disabled = backdrop.grid;
+  // The layout size: the view's transform scales the backdrop with the rest of the surface, so it must not be measured scaled.
+  ui.viewportBackdrop.style.width = `${ui.canvas.offsetWidth}px`;
+  ui.viewportBackdrop.style.height = `${ui.canvas.offsetHeight}px`;
+}
+
+function setBackdrop(next: Backdrop): void {
+  backdrop = next;
+  try {
+    localStorage.setItem(BACKDROP_KEY, serialiseBackdrop(next));
+  } catch {
+    /* storage can be unavailable */
+  }
+  applyBackdrop();
+}
+
+ui.viewportGrid.addEventListener("click", () => setBackdrop({ ...backdrop, grid: !backdrop.grid }));
+ui.viewportBg.addEventListener("input", () => setBackdrop({ ...backdrop, color: parseBackdrop(JSON.stringify({ color: ui.viewportBg.value })).color }));
+// The canvas fits itself to the pane, so the backdrop follows its box.
+new ResizeObserver(() => {
+  applyBackdrop();
+  syncCamera();
+}).observe(ui.canvas);
+applyBackdrop();
+
+function readViewChoice(): ViewChoice {
+  // A matte view is only the engine's to draw (3.30).
+  if (matteView !== undefined) return "engine";
+  try {
+    const saved = localStorage.getItem(VIEW_KEY);
+    if (saved === "draft" || saved === "engine" || saved === "auto") return saved;
+  } catch {
+    /* storage can be unavailable */
+  }
+  return "auto";
+}
+
+function applyViewportSource(): void {
+  const choice = readViewChoice();
+  ui.viewportView.value = choice;
+  const verdict = viewportSource({
+    objects: scene?.objects ?? [],
+    choice,
+    status: lastPreviewState.status,
+    hasImage: lastPreviewState.imageUrl !== undefined,
+    playing: playback !== undefined,
+  });
+  const engine = verdict.source === "engine";
+  const surface = ui.canvas.closest<HTMLElement>(".viewport-surface");
+  if (surface) surface.dataset.source = verdict.source;
+  ui.viewportEngine.hidden = !engine;
+  ui.viewportEngine.dataset.status = lastPreviewState.status;
+  if (engine && lastPreviewState.imageUrl !== undefined && ui.viewportEngine.src !== lastPreviewState.imageUrl) {
+    ui.viewportEngine.src = lastPreviewState.imageUrl;
+  }
+  ui.viewportChip.textContent = engine ? "Engine" : "Draft";
+  ui.viewportChip.dataset.source = verdict.source;
+  ui.viewportNote.textContent = verdict.note ?? "";
+}
+
 function renderEngineFrame(state: PreviewState): void {
+  lastPreviewState = state;
+  applyViewportSource();
   const words = statusWords(state);
   ui.engineFrame.dataset.status = state.status;
   ui.engineStatus.textContent = words.word;
@@ -638,13 +973,16 @@ function scheduleEnginePreview(): void {
     enginePreview.clear();
     return;
   }
-  if (playback !== undefined) return;
+  // While playing, ask only when the viewport is showing the engine's frame (effects present or
+  // the Engine view chosen): a plain scene is carried by the Draft view and costs the engine nothing.
+  if (playback !== undefined && !wantsEngineFrame(scene.objects, readViewChoice())) return;
   const endpoint = ui.endpoint.value.trim();
   const frame = currentFrame;
-  enginePreview.request(`${session.key}/${sceneVersion(scene)}/${frame}/${endpoint}`, {
+  enginePreview.request(`${session.key}/${sceneVersion(scene)}/${frame}/${endpoint}/${matteView === undefined ? "" : `${matteView.objectId}:${matteView.view}`}`, {
     endpoint,
     target: { target: "session", session: session.key },
     frame,
+    ...(matteView === undefined ? {} : { matteView }),
   });
 }
 
@@ -678,9 +1016,39 @@ let overlayDrag:
       readonly start: OverlayPoint;
       readonly startClient: OverlayPoint;
       readonly additive: boolean;
+      /** A Move, Rotate or Scale drag (11.102); without it the drag is a click or a marquee. */
+      readonly tool?: ToolDrag;
+      /** The tool was refused for what is selected: a click still selects, a drag says why and does nothing. */
+      readonly refusal?: string;
+      told?: boolean;
       moved: boolean;
     }
   | undefined;
+/** The tool of the ribbon. Select picks; the others change what is selected as the pointer drags (11.102). */
+/** The tool of the ribbon: the drag tools, the Pen, and the two that move the view (Hand and Zoom, 11.105). */
+type PageTool = ToolId | "pen" | "hand" | "zoom" | "path" | "vertex-add" | "vertex-delete" | "vertex-convert";
+
+/** The tools that edit the path of the selected shape (11.107). */
+const isPathTool = (tool: PageTool): boolean => tool === "path" || tool === "vertex-add" || tool === "vertex-delete" || tool === "vertex-convert";
+let activeTool: PageTool = "select";
+/** The path the Pen tool is drawing, the pointer that is pulling its last point's handles, and where the pointer is. */
+let pen: PenState = EMPTY_PEN;
+let penPull: number | undefined;
+let penHover: OverlayPoint | undefined;
+/** The scene the path was started in, so a path is never finished in another one. */
+let penScene: number | undefined;
+/** When the last path was finished: the second click of a double click that closed it must not start another. */
+let penFinishedAt = 0;
+/** The shape whose path the pen is carrying on, when it is (a click on an end of the selected open shape). */
+let penResume: string | undefined;
+/** The pointer is down on the first point, closing the path; a drag then sets the tangents it closes with. */
+let penClosing = false;
+/** Space is held while a point is placed: the point moves with the pointer instead of its handles being pulled. */
+let penSpace = false;
+/** Where the pointer was at the last pen move, so Space can move the point by the difference. */
+let penLastAt: OverlayPoint | undefined;
+/** The document as the drag in progress would leave it, drawn instead of the real one until the pointer is released. */
+let toolPreview: SceneDocument | null = null;
 
 // ---------------------------------------------------------------------------
 // Logging. Append-only, newest first, and it records refusals as refusals.
@@ -1013,6 +1381,7 @@ function renderSceneState(): void {
   pausePreview("the document changed");
   ui.canvasSize.textContent = `${scene.canvas.width} × ${scene.canvas.height} · ${formatRate(scene.canvas.frameRate)}`;
   scheduleEnginePreview();
+  applyViewportSource();
   showRateChoice(ui.canvasRate, scene.canvas.frameRate);
   ui.canvas.width = scene.canvas.width;
   ui.canvas.height = scene.canvas.height;
@@ -1409,6 +1778,8 @@ async function onControlContractClick(event: MouseEvent): Promise<void> {
 
 function renderPanels(document_: SceneDocument): void {
   renderProjectManager();
+  renderPivotPanel(document_);
+  renderGuides(document_);
   ui.objectEmpty.hidden = document_.objects.length > 0;
 
   const objects = objectManagerPanel(document_, {
@@ -1506,6 +1877,7 @@ function renderInspector(document_: SceneDocument): void {
       return group;
     }));
   }
+  renderMasks(document_);
   refreshInspectorFrame(model);
   if (focused?.field) {
     const input = [...ui.inspector.querySelectorAll<HTMLInputElement>("[data-inspector-field]")]
@@ -1516,6 +1888,317 @@ function renderInspector(document_: SceneDocument): void {
       if (input.type === "text" && focused.start !== null && focused.end !== null) input.setSelectionRange(focused.start, focused.end);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Masks and track mattes (11.117). The edits are `mask-edit.ts`'s; this draws the controls and sends one edit per change.
+// ---------------------------------------------------------------------------
+
+/** Put SVG path data on the clipboard and say so (11.114). */
+async function copySvg(data: string, what: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(data);
+    log(`Copied ${what} as SVG path data (${data.length} characters)`, "good");
+  } catch (error) {
+    log(`Copy SVG: the clipboard refused (${describe(error)}); the data is ${data.length} characters`, "bad");
+  }
+}
+
+function setMatteView(objectId: string, choice: MatteViewChoice): void {
+  matteView = choice === "off" ? undefined : { objectId, view: choice };
+  if (scene) {
+    scheduleEnginePreview();
+    applyViewportSource();
+    renderMasks(scene);
+  }
+}
+
+/** The mask whose variable feather gets a point where the next click on the canvas is (11.108); Escape lets it go. */
+let featherArm: { readonly objectId: string; readonly index: number } | undefined;
+
+function armFeatherPoint(objectId: string, index: number): void {
+  featherArm = { objectId, index };
+  document.body.classList.add("matte-whip");
+  log("Feather point: click the edge of the mask where the point should go. Escape cancels.");
+}
+
+function takeFeatherPoint(at: { readonly x: number; readonly y: number }): void {
+  const arm = featherArm;
+  featherArm = undefined;
+  document.body.classList.remove("matte-whip");
+  if (arm === undefined || !scene) return;
+  const target = maskTarget(scene, [arm.objectId]);
+  if (isMaskRefused(target)) {
+    log(`Feather point: ${target.refused}`, "bad");
+    return;
+  }
+  sendMaskEdit(addFeatherPointAt(scene, target, arm.index, at), "Add a feather point");
+}
+
+/** The variable feather of one mask (11.108): its points, each with where it is on the path, its radius and its tension. */
+function featherPointsRow(target: MaskTarget, index: number): HTMLElement {
+  const mask = target.masks[index]!;
+  const points = mask.featherPoints ?? [];
+  const box = document.createElement("div");
+  box.className = "mask-feather-points";
+  const head = document.createElement("span");
+  head.textContent =
+    points.length === 0
+      ? "Variable feather: none, so Feather above is used."
+      : `Variable feather: ${points.length} point${points.length === 1 ? "" : "s"}; Feather above is not used. A radius is outward when positive and inward when negative.`;
+  box.append(head);
+  const setPoint = (k: number, patch: Partial<(typeof points)[number]>): void =>
+    sendMaskEdit(patchMask(target, index, { featherPoints: points.map((p, i) => (i === k ? { ...p, ...patch } : p)) }), `Change feather point ${k + 1}`);
+  points.forEach((point, k) => {
+    const row = document.createElement("div");
+    row.className = "mask-feather-point";
+    row.append(
+      `Point ${k + 1} `,
+      maskNumber("Segment", point.segment, "0", (v) => setPoint(k, { segment: Math.max(0, Math.round(v ?? 0)) })),
+      maskNumber("At", point.t, "0.5", (v) => setPoint(k, { t: v ?? 0.5 }), "0.05"),
+      maskNumber("Radius", point.radius, "0", (v) => setPoint(k, { radius: v ?? 0 })),
+      maskNumber("Tension", point.tension, "0", (v) => setPoint(k, { tension: v ?? 0 }), "0.1"),
+      maskButton("Remove", "Take this feather point away", () => sendMaskEdit(patchMask(target, index, { featherPoints: points.filter((_, i) => i !== k) }), "Remove a feather point")),
+    );
+    box.append(row);
+  });
+  box.append(
+    maskButton("Add feather point", "Put a feather point on the mask's first segment; change where it is above", () =>
+      sendMaskEdit(patchMask(target, index, { featherPoints: [...points, { segment: 0, t: 0.5, radius: mask.feather > 0 ? mask.feather / 2 : 10, tension: 0.5 }] }), "Add a feather point"), points.length >= MOST_FEATHER_POINTS),
+    maskButton("Add on canvas", "Click the mask's edge on the canvas to put a feather point there", () => armFeatherPoint(target.object.id, index), points.length >= MOST_FEATHER_POINTS),
+    maskButton("Back to uniform", "Take every feather point away: the edge uses Feather again", () => sendMaskEdit(patchMask(target, index, { featherPoints: [] }), "Clear the variable feather"), points.length === 0),
+  );
+  return box;
+}
+
+/** The layer whose track matte source the next click chooses (the pick whip, 3.30): a click on a layer in the viewport or in the object
+ *  list sets it as the matte, wherever it is in the stack; Escape lets it go. */
+let matteWhip: string | undefined;
+
+function startMatteWhip(objectId: string): void {
+  matteWhip = objectId;
+  document.body.classList.add("matte-whip");
+  log("Pick whip: click the layer to use as the matte, in the viewport or in the object list. Escape cancels.");
+}
+
+function endMatteWhip(): string | undefined {
+  const target = matteWhip;
+  matteWhip = undefined;
+  document.body.classList.remove("matte-whip");
+  return target;
+}
+
+function takeMatteWhip(sourceId: string | undefined): void {
+  const target = endMatteWhip();
+  if (target === undefined || !scene) return;
+  if (sourceId === undefined) {
+    log("Pick whip: nothing was under the click, so the matte is as it was.", "bad");
+    return;
+  }
+  const object = scene.objects.find((candidate) => candidate.id === target);
+  sendMaskEdit(setMatte(scene, target, sourceId, object?.trackMatte?.mode ?? "alpha"), "Pick a track matte");
+}
+
+function sendMaskEdit(edit: SceneEdit | SceneEdit[] | { refused: string }, label: string): void {
+  if (!Array.isArray(edit) && "refused" in edit) {
+    log(edit.refused, "bad");
+    return;
+  }
+  void runEdits(Array.isArray(edit) ? edit : [edit as SceneEdit], label, "scene");
+}
+
+function maskNumber(label: string, value: number | undefined, placeholder: string, change: (value: number | null) => void, step = "1"): HTMLLabelElement {
+  const field = document.createElement("label");
+  field.className = "mask-field";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = step;
+  input.value = value === undefined ? "" : String(value);
+  input.placeholder = placeholder;
+  input.setAttribute("aria-label", label);
+  input.addEventListener("change", () => {
+    if (input.value.trim() === "") change(null);
+    else change(Number(input.value));
+  });
+  field.append(`${label} `, input);
+  return field;
+}
+
+function maskSelect<T extends string>(label: string, values: readonly T[], current: T, text: (value: T) => string, change: (value: T) => void): HTMLLabelElement {
+  const field = document.createElement("label");
+  field.className = "mask-field";
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", label);
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text(value);
+    option.selected = value === current;
+    select.append(option);
+  }
+  select.addEventListener("change", () => change(select.value as T));
+  field.append(`${label} `, select);
+  return field;
+}
+
+function maskButton(label: string, title: string, click: () => void, disabled = false): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.title = title;
+  button.disabled = disabled;
+  button.addEventListener("click", click);
+  return button;
+}
+
+function renderMasks(document_: SceneDocument): void {
+  const target = maskTarget(document_, selection);
+  const heading = document.createElement("h3");
+  heading.textContent = "Masks and track matte";
+  if (isMaskRefused(target)) {
+    const note = document.createElement("p");
+    note.className = "empty";
+    note.textContent = target.refused;
+    ui.masks.replaceChildren(heading, note);
+    return;
+  }
+  const { object, masks } = target;
+  // A shape's path copied in as a mask, or linked to one (Pen spec v2, 12 and 13): the picker serves both.
+  const shapes = copyableShapes(document_, object.id);
+  const shapePick = document.createElement("select");
+  shapePick.setAttribute("aria-label", "Shape to copy or link as a mask");
+  for (const shape of shapes) {
+    const option = document.createElement("option");
+    option.value = shape.id;
+    option.textContent = shape.name;
+    shapePick.append(option);
+  }
+  const rows = masks.map((mask, index) => {
+    const row = document.createElement("div");
+    row.className = "mask-row";
+    row.dataset.maskIndex = String(index);
+    const name = document.createElement("strong");
+    name.textContent = `Mask ${index + 1}`;
+    const change = (patch: MaskPatch, label = `Change mask ${index + 1}`): void => sendMaskEdit(patchMask(target, index, patch), label);
+    const invert = document.createElement("label");
+    invert.className = "mask-field";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = mask.inverted;
+    box.addEventListener("change", () => change({ inverted: box.checked }));
+    invert.append(box, " Invert");
+    const status = document.createElement("p");
+    status.className = "mask-status";
+    const link = pathLinkOf(document_, object, { kind: "mask", index });
+    status.textContent = `${maskStatus(mask)}${link === undefined ? "" : ` Linked with ${linkUsersWords(document_, link, linkedPathOf(object, { kind: "mask", index }))} (revision ${link.revision}).`}`;
+    row.append(
+      name,
+      maskSelect("Mode", MASK_MODES, mask.mode, (mode) => MASK_MODE_LABEL[mode], (mode) => change({ mode })),
+      invert,
+      maskNumber("Opacity %", Math.round(mask.opacity * 100), "100", (value) => change({ opacity: (value ?? 100) / 100 })),
+      maskNumber("Feather", mask.feather, "0", (value) => change({ feather: value ?? 0 })),
+      maskNumber("Feather y", mask.featherY, "same", (value) => change({ featherY: value })),
+      maskSelect("Falloff", MASK_FALLOFFS, mask.falloff ?? "smooth", (falloff) => (falloff === "smooth" ? "Smooth" : "Linear"), (falloff) => change({ falloff })),
+      maskNumber("Expansion", mask.expansion, "0", (value) => change({ expansion: value ?? 0 })),
+      featherPointsRow(target, index),
+      maskButton("Up", "Move this mask up the stack", () => sendMaskEdit(moveMask(target, index, -1), "Reorder masks"), index === 0),
+      maskButton("Down", "Move this mask down the stack", () => sendMaskEdit(moveMask(target, index, 1), "Reorder masks"), index === masks.length - 1),
+      maskButton("Edit path", "Edit this mask's path on the canvas with the path tools", () => {
+        pathMask = index;
+        pathSelected = [];
+        setActiveTool("path");
+      }),
+      maskButton("Copy SVG", "Copy this mask's path as SVG path data", () => void copySvg(writeSvgPath([mask.path]), `Mask ${index + 1}`)),
+      maskButton("To shape", "Draw a copy of this mask's path as a new shape; the two are independent", () => sendMaskEdit(copyMaskToShape(document_, object, index), "Copy mask to a shape")),
+      maskButton("Link to shape", "Make this mask's path the same path as the chosen shape's: its numbers are copied in and an edit of either changes both", () => sendMaskEdit(linkMaskToShape(document_, object, index, shapePick.value), "Link a mask to a shape"), shapes.length === 0 || link !== undefined),
+      maskButton("Unlink", "Make this mask's path independent of what it is linked to; it keeps its shape", () => sendMaskEdit(unlinkPath(object.id, { kind: "mask", index }), "Unlink a mask path"), link === undefined),
+      maskButton("Remove", "Remove this mask", () => sendMaskEdit(removeMask(target, index), "Remove mask")),
+      status,
+    );
+    return row;
+  });
+  const add = maskButton("Add mask", "Add a rectangle mask over this layer", () => sendMaskEdit(addMask(target), "Add mask"));
+  const copy = document.createElement("span");
+  copy.className = "mask-field";
+  copy.append(
+    shapePick,
+    maskButton("Copy as mask", "Add a copy of this shape's path as a mask on this layer; the two are independent", () => sendMaskEdit(copyShapeToMask(document_, target, shapePick.value), "Copy a shape to a mask"), shapes.length === 0),
+  );
+  // The track matte: a source layer by name, how it matters, and clear. The source's own eye is turned off when it is set.
+  const matte = document.createElement("div");
+  matte.className = "mask-matte";
+  const source = document.createElement("select");
+  source.setAttribute("aria-label", "Track matte source");
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "No track matte";
+  source.append(none);
+  for (const candidate of matteSources(document_, object.id)) {
+    const option = document.createElement("option");
+    option.value = candidate.id;
+    option.textContent = candidate.name;
+    option.selected = object.trackMatte?.sourceId === candidate.id;
+    source.append(option);
+  }
+  source.addEventListener("change", () => {
+    if (source.value === "") sendMaskEdit(clearMatte(object), "Clear track matte");
+    else sendMaskEdit(setMatte(document_, object.id, source.value, object.trackMatte?.mode ?? "alpha"), "Set track matte");
+  });
+  matte.append(
+    "Track matte ",
+    source,
+    maskSelect("Matte", MATTE_MODES, object.trackMatte?.mode ?? "alpha", (mode) => MATTE_MODE_LABEL[mode], (mode) => sendMaskEdit(setMatteMode(object, mode), "Change track matte")),
+    maskSelect("View", MATTE_VIEWS, matteView?.objectId === object.id ? matteView.view : "off", (v) => MATTE_VIEW_LABEL[v], (v) => setMatteView(object.id, v)),
+    maskButton("Pick whip", "Click the layer to use as the matte, in the viewport or the object list: it may be anywhere in the stack", () => startMatteWhip(object.id)),
+    maskButton("Clear", "Take the track matte off; the source's eye stays as it is", () => sendMaskEdit(clearMatte(object), "Clear track matte"), object.trackMatte === undefined),
+  );
+  const looking = matteViewInfo(document_, object);
+  if (looking !== undefined && object.trackMatte !== undefined) {
+    const info = document.createElement("p");
+    info.className = "mask-status";
+    info.textContent = `${looking}${matteView?.objectId === object.id ? ` Showing: ${MATTE_VIEW_LABEL[matteView.view]}.` : ""}`;
+    matte.append(info);
+  }
+  const missing = matteWarning(document_, object);
+  if (missing !== undefined) {
+    const warning = document.createElement("p");
+    warning.className = "mask-status";
+    warning.setAttribute("role", "status");
+    warning.textContent = missing;
+    matte.append(warning);
+  }
+  // Preserve Underlying Transparency (3.28): the layer shows only over what is already below it.
+  const preserve = document.createElement("label");
+  preserve.className = "mask-field";
+  const preserveBox = document.createElement("input");
+  preserveBox.type = "checkbox";
+  preserveBox.checked = object.preserveUnderlyingTransparency === true;
+  preserveBox.addEventListener("change", () => sendMaskEdit(setPreserve(object, preserveBox.checked), "Change preserve underlying transparency"));
+  preserve.append(preserveBox, " Preserve underlying transparency");
+  // Mask Reference (3.28): each effect can act only where one of the layer's masks covers. A mask in mode None still counts.
+  const referable = masks.filter((mask) => mask.id !== undefined);
+  const references = (object.effects ?? []).map((effect, effectIndex) => {
+    const row = document.createElement("div");
+    row.className = "mask-matte";
+    const pick = document.createElement("select");
+    pick.setAttribute("aria-label", `Mask reference of ${effect.effectId}`);
+    const whole = document.createElement("option");
+    whole.value = "";
+    whole.textContent = "Whole layer";
+    pick.append(whole);
+    for (const mask of referable) {
+      const option = document.createElement("option");
+      option.value = mask.id!;
+      option.textContent = mask.id!;
+      option.selected = effect.maskIds?.[0] === mask.id;
+      pick.append(option);
+    }
+    pick.disabled = referable.length === 0;
+    pick.addEventListener("change", () => sendMaskEdit(setEffectMask(object, effectIndex, pick.value === "" ? null : pick.value), "Limit an effect to a mask"));
+    row.append(`${effect.effectId} acts on `, pick);
+    return row;
+  });
+  ui.masks.replaceChildren(heading, ...rows, add, copy, matte, preserve, ...references);
 }
 
 function refreshInspectorFrame(model: KeyframePanelModel): void {
@@ -2154,44 +2837,26 @@ function collectSnapCandidates(model: TimelineModel): number[] {
   return out;
 }
 
-/** Delete, copy and paste over the key selection. */
-function onTimelineKeyDown(event: KeyboardEvent): void {
+/** Ease the selected keys: After Effects Easy Ease, on both sides, the in side or the out side. A menu item and a key
+ *  both come here (11.31). */
+function easeKeys(kind: EasyEaseKind): void {
+  if (scene) void runKeyEdit(planEasyEase(currentTimelineModel(scene), [...selectedKeys], kind));
+}
+
+function deleteKeys(): void {
   if (!scene) return;
-  const target = event.target;
-  // Never steal a text field's own editing keys.
-  if (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
-  ) {
-    return;
-  }
-  const model = currentTimelineModel(scene);
+  void runKeyEdit(planDelete([...selectedKeys]));
+  setKeySelection([]);
+}
 
-  // After Effects' Easy Ease: F9 both sides, Shift+F9 in, Ctrl+Shift+F9 out.
-  if (event.key === "F9") {
-    event.preventDefault();
-    const kind: EasyEaseKind = event.shiftKey && (event.ctrlKey || event.metaKey) ? "out" : event.shiftKey ? "in" : "both";
-    void runKeyEdit(planEasyEase(model, [...selectedKeys], kind));
-    return;
-  }
-  if ((event.key === "Delete" || event.key === "Backspace") && selectedKeys.size > 0) {
-    event.preventDefault();
-    void runKeyEdit(planDelete([...selectedKeys]));
-    setKeySelection([]);
-    return;
-  }
-  if (!(event.ctrlKey || event.metaKey)) return;
+function copyKeys(): void {
+  if (!scene) return;
+  keyClipboard = planCopy(currentTimelineModel(scene), [...selectedKeys]);
+  log(`timeline: copied ${keyClipboard.length} key(s)`);
+}
 
-  const key = event.key.toLowerCase();
-  if (key === "c" && selectedKeys.size > 0) {
-    event.preventDefault();
-    keyClipboard = planCopy(model, [...selectedKeys]);
-    log(`timeline: copied ${keyClipboard.length} key(s)`);
-  } else if (key === "v" && keyClipboard.length > 0) {
-    event.preventDefault();
-    void runKeyEdit(planPaste(model, keyClipboard, currentFrame));
-  }
+function pasteKeys(): void {
+  if (scene) void runKeyEdit(planPaste(currentTimelineModel(scene), keyClipboard, currentFrame));
 }
 
 // ---------------------------------------------------------------------------
@@ -2646,7 +3311,14 @@ function closeSpeedGraph(): void {
 
 /** Render interaction separately from the raster canvas (11.7). */
 function renderOverlayLayer(): void {
-  const active = previewScene ?? scene;
+  // Another scene starts at Fit: the view is the Editor's, not the scene's, and a position in one means nothing in another.
+  const sceneKey = activeSession(workspace)?.key;
+  if (sceneKey !== cameraScene) {
+    cameraScene = sceneKey;
+    camera = FIT;
+    syncCamera();
+  }
+  const active = toolPreview ?? previewScene ?? scene;
   if (!active) {
     ui.overlay.replaceChildren();
     return;
@@ -2656,14 +3328,29 @@ function renderOverlayLayer(): void {
     ui.overlay,
     buildViewportOverlay(active, {
       selectedIds: selection,
+      unit: overlayUnit(),
+      pivots: activeTool === "pivot",
+      ...(pen.points.length > 0 && penScene === activeSession(workspace)?.key ? { pen: penSketch(pen, penHover, penHover !== undefined && nearFirst(pen, penHover, penTolerance())) } : {}),
+      ...pathSketchFor(active),
+      ...maskSketchesFor(active),
       ...(marquee === undefined ? {} : { marquee }),
       ...(guides.length === 0 ? {} : { guides }),
+      ...(guidesShown ? {} : { showGuides: false }),
     }),
   );
 }
 
 function setSelection(next: readonly string[]): void {
   selection = [...new Set(next)];
+  pathSelected = [];
+  pathMask = undefined;
+  showRibbonStates();
+  // A matte view belongs to the layer it looks at.
+  if (matteView !== undefined && !selection.includes(matteView.objectId)) {
+    matteView = undefined;
+    scheduleEnginePreview();
+    applyViewportSource();
+  }
   if (!scene) return;
   renderPanels(scene);
   renderOverlayLayer();
@@ -2717,6 +3404,7 @@ function updatePlaybackControls(): void {
   ui.previewPlay.setAttribute("aria-label", playing ? "Pause preview" : "Play preview");
   ui.previewPlay.setAttribute("aria-pressed", String(playing));
   ui.previewStatus.textContent = `${playing ? "Playing" : "Paused"} at frame ${currentFrame}`;
+  applyViewportSource();
 }
 
 function pausePreview(reason: string): void {
@@ -2821,23 +3509,6 @@ function previewShortcutOwnsTarget(event: KeyboardEvent): boolean {
   );
 }
 
-function onPreviewShortcut(event: KeyboardEvent): void {
-  if (
-    (event.key !== " " && event.code !== "Space") ||
-    event.repeat ||
-    event.defaultPrevented ||
-    event.ctrlKey ||
-    event.metaKey ||
-    event.altKey ||
-    event.shiftKey ||
-    previewShortcutOwnsTarget(event)
-  ) {
-    return;
-  }
-  event.preventDefault();
-  togglePreview();
-}
-
 // ---------------------------------------------------------------------------
 // Undo/redo and edits. Rust owns each session's history (11.36): one command
 // is one entry, and a batch of edits is applied atomically, so one gesture is
@@ -2845,10 +3516,177 @@ function onPreviewShortcut(event: KeyboardEvent): void {
 // command changes nothing and adds no entry; its refusal is shown by name.
 // ---------------------------------------------------------------------------
 
+/** What the page knows that decides whether a command can run now (11.31). */
+function commandContext(): CommandContext {
+  const view = activeSession(workspace)?.view;
+  return {
+    sceneOpen: scene !== null && view !== undefined,
+    projectOpen: openProject !== undefined,
+    selectionCount: selection.length,
+    canUndo: view !== undefined && view.undoDepth > 0,
+    canRedo: view !== undefined && view.redoDepth > 0,
+    busy: animationBusy,
+    presetChosen: ui.timelinePreset.value !== "",
+    selectedKeyCount: selectedKeys.size,
+    copiedKeyCount: keyClipboard.length,
+    arrangeRefusal: (command) => {
+      const document_ = view?.document;
+      if (document_ === undefined) return "no scene is open";
+      const outcome = arrangeEdits(document_, selection, command);
+      return isRefused(outcome) ? outcome.refused : undefined;
+    },
+  };
+}
+
+/** Run a command by its id: the one path a shortcut takes. The registry is asked first, so a key and the menu item
+ *  give the same reason in the same words, and nothing runs that cannot. */
+function runRegistryCommand(id: string): void {
+  const reason = commandUnavailable(id, commandContext());
+  if (reason !== undefined) {
+    log(refusalLine(id, reason), "bad");
+    return;
+  }
+  // Undo and redo keep their scope: a panel that has focus undoes its own module's latest change.
+  if (id === "edit.undo" || id === "edit.redo") {
+    void (id === "edit.undo" ? undo(focusedPanelModule()) : redo(focusedPanelModule()));
+    return;
+  }
+  const command = commandById(id);
+  if (command === undefined) return;
+  switch (actionOf(command)) {
+    case "invoke":
+      document.getElementById(command.invoke!)?.click();
+      break;
+    case "native":
+      runNativeAction(command.native!);
+      break;
+    default:
+      break;
+  }
+}
+
+/** Where a key press went, for the registry: into a text field, or onto a control that owns Space. */
+function keyFocus(event: KeyboardEvent): KeyFocus {
+  const target = event.target;
+  const editing =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof Element && target.closest('[contenteditable="true"]') !== null);
+  return { editing, control: previewShortcutOwnsTarget(event) };
+}
+
+/** Every keyboard shortcut of the Editor, decided by the one table in `command-registry.ts`. */
+function onCommandKey(event: KeyboardEvent): void {
+  // Text selected anywhere on the page is copied as text, not as keys.
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && (window.getSelection()?.toString() ?? "") !== "") return;
+  const decision = decideKey(event, keyFocus(event), commandContext());
+  if (decision.kind === "pass") return;
+  if (decision.kind === "refused") {
+    if (decision.quiet) return;
+    // The browser gives Ctrl+S the meaning of saving the page; nothing else is taken from it.
+    if (event.ctrlKey || event.metaKey) event.preventDefault();
+    log(refusalLine(decision.command, decision.reason), "bad");
+    return;
+  }
+  event.preventDefault();
+  // G again, while a pen-family tool is in use, goes on to the next of the family: Pen, Add, Delete, Convert (11.116).
+  if (decision.command === "edit.pen" && event.key.toLowerCase() === "g" && PEN_FAMILY.includes(activeTool)) {
+    document.getElementById(PEN_FAMILY_BUTTONS[(PEN_FAMILY.indexOf(activeTool) + 1) % PEN_FAMILY.length]!)?.click();
+    return;
+  }
+  runRegistryCommand(decision.command);
+}
+
+/** The pen family, in the order G goes through it. */
+const PEN_FAMILY: readonly PageTool[] = ["pen", "vertex-add", "vertex-delete", "vertex-convert"];
+const PEN_FAMILY_BUTTONS: readonly string[] = ["tool-pen", "tool-vertex-add", "tool-vertex-delete", "tool-vertex-convert"];
+
 function updateHistoryButtons(): void {
   const view = activeSession(workspace)?.view;
   ui.undo.disabled = view === undefined || view.undoDepth === 0;
   ui.redo.disabled = view === undefined || view.redoDepth === 0;
+  showRibbonStates();
+  // Every edit, undo, redo and scene switch passes here, so the open list never shows a stale history.
+  void refreshHistoryList();
+}
+
+// ---------------------------------------------------------------------------
+// Change history (11.82). The list is the session's command log as Rust holds
+// it: this page asks for it and draws it, and a click is one command
+// (`goToHistoryStep`) like every other change, so the list, the Undo and Redo
+// buttons and the shortcut can never disagree about what is applied.
+// ---------------------------------------------------------------------------
+
+/** Counts the reads, so a slow answer never overwrites a newer one. */
+let historyRead = 0;
+
+async function refreshHistoryList(): Promise<void> {
+  if (!ui.historyDialog.open) return;
+  const read = ++historyRead;
+  const session = activeSession(workspace);
+  if (!session) {
+    ui.historyLead.textContent = "No scene is open.";
+    ui.historyList.replaceChildren();
+    return;
+  }
+  try {
+    const view = await shell().invoke<HistoryView>("cmd_session_history", { session: session.key });
+    if (read !== historyRead) return;
+    ui.historyError.textContent = "";
+    drawHistory(view);
+  } catch (error) {
+    if (read !== historyRead) return;
+    ui.historyError.textContent = describe(error);
+  }
+}
+
+function drawHistory(view: HistoryView): void {
+  ui.historyLead.textContent = historySummary(view);
+  let current: HTMLElement | undefined;
+  const items = historyRows(view).map((row) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = row.applied ? "history-row" : "history-row undone";
+    if (row.step !== undefined) button.dataset.step = String(row.step);
+    if (row.current) {
+      button.setAttribute("aria-current", "step");
+      current = button;
+    }
+    const what = document.createElement("span");
+    what.className = "history-what";
+    what.textContent = row.title;
+    const from = document.createElement("span");
+    from.className = "history-from";
+    from.textContent = row.applied ? row.from : row.from === "" ? "undone" : `${row.from}, undone`;
+    button.append(what, from);
+    button.title = row.current ? "The scene is here" : row.applied ? "Go back to here" : "Bring the scene forward to here";
+    // The line the scene is already on does nothing: no command, and no "went to" line in Activity.
+    if (!row.current) button.addEventListener("click", () => void goToHistoryStep(row.step, row.title));
+    const item = document.createElement("li");
+    item.append(button);
+    return item;
+  });
+  ui.historyList.replaceChildren(...items);
+  current?.scrollIntoView({ block: "nearest" });
+}
+
+/** A click on a line: the scene goes to the state just after that step, in one move. */
+async function goToHistoryStep(step: number | undefined, title: string): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session) return;
+  const scope = step === undefined ? {} : { step };
+  const outcome = await runCommand(
+    { command: "goToHistoryStep", session: session.key, ...scope },
+    { label: step === undefined ? "Went back to the scene as opened" : `Went to: ${title}`, refusal: "Change history" },
+  );
+  // A refusal draws nothing new (the list may have been stale), so read the history again.
+  if (outcome === undefined) void refreshHistoryList();
+}
+
+function openHistory(): void {
+  if (!ui.historyDialog.open) ui.historyDialog.show();
+  void refreshHistoryList();
 }
 
 /// What a successful command reports, and how a refusal is introduced.
@@ -2882,7 +3720,10 @@ async function runCommand(
       // A take-page preview is of the document as it was; only an edit,
       // undo or redo changes the active document.
       const changesDocument =
-        command.command === "editScene" || command.command === "undo" || command.command === "redo";
+        command.command === "editScene" ||
+        command.command === "undo" ||
+        command.command === "redo" ||
+        command.command === "goToHistoryStep";
       if (changesDocument) takePagePreviewDocument = null;
       presentView(outcome.session, spec.select?.(outcome.effects));
     }
@@ -2896,6 +3737,8 @@ async function runCommand(
   } finally {
     animationBusy = false;
     ui.animationMount.removeAttribute("aria-busy");
+    // The ribbon was last worked out while the edit was still going, when nothing could be created: say what can run now.
+    showRibbonStates();
   }
 }
 
@@ -2906,6 +3749,7 @@ const PANEL_MODULE: Readonly<Record<string, EditorModule>> = {
   viewport: "viewport",
   "object-manager": "objectManager",
   inspector: "inspector",
+  pivot: "inspector",
   timeline: "timeline",
   animation: "animation",
   materials: "materials",
@@ -3324,6 +4168,848 @@ function onInspectorChange(event: Event): void {
 }
 
 
+/** What a tool is called in an Activity line. */
+function toolWords(tool: PageTool): string {
+  return tool === "move" ? "Move" : tool === "rotate" ? "Rotate" : tool === "scale" ? "Resize" : tool === "pivot" ? "Pivot" : tool === "pen" ? "Pen" : tool === "path" ? "Edit path" : tool === "vertex-add" ? "Add vertex" : tool === "vertex-delete" ? "Delete vertex" : tool === "vertex-convert" ? "Convert vertex" : tool === "hand" ? "Hand" : tool === "zoom" ? "Zoom" : "Select";
+}
+
+/** Choose the tool the pointer drags with. The buttons show which is in use. */
+function setActiveTool(tool: PageTool): void {
+  // A path being drawn is finished when another tool is chosen, or dropped when it is too short to be one. Hand and Zoom only
+  // move the view, so the path waits for the Pen to be chosen again.
+  if (activeTool === "pen" && tool !== "pen" && tool !== "hand" && tool !== "zoom") leavePen();
+  if (!isPathTool(tool) && tool !== "hand" && tool !== "zoom") {
+    dropPathState();
+    pathMask = undefined;
+  }
+  activeTool = tool;
+  for (const button of document.querySelectorAll<HTMLElement>("[data-tool]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.tool === tool));
+  }
+  ui.overlay.dataset.tool = tool;
+  showPenCreates();
+  renderOverlayLayer();
+}
+
+// ---------------------------------------------------------------------------
+// The view (11.105). The model is `viewport-camera.ts`; the camera is one CSS transform on the viewport surface, so every
+// tool, which reads the pointer through the overlay's own box, stays true at any zoom and pan. Not saved in the scene.
+// ---------------------------------------------------------------------------
+
+let camera: Camera = FIT;
+/** The scene the camera is for: another scene starts at Fit. */
+let cameraScene: number | undefined;
+let panning: { pointerId: number; x: number; y: number; camera: Camera } | undefined;
+
+function viewSurface(): HTMLElement | null {
+  return ui.canvas.closest<HTMLElement>(".viewport-surface");
+}
+
+/** The pane and the picture at Fit, in screen pixels as laid out (a transform does not change them). */
+function viewSizes(): { pane: ViewSize; picture: ViewSize } {
+  const surface = viewSurface();
+  return {
+    pane: { width: surface?.offsetWidth ?? 0, height: surface?.offsetHeight ?? 0 },
+    picture: { width: ui.canvas.offsetWidth, height: ui.canvas.offsetHeight },
+  };
+}
+
+/** Screen pixels per canvas pixel at Fit. */
+function fitScale(): number {
+  const active = previewScene ?? scene;
+  return active !== null && active.canvas.width > 0 ? ui.canvas.offsetWidth / active.canvas.width : 0;
+}
+
+/** Canvas pixels to a screen pixel at the moment: what the overlay's handles and markers are drawn larger by. */
+function overlayUnit(): number {
+  const active = previewScene ?? scene;
+  const box = ui.overlay.getBoundingClientRect();
+  return active !== null && box.width > 0 ? active.canvas.width / box.width : 1;
+}
+
+/** Put the camera on the surface and in the readout. */
+function syncCamera(): void {
+  const { pane, picture } = viewSizes();
+  camera = clampPan(camera, pane, picture);
+  const surface = viewSurface();
+  if (surface) surface.style.transform = cameraTransform(camera);
+  ui.viewerZoomReadout.textContent = zoomLabel(camera, fitScale()) || "100%";
+}
+
+function setCamera(next: Camera): void {
+  camera = next;
+  syncCamera();
+  renderOverlayLayer();
+}
+
+/** A point of the screen as an offset from the pane's middle. */
+function paneOffset(clientX: number, clientY: number): ViewPoint {
+  const stage = ui.canvas.closest<HTMLElement>(".viewport-stage")?.getBoundingClientRect();
+  return stage === undefined ? { x: 0, y: 0 } : { x: clientX - (stage.left + stage.width / 2), y: clientY - (stage.top + stage.height / 2) };
+}
+
+function zoomView(factor: number, at: ViewPoint = { x: 0, y: 0 }): void {
+  const { pane, picture } = viewSizes();
+  setCamera(zoomAt(camera, factor, at, pane, picture));
+}
+
+function startPan(event: PointerEvent): void {
+  event.preventDefault();
+  panning = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, camera };
+  ui.overlay.setPointerCapture(event.pointerId);
+  ui.overlay.dataset.panning = "true";
+}
+
+function movePan(event: PointerEvent): void {
+  if (panning === undefined) return;
+  const { pane, picture } = viewSizes();
+  setCamera(panBy(panning.camera, event.clientX - panning.x, event.clientY - panning.y, pane, picture));
+}
+
+function endPan(event: PointerEvent): void {
+  if (ui.overlay.hasPointerCapture(event.pointerId)) ui.overlay.releasePointerCapture(event.pointerId);
+  panning = undefined;
+  delete ui.overlay.dataset.panning;
+}
+
+/** The wheel zooms at the pointer; with Shift it moves the view across. */
+function onViewWheel(event: WheelEvent): void {
+  if (!scene) return;
+  event.preventDefault();
+  // A line or a page is a larger turn than a pixel: bring them to pixels first.
+  const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1);
+  if (event.shiftKey && !event.ctrlKey) {
+    const { pane, picture } = viewSizes();
+    setCamera(panBy(camera, -pixels, 0, pane, picture));
+    return;
+  }
+  zoomView(wheelFactor(pixels), paneOffset(event.clientX, event.clientY));
+}
+
+// ---------------------------------------------------------------------------
+// The Pen tool (11.104). The model is `pen-tool.ts`; this feeds it the pointer and the keys and sends what it makes.
+// ---------------------------------------------------------------------------
+
+/** How close to the first point a click closes the path: ten screen pixels, in canvas pixels. */
+function penTolerance(): number {
+  const box = ui.overlay.getBoundingClientRect();
+  const canvasWidth = (previewScene ?? scene)?.canvas.width ?? 1920;
+  return box.width > 0 ? (10 * canvasWidth) / box.width : 10;
+}
+
+/** What the last snap held, so a snap is let go only at 11 screen pixels (11.110). */
+let snapHold: SnapHold = {};
+
+/** `at`, snapped to the canvas, other layers and vertices; the guides it snapped to are shown until the gesture ends. Shift (an angle
+ *  step) and Ctrl turn it off; so does the setting. */
+function snapAt(at: OverlayPoint, event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }, except: ReadonlySet<string>, own: readonly OverlayPoint[] = []): OverlayPoint {
+  const active = previewScene ?? scene;
+  if (!active) return at;
+  const off = event.ctrlKey || event.metaKey || event.shiftKey || !editorPen.snap;
+  const result = snapPoint(at, snapTargets(active, except, own), snapHold, overlayUnit(), off);
+  snapHold = result.hold;
+  guides = [...result.guides];
+  return result.point;
+}
+
+function endSnap(): void {
+  snapHold = {};
+  guides = [];
+}
+
+function penPointerDown(event: PointerEvent): void {
+  const at = snapAt(eventScenePoint(event), event, new Set(), pen.points.map((p) => ({ x: p.x, y: p.y })));
+  event.preventDefault();
+  ui.overlay.focus({ preventScroll: true });
+  // The second click of a double click that has just finished a path is not the start of another.
+  if (event.timeStamp - penFinishedAt < 500) return;
+  // A path begun in another scene is dropped; its points mean nothing here.
+  if (pen.points.length > 0 && penScene !== activeSession(workspace)?.key) cancelPen();
+  // Clicking an end of the selected open shape carries that path on instead of starting another.
+  if (pen.points.length === 0 && tryResume(at)) {
+    ui.overlay.setPointerCapture(event.pointerId);
+    penPull = event.pointerId;
+    return;
+  }
+  if (nearFirst(pen, at, penTolerance())) {
+    // Closing: a click closes the path; a drag from the first point also sets the tangents it closes with (released, it ends).
+    pen = closePath(pen);
+    penClosing = true;
+    penPull = event.pointerId;
+    penLastAt = at;
+    ui.overlay.setPointerCapture(event.pointerId);
+    renderOverlayLayer();
+    return;
+  }
+  penRefused = false;
+  pen = addPoint(pen, at, event.shiftKey, editorPen.angle);
+  penScene = activeSession(workspace)?.key;
+  penPull = event.pointerId;
+  penLastAt = at;
+  ui.overlay.setPointerCapture(event.pointerId);
+  renderOverlayLayer();
+}
+
+/** Where a click at `at` is on an end of the selected open shape: the path is carried on from there. Only for a shape that is
+ *  placed where its path says (no move, turn, scale or pivot), since the pen's points are canvas points. */
+function tryResume(at: OverlayPoint): boolean {
+  if (!scene || selection.length !== 1) return false;
+  // A path drawn as a mask is a new one, never the end of the selected shape.
+  const plan = currentPenPlan();
+  if ("refused" in plan || plan.kind !== "shape") return false;
+  const object = scene.objects.find((candidate) => candidate.id === selection[0]);
+  if (object === undefined || object.type !== "shape" || object.locked || object.path.closed) return false;
+  if (object.compoundPaths !== undefined && object.compoundPaths.length > 0) return false;
+  // An animated path keeps its vertices in every key: carrying it on would add a vertex to one key only.
+  if (animatesPath(scene, object.id)) return false;
+  const near = (p: { x: number; y: number }) => Math.hypot(p.x - at.x, p.y - at.y) <= penTolerance();
+  const first = object.path.vertices[0];
+  const last = object.path.vertices[object.path.vertices.length - 1];
+  const fromFirst = first !== undefined && near(first);
+  if (!fromFirst && !(last !== undefined && near(last))) return false;
+  const where = effectivePlacement(scene, object);
+  const placed = where.x === 0 && where.y === 0 && where.rotation === 0 && where.scaleX === 1 && where.scaleY === 1 && where.anchorX === 0 && where.anchorY === 0;
+  if (!placed) {
+    log(`Pen: ${object.name} has been moved, turned or scaled, so its path cannot be carried on from the canvas yet. Reset its transform, or draw a new path.`, "bad");
+    return false;
+  }
+  const state = resumeState(object.path, fromFirst);
+  if (state === undefined) return false;
+  pen = state;
+  penResume = object.id;
+  penScene = activeSession(workspace)?.key;
+  renderOverlayLayer();
+  return true;
+}
+
+function penPointerMove(event: PointerEvent): void {
+  const raw = eventScenePoint(event);
+  // A point being placed is snapped as it is put down; the handles it pulls are not.
+  const at = penPull === event.pointerId ? raw : snapAt(raw, event, new Set(), pen.points.map((p) => ({ x: p.x, y: p.y })));
+  if (penPull === event.pointerId) {
+    const options = { alt: event.altKey, shift: event.shiftKey, degrees: editorPen.angle };
+    if (penClosing) pen = closeWithPull(pen, at, options);
+    else if (penSpace && penLastAt !== undefined) {
+      // Space held: the new point moves with its handles, the pull stays as it was.
+      pen = moveLast(pen, { x: at.x - penLastAt.x, y: at.y - penLastAt.y });
+    } else {
+      // The pointer is down on the point just made: it pulls that point's handles.
+      pen = pullHandles(pen, at, options);
+    }
+    penLastAt = at;
+  } else {
+    const last = pen.points[pen.points.length - 1];
+    penHover = event.shiftKey && last !== undefined ? constrain(last, at, editorPen.angle) : at;
+  }
+  renderOverlayLayer();
+}
+
+function penPointerUp(event: PointerEvent): void {
+  if (penPull !== event.pointerId) return;
+  penPull = undefined;
+  penSpace = false;
+  penLastAt = undefined;
+  endSnap();
+  if (ui.overlay.hasPointerCapture(event.pointerId)) ui.overlay.releasePointerCapture(event.pointerId);
+  // A click or drag on the first point closed the path: it ends here.
+  if (penClosing) {
+    penClosing = false;
+    finishPen();
+    return;
+  }
+  renderOverlayLayer();
+}
+
+/** Enter finishes the path, Backspace takes back the last point, Escape drops it. Returns whether the key was the pen's. */
+function penKey(event: KeyboardEvent): boolean {
+  // With no path in progress these keys are not the pen's: Delete still deletes and Escape still clears the selection.
+  if (pen.points.length === 0) return false;
+  // Space while a point is being placed moves it instead of playing the preview.
+  if (event.key === " " && penPull !== undefined) {
+    penSpace = true;
+    event.preventDefault();
+    return true;
+  }
+  if (event.key === "Enter") finishPen();
+  else if (event.key === "Backspace" || event.key === "Delete") pen = removeLast(pen);
+  else if (event.key === "Escape") {
+    if (penPull !== undefined) {
+      // Escape in the middle of placing a point takes that point back and nothing else.
+      if (ui.overlay.hasPointerCapture(penPull)) ui.overlay.releasePointerCapture(penPull);
+      penPull = undefined;
+      penSpace = false;
+      penLastAt = undefined;
+      if (penClosing) {
+        penClosing = false;
+        pen = { ...pen, closed: false };
+      } else pen = removeLast(pen);
+    } else if (penRefused) {
+      // The path was refused (an open path cannot be a mask) and given back; a second Escape lets it go.
+      penRefused = false;
+      cancelPen();
+    } else if (pen.points.length >= 2) finishPen();
+    else cancelPen();
+  } else return false;
+  event.preventDefault();
+  renderOverlayLayer();
+  return true;
+}
+
+/** The path in progress was refused when it was finished and given back (11.111); Escape again drops it. */
+let penRefused = false;
+
+function cancelPen(): void {
+  penRefused = false;
+  endSnap();
+  pen = EMPTY_PEN;
+  penResume = undefined;
+  penClosing = false;
+  penSpace = false;
+  penLastAt = undefined;
+  penPull = undefined;
+  penHover = undefined;
+  renderOverlayLayer();
+}
+
+/** Make the path a shape: one batch, one undo step, and the new shape is selected. A path that is not enough yet says why
+ *  and stays, so the next click carries on drawing it. */
+function finishPen(): void {
+  if (!scene || pen.points.length === 0) return;
+  if (penScene !== activeSession(workspace)?.key) {
+    log("Pen: the path was drawn in another scene, so nothing was made.", "bad");
+    cancelPen();
+    return;
+  }
+  // A double click makes its second point on top of the first: that is the end of the path, not another point.
+  const last = pen.points[pen.points.length - 1]!;
+  const before = pen.points[pen.points.length - 2];
+  if (!pen.closed && before !== undefined && Math.hypot(last.x - before.x, last.y - before.y) < 1) pen = removeLast(pen);
+  const shapes = scene.objects.filter((object) => object.type === "shape").length;
+  const resumed = penResume;
+  // 11.111: a mask on the selected layer, or a new shape, as `Pen creates` and the selection say.
+  const plan = resumed === undefined ? currentPenPlan() : ({ kind: "shape" } as const);
+  if ("refused" in plan) {
+    log(`Pen: ${plan.refused}`, "bad");
+    penRefused = true;
+    renderOverlayLayer();
+    return;
+  }
+  const outcome = plan.kind === "mask"
+    ? penMaskEdit(scene, pen, plan.object)
+    : resumed === undefined ? penEdits(scene, pen, `Pen path ${shapes + 1}`) : resumeEdits(resumed, pen);
+  if (isRefused(outcome)) {
+    log(`Pen: ${outcome.refused}`, "bad");
+    penRefused = true;
+    renderOverlayLayer();
+    return;
+  }
+  const label = plan.kind === "mask" ? penMaskLabel(pen, plan.object) : penLabel(pen, resumed !== undefined);
+  const kept = pen;
+  cancelPen();
+  penFinishedAt = performance.now();
+  void runEdits(outcome.edits, {
+    label,
+    select: (effects) => {
+      for (const effect of effects) if (effect.effect === "objectCreated") return [effect.objectId];
+      return resumed === undefined ? undefined : [resumed];
+    },
+  }, plan.kind === "mask" ? "scene" : "viewport").then((done) => {
+    // Refused, or an edit was still going: the path is given back, so the author has not lost it.
+    if (done === undefined && pen.points.length === 0 && activeTool === "pen") {
+      pen = kept;
+      penResume = resumed;
+      penScene = activeSession(workspace)?.key;
+      renderOverlayLayer();
+    }
+  });
+}
+
+/** Leaving the Pen tool: a path of enough points is made, a shorter one is dropped. */
+function leavePen(): void {
+  if (pen.points.length >= 2) finishPen();
+  // A path that was refused is not kept out of sight for the next time the Pen is chosen.
+  if (activeTool !== "pen") cancelPen();
+}
+
+// ---------------------------------------------------------------------------
+// Editing a path (11.107). The model is `path-edit.ts` (and `path-geometry.ts`, the same maths as the backend's
+// `path_geometry.rs`); this feeds it the pointer and the keys and sends ONE `editPath` edit when a gesture ends.
+// ---------------------------------------------------------------------------
+
+/** The vertices that are selected, on the shape that is selected. */
+let pathSelected: readonly Selected[] = [];
+let pathGesture: { pointerId: number; gesture?: PathGesture; startClient: { x: number; y: number }; start: OverlayPoint; moved: boolean; additive: boolean } | undefined;
+/** The subpath as it would be after the drag in progress. */
+let pathPreview: { subpath: number; path: BezierPath } | undefined;
+/** Shift pressed on a vertex that was already selected: a click without a move takes it out of the selection. */
+let pathToggle: Selected | undefined;
+
+/** The mask whose path the path tools edit (11.117), or `undefined` for the selected shape's own path. */
+let pathMask: number | undefined;
+
+/** Whether edits of a path set a path key at the playhead even when the path has none yet (11.112). */
+let pathKeying = false;
+
+function pathTarget(): EditTarget | { refused: string } {
+  return scene ? editTarget(scene, selection, pathMask, currentFrame) : { refused: "Open a scene first." };
+}
+
+/** What the viewport draws for the path tools: the selected shape's vertices, and the handles of the selected ones. */
+function pathSketchFor(active: SceneDocument): { pathEdit: ReturnType<typeof pathEditSketch> } | Record<string, never> {
+  if (!isPathTool(activeTool)) return {};
+  const target = editTarget(active, selection, pathMask, currentFrame);
+  if (isRefused(target)) return {};
+  return { pathEdit: pathEditSketch(target, pathSelected, pathPreview) };
+}
+
+/** The masks of the selected layer, for the viewport (11.117): shown with every tool, so the author sees what clips. */
+function maskSketchesFor(active: SceneDocument): { masks: ReturnType<typeof maskSketches> } | Record<string, never> {
+  if (selection.length !== 1) return {};
+  const object = active.objects.find((candidate) => candidate.id === selection[0]);
+  if (object === undefined || (object.masks?.length ?? 0) === 0) return {};
+  return { masks: maskSketches(active, object, activeTool === "path" || activeTool === "vertex-add" || activeTool === "vertex-delete" || activeTool === "vertex-convert" ? pathMask : undefined) };
+}
+
+function dropPathState(): void {
+  endSnap();
+  pathSelected = [];
+  pathGesture = undefined;
+  pathPreview = undefined;
+  pathToggle = undefined;
+  marquee = undefined;
+}
+
+/** Ten screen pixels, in canvas pixels. */
+const pathRadius = (): number => editorPen.pick * overlayUnit();
+
+function pathPointerDown(event: PointerEvent): void {
+  event.preventDefault();
+  ui.overlay.focus({ preventScroll: true });
+  const active = previewScene ?? scene;
+  if (!active || !scene) return;
+  const at = eventScenePoint(event);
+  let target = pathTarget();
+  const hitShape = hitTestOverlay(active, at);
+  // Nothing editable selected yet, or a click on another object: select it, as the Select tool would.
+  if (isRefused(target) || (hitShape !== undefined && !selection.includes(hitShape) && pickPath(target, pathSelected, at, pathRadius()) === undefined)) {
+    if (hitShape !== undefined) {
+      setSelection(event.shiftKey ? [hitShape] : [hitShape]);
+      target = pathTarget();
+    }
+    if (isRefused(target)) {
+      if (selection.length > 0) log(`${toolWords(activeTool)}: ${target.refused}`, "bad");
+      else if (hitShape === undefined) log(`${toolWords(activeTool)}: ${target.refused}`);
+      renderOverlayLayer();
+      return;
+    }
+    if (activeTool === "path") {
+      // The click that chose the shape only chose it.
+      renderOverlayLayer();
+      return;
+    }
+  }
+  const hit = pickPath(target, pathSelected, at, pathRadius());
+  if (activeTool !== "path") {
+    const tool = activeTool === "vertex-add" ? "add" : activeTool === "vertex-delete" ? "delete" : "convert";
+    // Alt with the Delete Vertex tool takes the point out and fits one curve over the two beside it (11.113).
+    const planned = clickOp(tool, hit, target, tool === "delete" && event.altKey ? editorPen.fit : undefined);
+    if ("refused" in planned) {
+      log(`${toolWords(activeTool)}: ${planned.refused}`, "bad");
+      return;
+    }
+    sendPathOp(target, planned.subpath, planned.op, planned.label);
+    return;
+  }
+  // Alt-click on a vertex swaps corner and smooth, as it does in Illustrator and with the Convert tool (11.116).
+  if (event.altKey && hit?.kind === "vertex") {
+    const planned = clickOp("convert", hit, target);
+    if ("refused" in planned) log(`Edit path: ${planned.refused}`, "bad");
+    else sendPathOp(target, planned.subpath, planned.op, planned.label);
+    return;
+  }
+  const additive = event.shiftKey;
+  pathToggle = undefined;
+  if (hit === undefined) {
+    // Empty space: a marquee, which selects the vertices inside it.
+    pathGesture = { pointerId: event.pointerId, startClient: { x: event.clientX, y: event.clientY }, start: at, moved: false, additive };
+    if (!additive) pathSelected = [];
+  } else {
+    if (hit.kind === "vertex" && additive && isSelected(pathSelected, hit.subpath, hit.index)) pathToggle = { subpath: hit.subpath, index: hit.index };
+    const begun = beginGesture(hit, at, pathSelected, additive);
+    pathSelected = begun.selected;
+    pathGesture = { pointerId: event.pointerId, gesture: begun.gesture, startClient: { x: event.clientX, y: event.clientY }, start: at, moved: false, additive };
+  }
+  ui.overlay.setPointerCapture(event.pointerId);
+  renderOverlayLayer();
+}
+
+function pathPointerMove(event: PointerEvent): void {
+  if (!pathGesture || pathGesture.pointerId !== event.pointerId) return;
+  const target = pathTarget();
+  if (isRefused(target)) return;
+  const rawAt = eventScenePoint(event);
+  pathGesture.moved ||= !isClick({ clientX: pathGesture.startClient.x, clientY: pathGesture.startClient.y }, event);
+  if (!pathGesture.moved) return;
+  if (pathGesture.gesture === undefined) {
+    marquee = boundsFromDrag(pathGesture.start, rawAt);
+    renderOverlayLayer();
+    return;
+  }
+  const at = snapGrab(target, pathGesture.gesture, rawAt, event);
+  const made = gestureOp(target, pathGesture.gesture, at, { shift: event.shiftKey, alt: event.altKey, step: editorPen.angle });
+  if (made === undefined) return;
+  const subpath = target.paths.find((p) => p.subpath === made.subpath);
+  const next = subpath === undefined ? undefined : applyOp(subpath.path, made.op);
+  pathPreview = next === undefined ? undefined : { subpath: made.subpath, path: next };
+  renderOverlayLayer();
+}
+
+/** The pointer position for a drag, moved so that what is grabbed (a vertex, or the end of a handle) lands on a snap, if one is
+ *  near: the snap is of the grabbed point, not of the pointer. A curve is not snapped. */
+function snapGrab(target: EditTarget, gesture: PathGesture, at: OverlayPoint, event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): OverlayPoint {
+  const hit = gesture.hit;
+  if (hit.kind === "segment") return at;
+  const entry = target.paths.find((p) => p.subpath === hit.subpath);
+  if (entry === undefined) return at;
+  const vertex = entry.path.vertices[hit.index];
+  if (vertex === undefined) return at;
+  const grabbed = hit.kind === "vertex"
+    ? vertex
+    : { x: vertex.x + (hit.side === "out" ? entry.path.outTangents : entry.path.inTangents)[hit.index]!.x, y: vertex.y + (hit.side === "out" ? entry.path.outTangents : entry.path.inTangents)[hit.index]!.y };
+  const from = canvasPointOf(target, grabbed);
+  // Where the grabbed point would be with the pointer at `at`: it was `from` when the pointer was at the start.
+  const offset = { x: from.x - gesture.start.x, y: from.y - gesture.start.y };
+  const moving = new Set(gesture.moving.map((s) => `${s.subpath}:${s.index}`));
+  const own = target.paths.flatMap((p) => p.path.vertices.flatMap((v, index) => (moving.has(`${p.subpath}:${index}`) ? [] : [canvasPointOf(target, v)])));
+  const landed = snapAt({ x: at.x + offset.x, y: at.y + offset.y }, event, new Set([target.object.id]), own);
+  return { x: landed.x - offset.x, y: landed.y - offset.y };
+}
+
+function pathPointerUp(event: PointerEvent, cancelled: boolean): void {
+  const drag = pathGesture;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (cancelled) endSnap();
+  pathGesture = undefined;
+  if (ui.overlay.hasPointerCapture(event.pointerId)) ui.overlay.releasePointerCapture(event.pointerId);
+  const target = pathTarget();
+  const at = eventScenePoint(event);
+  if (isRefused(target) || cancelled) {
+    pathPreview = undefined;
+    marquee = undefined;
+    renderOverlayLayer();
+    return;
+  }
+  if (drag.gesture === undefined) {
+    // The marquee ends: the vertices inside it, added to the selection with Shift. A click on nothing has cleared it already.
+    if (drag.moved) {
+      const inside = verticesInBox(target, boundsFromDrag(drag.start, at));
+      pathSelected = drag.additive ? [...pathSelected, ...inside.filter((s) => !isSelected(pathSelected, s.subpath, s.index))] : inside;
+    }
+    marquee = undefined;
+    renderOverlayLayer();
+    return;
+  }
+  if (!drag.moved) {
+    // A click: Shift on a vertex that was selected takes it out of the selection.
+    if (pathToggle !== undefined) pathSelected = pathSelected.filter((s) => !(s.subpath === pathToggle!.subpath && s.index === pathToggle!.index));
+    pathToggle = undefined;
+    pathPreview = undefined;
+    renderOverlayLayer();
+    return;
+  }
+  const made = gestureOp(target, drag.gesture, snapGrab(target, drag.gesture, at, event), { shift: event.shiftKey, alt: event.altKey, step: editorPen.angle });
+  endSnap();
+  if (made === undefined) {
+    pathPreview = undefined;
+    renderOverlayLayer();
+    return;
+  }
+  const words = drag.gesture.hit.kind === "vertex" ? (drag.gesture.moving.length > 1 ? `Moved ${drag.gesture.moving.length} vertices` : "Moved a vertex") : drag.gesture.hit.kind === "handle" ? "Moved a handle" : "Reshaped a curve";
+  sendPathOp(target, made.subpath, made.op, words);
+}
+
+/** One `editPath` edit: one undo step. The preview stays up until Rust has answered, so the path does not jump back. */
+function sendPathOp(target: EditTarget, subpath: number, op: PathOp, label: string): void {
+  const id = target.object.id;
+  // A new vertex count or order makes the selected indices mean something else.
+  const keeps = op.op === "moveVertices" || op.op === "setHandle" || op.op === "reshapeSegment" || op.op === "convertVertex" || op.op === "setVertexKind";
+  // 11.112: the frame goes with the edit when the path is animated or keys are being set, so the edit lands in a key.
+  const frame = pathEditFrame(target, subpath, pathKeying);
+  void runEdits([editPathEdit(id, subpath, op, target.mask, frame, pathEditRevision(target, subpath))], { label: `${label} of ${target.object.name}${frame === undefined ? "" : ` at frame ${frame}`}` }, "viewport")
+    .then((done) => {
+      if (done === undefined) return;
+      if (!keeps) pathSelected = [];
+    })
+    .finally(() => {
+      pathPreview = undefined;
+      renderOverlayLayer();
+    });
+}
+
+/** The kind of every selected vertex set in one gesture (one undo step), written out to the path and, if it is animated, to its key here. */
+function setSelectedVertexKind(kind: VertexKind): void {
+  const target = pathTarget();
+  if (isRefused(target)) {
+    log(`Vertex kind: ${target.refused}`, "bad");
+    return;
+  }
+  const planned = kindEdits(target, pathSelected, kind, pathKeying);
+  if ("refused" in planned) {
+    log(`Vertex kind: ${planned.refused}`, "bad");
+    return;
+  }
+  void runEdits(planned.edits, { label: `${planned.label} of ${target.object.name}` }, "viewport").finally(() => renderOverlayLayer());
+}
+
+/** The subpath of the selected vertices taken out of its compound shape (11.112): its animation and links go with it, the others keep their ids. */
+async function removeSelectedSubpath(): Promise<void> {
+  const target = pathTarget();
+  if (isRefused(target)) {
+    log(`Remove subpath: ${target.refused}`, "bad");
+    return;
+  }
+  if (target.mask !== undefined) {
+    log("Remove subpath: a mask is one path. Remove the mask instead.", "bad");
+    return;
+  }
+  const subpath = pathSelected[0]?.subpath;
+  if (subpath === undefined) {
+    log("Remove subpath: select a vertex of the subpath to take out first.", "bad");
+    return;
+  }
+  await runEdits([{ edit: "removeSubpath", shapeId: target.object.id, subpath } as SceneEdit], { label: `Removed a subpath of ${target.object.name}` }, "viewport");
+  pathSelected = [];
+}
+
+/** The path being edited taken out of its link (11.112): it keeps what it has and is independent from then on. */
+async function unlinkEditedPath(): Promise<void> {
+  const target = pathTarget();
+  if (isRefused(target) || !scene) {
+    log(`Unlink path: ${isRefused(target) ? target.refused : "open a scene first"}`, "bad");
+    return;
+  }
+  const subpath = pathSelected[0]?.subpath ?? target.paths[0]?.subpath ?? 0;
+  const place = target.mask === undefined ? ({ kind: "shape", subpath } as const) : ({ kind: "mask", index: target.mask } as const);
+  const link = pathLinkOf(scene, target.object, place);
+  if (link === undefined) {
+    log(`Unlink path: that path of ${target.object.name} is not linked.`, "bad");
+    return;
+  }
+  await runEdits([unlinkPath(target.object.id, place)], { label: `Unlinked a path of ${target.object.name} from ${linkUsersWords(scene, link, linkedPathOf(target.object, place))}` }, "viewport");
+}
+
+/** The tension of the selected path's auto vertices, from the slider. */
+function setPathAutoTension(tension: number): void {
+  const target = pathTarget();
+  if (isRefused(target)) {
+    log(`Auto tension: ${target.refused}`, "bad");
+    return;
+  }
+  const subpath = pathSelected[0]?.subpath ?? target.paths[0]?.subpath ?? 0;
+  sendPathOp(target, subpath, { op: "setAutoTension", tension }, `Set auto tension to ${tension}`);
+}
+
+/** A key on every path of the selection at the playhead, as the path is there: how a path starts to animate (11.112). */
+async function keyPathAtPlayhead(): Promise<void> {
+  const target = pathTarget();
+  if (isRefused(target)) {
+    log(`Key path: ${target.refused}`, "bad");
+    return;
+  }
+  const edits: SceneEdit[] = target.paths.map((entry) => ({
+    edit: "setPathKey",
+    objectId: target.object.id,
+    target: target.mask === undefined ? { kind: "shape", subpath: entry.subpath } : { kind: "mask", index: target.mask },
+    frame: wireFrame(currentFrame),
+    path: entry.path,
+    easing: "ease-in-out",
+  }) as SceneEdit);
+  await runEdits(edits, { label: `Keyed the path of ${target.object.name} at frame ${currentFrame}` }, "viewport");
+}
+
+/** The key of every path of the selection at the playhead, taken away. */
+async function removePathKeyAtPlayhead(): Promise<void> {
+  const target = pathTarget();
+  if (isRefused(target)) {
+    log(`Remove path key: ${target.refused}`, "bad");
+    return;
+  }
+  const edits: SceneEdit[] = [];
+  for (const entry of target.paths) {
+    const at = target.mask === undefined ? ({ kind: "shape", subpath: entry.subpath } as const) : ({ kind: "mask", index: target.mask } as const);
+    if (pathKeyAt(scene ? pathChannelOf(scene, target.object.id, at) : undefined, currentFrame) !== undefined) {
+      edits.push({ edit: "removePathKey", objectId: target.object.id, target: at, frame: wireFrame(currentFrame) } as SceneEdit);
+    }
+  }
+  if (edits.length === 0) {
+    log(`Remove path key: ${target.object.name} has no path key at frame ${currentFrame}.`, "bad");
+    return;
+  }
+  await runEdits(edits, { label: `Removed the path key of ${target.object.name} at frame ${currentFrame}` }, "viewport");
+}
+
+/** Delete takes the selected vertices out, Escape drops the drag or the selection. Returns whether the key was this tool's. */
+function pathKey(event: KeyboardEvent): boolean {
+  if (event.key === "Escape") {
+    if (pathGesture !== undefined) {
+      if (ui.overlay.hasPointerCapture(pathGesture.pointerId)) ui.overlay.releasePointerCapture(pathGesture.pointerId);
+      pathGesture = undefined;
+      pathPreview = undefined;
+      marquee = undefined;
+    } else if (pathSelected.length > 0) pathSelected = [];
+    else return false;
+    event.preventDefault();
+    renderOverlayLayer();
+    return true;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && pathSelected.length > 0) {
+    const target = pathTarget();
+    if (isRefused(target)) return false;
+    const planned = deleteSelected(target, pathSelected);
+    event.preventDefault();
+    if ("refused" in planned) log(`Edit path: ${planned.refused}`, "bad");
+    else sendPathOp(target, planned.subpath, planned.op, planned.label);
+    return true;
+  }
+  return false;
+}
+
+/** Double click on a vertex swaps corner and smooth; on a curve it puts a vertex there (the Smart Pen's shortcuts). */
+function pathDoubleClick(event: MouseEvent): void {
+  const at = eventScenePoint(event as PointerEvent);
+  const target = pathTarget();
+  if (isRefused(target)) return;
+  const hit: PathHit | undefined = pickPath(target, pathSelected, at, pathRadius());
+  if (hit === undefined || hit.kind === "handle") return;
+  const planned = clickOp(hit.kind === "vertex" ? "convert" : "add", hit, target);
+  if ("refused" in planned) log(`Edit path: ${planned.refused}`, "bad");
+  else sendPathOp(target, planned.subpath, planned.op, planned.label);
+}
+
+// ---------------------------------------------------------------------------
+// The Pivot panel (11.103). The model is `anchor-point.ts`; this draws it and sends what it plans.
+// ---------------------------------------------------------------------------
+
+/** Show where the selection's pivot is and which place on the box it is on. A field being typed in is left alone. */
+function renderPivotPanel(document_: SceneDocument): void {
+  const view = pivotView(document_, selection);
+  ui.pivotEmpty.hidden = view.kind !== "none";
+  ui.pivotBody.hidden = view.kind === "none";
+  ui.pivotSummary.textContent = view.summary;
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-pivot-place]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.pivotPlace === view.place));
+  }
+  if (document.activeElement !== ui.pivotX) ui.pivotX.value = view.x === undefined ? "" : String(view.x);
+  if (document.activeElement !== ui.pivotY) ui.pivotY.value = view.y === undefined ? "" : String(view.y);
+  ui.pivotX.placeholder = view.x === undefined ? "differs" : "";
+  ui.pivotY.placeholder = view.y === undefined ? "differs" : "";
+}
+
+/** Send a pivot request for the selection as one batch (one undo step), or say by name why it cannot be. */
+let pivotQueue: Promise<void> = Promise.resolve();
+/** Requests go one after another, so a second one (a typed Y straight after a typed X) is planned from the document the
+ *  first one made, not from the one before it. */
+function applyPivot(request: PivotRequest): Promise<void> {
+  pivotQueue = pivotQueue.then(() => sendPivot(request));
+  return pivotQueue;
+}
+
+async function sendPivot(request: PivotRequest): Promise<void> {
+  if (!scene) return;
+  const keepInPlace = ui.pivotKeep.checked;
+  // With keys on the position: add a key at the playhead (the object as drawn there), or move every existing key.
+  const keyed = ui.pivotKeyedModify.checked ? "modify" : "insert";
+  const plan = pivotPlan(scene, selection, request, { keepInPlace, keyed, frame: currentFrame, view: previewScene ?? scene });
+  if (isRefused(plan)) {
+    ui.pivotError.textContent = plan.refused;
+    ui.pivotError.hidden = false;
+    log(`Pivot: ${plan.refused}`, "bad");
+    return;
+  }
+  ui.pivotError.hidden = true;
+  const objects = selectionRoots(scene, selection).flatMap((id) => scene?.objects.filter((object) => object.id === id) ?? []);
+  await runEdits(plan, pivotLabel(objects, request, keepInPlace), "inspector");
+}
+
+function wirePivotPanel(): void {
+  const offset = (): { x: number; y: number } => ({ x: Number(ui.pivotOffsetX.value) || 0, y: Number(ui.pivotOffsetY.value) || 0 });
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-pivot-place]")) {
+    button.addEventListener("click", () => {
+      const place = button.dataset.pivotPlace ?? "";
+      void applyPivot({ kind: ui.pivotScope.value === "selection" ? "selection" : "grid", place, offset: offset() });
+    });
+  }
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-pivot-nudge]")) {
+    button.addEventListener("click", () => {
+      const [dx = 0, dy = 0] = (button.dataset.pivotNudge ?? "0,0").split(",").map(Number);
+      const step = Number(ui.pivotStep.value) > 0 ? Number(ui.pivotStep.value) : 1;
+      void applyPivot({ kind: "nudge", dx: dx * step, dy: dy * step });
+    });
+  }
+  const typed = (): void => {
+    const x = ui.pivotX.value.trim() === "" ? undefined : Number(ui.pivotX.value);
+    const y = ui.pivotY.value.trim() === "" ? undefined : Number(ui.pivotY.value);
+    if (x === undefined && y === undefined) return;
+    void applyPivot({ kind: "point", ...(x === undefined ? {} : { x }), ...(y === undefined ? {} : { y }) });
+  };
+  ui.pivotX.addEventListener("change", typed);
+  ui.pivotY.addEventListener("change", typed);
+  ui.pivotReset.addEventListener("click", () => void applyPivot({ kind: "reset" }));
+}
+
+/** Whether `id` is selected, or sits inside a group that is: grabbing a selected group by one of its children is
+ *  grabbing the group. */
+function isSelectedOrInsideSelected(id: string): boolean {
+  if (selection.includes(id)) return true;
+  if (!scene) return false;
+  const parents = parentsOf(scene);
+  for (let at = parents.get(id), seen = new Set<string>(); at !== undefined && !seen.has(at); at = parents.get(at)) {
+    if (selection.includes(at)) return true;
+    seen.add(at);
+  }
+  return false;
+}
+
+/** Stop showing a drag in progress and draw the real document again. */
+function dropToolPreview(): void {
+  if (toolPreview === null) return;
+  toolPreview = null;
+  if (previewScene !== null) {
+    viewport?.updateDocument(previewScene);
+    viewport?.render();
+  }
+  renderOverlayLayer();
+}
+
+/** Dim the ribbon buttons whose command cannot run now, with the reason as the tooltip: the registry's answer, the
+ *  same one the menu item and the key give (11.31, 11.102). */
+/** `Tool Creates` for the Pen (11.111): what the next path will be, said before the first click. */
+let penCreates: PenCreates = "auto";
+
+function currentPenPlan(): PenPlan {
+  return scene ? penPlan(scene, selection, penCreates) : { kind: "shape" };
+}
+
+function showPenCreates(): void {
+  const plan = currentPenPlan();
+  ui.penCreatesNote.textContent = penPlanWords(plan);
+  ui.penCreatesNote.classList.toggle("menu-refused", "refused" in plan);
+}
+
+function showRibbonStates(): void {
+  showPenCreates();
+  const context = commandContext();
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".creation-tools button[data-menu-item], .viewer-footer button[data-menu-item]")) {
+    const command = commandById(button.dataset.menuItem ?? "");
+    if (command === undefined) continue;
+    button.dataset.title ??= button.title;
+    const reason = commandUnavailable(command.id, context);
+    button.setAttribute("aria-disabled", String(reason !== undefined));
+    button.classList.toggle("menu-refused", reason !== undefined);
+    button.title = reason === undefined ? (button.dataset.title ?? "") : `${button.dataset.title ?? ""}: ${reason}`;
+  }
+}
+
 function eventScenePoint(event: PointerEvent): OverlayPoint {
   const active = previewScene ?? scene;
   if (!active) return { x: 0, y: 0 };
@@ -3340,20 +5026,82 @@ function additiveSelection(ids: readonly string[]): string[] {
 }
 
 function onOverlayPointerDown(event: PointerEvent): void {
+  // The middle button moves the view with any tool; the Hand tool does it with the main button; the Zoom tool zooms where
+  // it is clicked, out with Alt.
+  if (previewScene && (event.button === 1 || (event.button === 0 && activeTool === "hand"))) {
+    startPan(event);
+    return;
+  }
+  if (previewScene && event.button === 0 && activeTool === "zoom") {
+    event.preventDefault();
+    zoomView(event.altKey ? 1 / ZOOM_STEP : ZOOM_STEP, paneOffset(event.clientX, event.clientY));
+    return;
+  }
   if (!previewScene || event.button !== 0) return;
+  // The next click puts a feather point on a mask's edge (11.108).
+  if (featherArm !== undefined) {
+    event.preventDefault();
+    takeFeatherPoint(eventScenePoint(event));
+    return;
+  }
+  // The pick whip (3.30): the next click chooses the matte source, whichever layer it is.
+  if (matteWhip !== undefined) {
+    event.preventDefault();
+    takeMatteWhip(hitTestOverlay(previewScene, eventScenePoint(event)));
+    return;
+  }
+  if (activeTool === "pen" && scene) {
+    penPointerDown(event);
+    return;
+  }
+  if (isPathTool(activeTool) && scene) {
+    pathPointerDown(event);
+    return;
+  }
   const start = eventScenePoint(event);
+  const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+  let tool: ToolDrag | undefined;
+  let refusal: string | undefined;
+  // Shift or Ctrl extends the selection, as with the Select tool; a tool does not start from it.
+  if ((activeTool === "move" || activeTool === "rotate" || activeTool === "scale" || activeTool === "pivot") && scene && !additive) {
+    // A tool acts on what is under the pointer when that is not selected yet (or a group above it is), as the pick
+    // tool would select it.
+    const hit = hitTestOverlay(previewScene, start);
+    if (hit !== undefined && !isSelectedOrInsideSelected(hit)) setSelection([hit]);
+    if (selection.length > 0) {
+      const begun = beginToolDrag(activeTool, scene, selection, start, previewScene);
+      if (isRefused(begun)) refusal = begun.refused;
+      else tool = begun;
+    }
+  }
   overlayDrag = {
     pointerId: event.pointerId,
     start,
     startClient: { x: event.clientX, y: event.clientY },
-    additive: event.shiftKey || event.ctrlKey || event.metaKey,
+    additive,
+    ...(tool === undefined ? {} : { tool }),
+    ...(refusal === undefined ? {} : { refusal }),
     moved: false,
   };
+  // The clock would redraw the canvas under the drag on its next tick.
+  if (tool !== undefined && playback !== undefined) pausePreview("moving an object");
   ui.overlay.setPointerCapture(event.pointerId);
   event.preventDefault();
 }
 
 function onOverlayPointerMove(event: PointerEvent): void {
+  if (panning !== undefined && panning.pointerId === event.pointerId) {
+    movePan(event);
+    return;
+  }
+  if (activeTool === "pen" && previewScene && scene) {
+    penPointerMove(event);
+    return;
+  }
+  if (isPathTool(activeTool) && previewScene && scene) {
+    pathPointerMove(event);
+    return;
+  }
   if (!previewScene || !overlayDrag || overlayDrag.pointerId !== event.pointerId) return;
   const current = eventScenePoint(event);
   const cssDistance = Math.hypot(
@@ -3362,6 +5110,23 @@ function onOverlayPointerMove(event: PointerEvent): void {
   );
   overlayDrag.moved ||= cssDistance >= 3;
   if (!overlayDrag.moved) return;
+
+  if (overlayDrag.refusal !== undefined) {
+    // Dragging a refused tool says why, once, and does nothing else (not even a marquee).
+    if (overlayDrag.told !== true) {
+      overlayDrag.told = true;
+      log(`${toolWords(activeTool)}: ${overlayDrag.refusal}`, "bad");
+    }
+    return;
+  }
+  if (overlayDrag.tool !== undefined) {
+    // The object follows the pointer: the same changes the release will send, drawn on a copy of the document.
+    toolPreview = previewDocument(previewScene, toolDragChanges(overlayDrag.tool, current, { shift: event.shiftKey }));
+    viewport?.updateDocument(toolPreview);
+    viewport?.render();
+    renderOverlayLayer();
+    return;
+  }
 
   marquee = boundsFromDrag(overlayDrag.start, current);
   // Crosshair guides are ephemeral interaction data, not scene objects. They
@@ -3374,11 +5139,37 @@ function onOverlayPointerMove(event: PointerEvent): void {
 }
 
 function finishOverlayPointer(event: PointerEvent, cancelled: boolean): void {
+  if (panning !== undefined && panning.pointerId === event.pointerId) {
+    endPan(event);
+    return;
+  }
+  if (activeTool === "pen") {
+    penPointerUp(event);
+    return;
+  }
+  if (isPathTool(activeTool)) {
+    pathPointerUp(event, cancelled);
+    return;
+  }
   const active = previewScene ?? scene;
   if (!active || !overlayDrag || overlayDrag.pointerId !== event.pointerId) return;
   const drag = overlayDrag;
   overlayDrag = undefined;
   if (ui.overlay.hasPointerCapture(event.pointerId)) ui.overlay.releasePointerCapture(event.pointerId);
+
+  if (drag.refusal !== undefined && drag.moved) {
+    renderOverlayLayer();
+    return;
+  }
+  if (drag.tool !== undefined && drag.moved) {
+    // One drag is one batch of edits and one undo step; a drag that ends where it began sends nothing.
+    const changes = cancelled ? [] : toolDragChanges(drag.tool, eventScenePoint(event), { shift: event.shiftKey });
+    // The preview stays up until Rust has answered, so the object does not jump back for a moment; a refusal or a
+    // failure puts the real document back.
+    if (changes.length > 0) void runEdits(toolDragEdits(changes), toolDragLabel(drag.tool, changes), "viewport").finally(dropToolPreview);
+    else dropToolPreview();
+    return;
+  }
 
   if (!cancelled) {
     if (drag.moved && marquee !== undefined) {
@@ -3410,6 +5201,10 @@ function onObjectManagerClick(event: MouseEvent): void {
   const action = button?.dataset.action;
   if (!id || !action) return;
   if (action === "select") {
+    if (matteWhip !== undefined) {
+      takeMatteWhip(id);
+      return;
+    }
     setSelection(event.shiftKey || event.ctrlKey || event.metaKey ? additiveSelection([id]) : [id]);
     return;
   }
@@ -4691,8 +6486,23 @@ function focusWorkspacePanel(id: string): void {
   panel.focus({ preventScroll: true });
 }
 
+/** Grey the items of an opening menu that cannot run now, with the reason as the tooltip: the registry's answer, the
+ *  same one a key press or an agent gets (11.31). */
+function showMenuStates(menu: HTMLElement): void {
+  const context = commandContext();
+  for (const button of menu.querySelectorAll<HTMLButtonElement>("button[data-menu-item]")) {
+    const command = commandById(button.dataset.menuItem ?? "");
+    if (command === undefined || actionOf(command) === "unbuilt") continue;
+    const reason = commandUnavailable(command.id, context);
+    button.setAttribute("aria-disabled", String(reason !== undefined));
+    button.classList.toggle("menu-refused", reason !== undefined);
+    button.title = reason ?? menuTitle(command);
+  }
+}
+
 /** Workspace controls only invoke existing command and view-state paths. */
 function wireWorkspaceChrome(): void {
+  drawAppMenus();
   for (const button of document.querySelectorAll<HTMLElement>("[data-icon]")) {
     button.prepend(iconImage(button.dataset.icon!));
   }
@@ -4702,6 +6512,14 @@ function wireWorkspaceChrome(): void {
   }
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    // A menu item asks the registry first, as a key does (11.31): the same reason in the same words.
+    const itemId = target?.closest<HTMLElement>("[data-menu-item]")?.dataset.menuItem;
+    const refusal = itemId !== undefined && commandById(itemId) !== undefined ? commandUnavailable(itemId, commandContext()) : undefined;
+    if (itemId !== undefined && refusal !== undefined) {
+      log(refusalLine(itemId, refusal), "bad");
+      document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => { menu.open = false; });
+      return;
+    }
     const invoke = target?.closest<HTMLElement>("[data-invoke]");
     if (invoke?.dataset.invoke) {
       const button = document.getElementById(invoke.dataset.invoke) as HTMLButtonElement | null;
@@ -4716,7 +6534,9 @@ function wireWorkspaceChrome(): void {
     }
     const panel = target?.closest<HTMLElement>("[data-focus-panel]");
     if (panel?.dataset.focusPanel) focusWorkspacePanel(panel.dataset.focusPanel);
-    if (invoke || creation || panel) {
+    const native = target?.closest<HTMLElement>("[data-native]");
+    if (native?.dataset.native) runNativeMenuAction(native);
+    if (invoke || creation || panel || native) {
       document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => { menu.open = false; });
     } else if (!target?.closest(".app-menu")) {
       document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => { menu.open = false; });
@@ -4724,12 +6544,23 @@ function wireWorkspaceChrome(): void {
   });
   document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => {
     menu.addEventListener("toggle", () => {
-      if (menu.open) document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((other) => {
+      if (!menu.open) return;
+      document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((other) => {
         if (other !== menu) other.open = false;
       });
+      showMenuStates(menu);
     });
   });
   document.getElementById("tool-selection")?.addEventListener("click", () => ui.overlay.focus());
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    button.addEventListener("click", () => {
+      // The registry decides: with no scene open a tool cannot be chosen, and the document handler says why.
+      const id = button.dataset.menuItem;
+      if (id !== undefined && commandUnavailable(id, commandContext()) !== undefined) return;
+      setActiveTool(button.dataset.tool as PageTool);
+    });
+  }
+  showRibbonStates();
   document.getElementById("viewer-transparency")?.addEventListener("click", (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const on = button.getAttribute("aria-pressed") !== "true";
@@ -4763,36 +6594,170 @@ function wireWorkspaceChrome(): void {
     button.addEventListener("click", toggle);
     heading.addEventListener("dblclick", toggle);
     heading.append(button);
-    const menu = document.createElement("button");
-    menu.type = "button";
-    menu.dataset.focusPanel = panel.dataset.panel!;
-    menu.textContent = heading.childNodes[0]?.textContent ?? panel.dataset.panel!;
-    document.getElementById("window-panel-menu")?.append(menu);
   }
-  for (const [id, label] of [["viewport", "Composition"], ["timeline", "Timeline"]]) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.focusPanel = id!;
-    button.textContent = label!;
-    document.getElementById("window-panel-menu")?.append(button);
+}
+
+/** The dockable panels the Display menu lists, from the page itself so the menu and the dock agree. */
+function dockPanelEntries(): PanelEntry[] {
+  const entries: PanelEntry[] = [];
+  for (const panel of document.querySelectorAll<HTMLElement>(".panel[data-panel]")) {
+    const heading = panel.querySelector<HTMLElement>(":scope > h2, :scope > .panel-title-row h2");
+    if (!heading) continue;
+    entries.push({ id: panel.dataset.panel!, label: heading.childNodes[0]?.textContent?.trim() || panel.dataset.panel! });
   }
+  entries.push({ id: "viewport", label: "Composition" }, { id: "timeline", label: "Timeline" });
+  return entries;
+}
+
+/** Draw the menu bar from the model (11.32): Ross XPression's eight menus, in its order. */
+function drawAppMenus(): void {
+  const bar = document.querySelector<HTMLElement>(".app-menubar");
+  if (!bar) return;
+  renderAppMenus(bar, APP_MENUS, {
+    panels: dockPanelEntries(),
+    loadRecent: async () =>
+      (await shell().invoke<ListedRecent[]>("cmd_recent_projects")).map((r) => ({
+        gpx: r.gpx,
+        label: r.name,
+        detail: r.gpx,
+        missing: !r.exists,
+      })),
+    openRecent: (gpx) => void openRecentProject(gpx),
+  });
+  // The Object Toolbar is shown until the menu hides it.
+  bar.querySelector('[data-native="toggle-object-toolbar"]')?.setAttribute("aria-checked", "true");
+}
+
+/** File > Open Recent: open it as File > Open does, then bring the page up to date. */
+async function openRecentProject(gpx: string): Promise<void> {
+  try {
+    const opened = await shell().invoke<OpenedProject>("cmd_open_project", { path: gpx });
+    log(`Opened project ${opened.name} (${opened.gpx})`, "good");
+    if (afterSwitch(opened) === "continue") await loadProjects(opened.name);
+  } catch (error) {
+    log(`open project refused: ${describe(error)}`, "bad");
+  }
+}
+
+/** The menu's own actions, which are not a click on an existing control. */
+function runNativeMenuAction(item: HTMLElement): void {
+  runNativeAction(item.dataset.native ?? "", item);
+}
+
+/** A native action by name. `item` is the menu item that asked, when one did. */
+function runNativeAction(native: string, item?: HTMLElement): void {
+  switch (native) {
+    case "view-fit":
+      setCamera(FIT);
+      break;
+    case "view-zoom-in":
+      zoomView(ZOOM_STEP);
+      break;
+    case "view-zoom-out":
+      zoomView(1 / ZOOM_STEP);
+      break;
+    case "view-zoom-100": {
+      const { pane, picture } = viewSizes();
+      setCamera(atPercent(camera, 100, fitScale(), pane, picture));
+      break;
+    }
+    case "easy-ease":
+      easeKeys("both");
+      break;
+    case "easy-ease-in":
+      easeKeys("in");
+      break;
+    case "easy-ease-out":
+      easeKeys("out");
+      break;
+    case "delete-keys":
+      deleteKeys();
+      break;
+    case "copy-keys":
+      copyKeys();
+      break;
+    case "paste-keys":
+      pasteKeys();
+      break;
+    case "open-settings":
+      void openSettings();
+      break;
+    case "save":
+      void saveInPlace();
+      break;
+    case "save-next-version":
+      void saveNextVersion();
+      break;
+    case "new-project":
+      void createProject();
+      break;
+    case "open-project":
+      void openProjectDialog();
+      break;
+    case "exit":
+      // The shell refuses by name while a scene has unsaved work; nothing is lost by choosing Exit.
+      void shell()
+        .invoke("cmd_exit")
+        .catch((error: unknown) => log(`exit refused: ${describe(error)}`, "bad"));
+      break;
+    case "toggle-object-toolbar": {
+      const toolbar = document.querySelector<HTMLElement>(".creation-tools");
+      if (!toolbar) break;
+      toolbar.hidden = !toolbar.hidden;
+      item?.setAttribute("aria-checked", String(!toolbar.hidden));
+      break;
+    }
+    case "export-diagnostics-all":
+    case "export-diagnostics-editor": {
+      // Help > Export diagnostic bundle (2.14). The Editor has no live telemetry (user, 18 Nov 2026),
+      // so beside Help Topics Help carries only the diagnostic export.
+      const allModules = native === "export-diagnostics-all";
+      void shell().invoke<void>("cmd_export_diagnostics", { allModules }).then(
+        () => log(allModules ? "Exporting a diagnostic bundle for every module" : "Exporting the Editor's diagnostic bundle"),
+        (error: unknown) => log(`Diagnostic export failed: ${describe(error)}`, "bad"),
+      );
+      break;
+    }
+    case "focus-activity": {
+      const title = document.querySelector<HTMLElement>(".log-title");
+      title?.scrollIntoView({ block: "nearest" });
+      const list = document.getElementById("log");
+      if (list) {
+        list.tabIndex = -1;
+        list.focus({ preventScroll: true });
+      }
+      break;
+    }
+    default: {
+      // Edit > Line up and spread (11.83): `arrange-<command>`.
+      const command = native.replace(/^arrange-/, "");
+      if (isArrangeCommand(command)) void arrange(command);
+    }
+  }
+}
+
+/** Line up or spread the selected items: one batch of position edits, so one undo step. A refusal is shown
+ *  as words in Activity and nothing is sent. */
+async function arrange(command: ArrangeCommand): Promise<void> {
+  const document_ = activeSession(workspace)?.view.document;
+  if (document_ === undefined) {
+    log(`${arrangeWords(command)}: no scene is open`, "bad");
+    return;
+  }
+  const outcome = arrangeEdits(document_, selection, command);
+  if (isRefused(outcome)) {
+    log(`${arrangeWords(command)}: ${outcome.refused}`, "bad");
+    return;
+  }
+  await runEdits(outcome, arrangeLabel(command, outcome.length), "viewport");
 }
 
 function setProjectOptions(next: readonly string[], preferred?: string): void {
   projects = [...next];
-  ui.projectSelect.replaceChildren();
-  for (const project of projects) {
-    const option = document.createElement("option");
-    option.value = project;
-    option.textContent = project;
-    ui.projectSelect.append(option);
-  }
   currentProject =
     (preferred && projects.includes(preferred) ? preferred : undefined) ??
     (currentProject && projects.includes(currentProject) ? currentProject : undefined) ??
     projects[0];
-  ui.projectSelect.disabled = currentProject === undefined;
-  if (currentProject !== undefined) ui.projectSelect.value = currentProject;
 }
 
 async function refreshProjectCatalog(): Promise<void> {
@@ -4975,8 +6940,477 @@ async function applyPendingIdentity(): Promise<boolean> {
   return outcome !== undefined;
 }
 
+/** File > Open project: the Start dialog's home view; the page is brought up to date when one opens. */
+async function openProjectDialog(): Promise<void> {
+  const opened = await showStart({ required: false, view: "home" });
+  if (opened) await loadProjects(opened.name);
+}
+
 async function createProject(): Promise<void> {
-  showManagerCreate("container");
+  const opened = await showStart({ required: false, view: "new" });
+  // With no scene open the page is not reloaded, so its project list is brought up to date here.
+  if (opened) await loadProjects(opened.name);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Start (11.43): a project is created at a path the user chooses, or opened from its .gpx, before
+// any work starts, as in XPression, Viz and After Effects. The shell decides what is allowed (a
+// name, a folder that exists, unsaved work in the way) and its refusal is shown as it is.
+
+let openProject: OpenedProject | undefined;
+
+function applyOpenedProject(opened: OpenedProject | undefined): void {
+  openProject = opened;
+  ui.projectSummary.textContent = projectSummary(opened);
+  ui.projectClose.disabled = opened === undefined;
+  ui.projectSaveAs.disabled = opened === undefined;
+}
+
+/** After a switch the scenes of the old project are closed in the shell; start the page afresh. */
+function afterSwitch(opened: OpenedProject): "reload" | "continue" {
+  applyOpenedProject(opened);
+  if (opened.closedSessions.length === 0) return "continue";
+  window.location.reload();
+  return "reload";
+}
+
+async function recentAndDefaults(): Promise<{ recent: ListedRecent[]; defaults: DefaultProject[] }> {
+  const [recent, defaults] = await Promise.all([
+    shell().invoke<ListedRecent[]>("cmd_recent_projects"),
+    shell().invoke<DefaultProject[]>("cmd_default_location_projects").catch(() => [] as DefaultProject[]),
+  ]);
+  return { recent, defaults };
+}
+
+async function renderStartList(): Promise<void> {
+  ui.startList.replaceChildren();
+  let rows: StartRow[];
+  try {
+    const { recent, defaults } = await recentAndDefaults();
+    rows = startRows(recent, defaults, Date.now());
+  } catch (error) {
+    ui.startError.textContent = describe(error);
+    rows = [];
+  }
+  ui.startEmpty.hidden = rows.length > 0;
+  for (const row of rows) {
+    const item = document.createElement("li");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "start-row";
+    open.disabled = row.open === undefined;
+    const title = document.createElement("span");
+    title.className = "start-row-title";
+    const name = document.createElement("span");
+    name.textContent = row.title;
+    const when = document.createElement("span");
+    when.className = "start-row-when";
+    when.textContent = row.missing ? "missing" : row.when;
+    title.append(name, when);
+    const path = document.createElement("span");
+    path.className = "start-row-path";
+    path.textContent = row.detail;
+    open.append(title, path);
+    if (row.missing) {
+      const note = document.createElement("span");
+      note.className = "start-row-note";
+      note.textContent = "Its .gpx is no longer there. Forget it, or restore the folder.";
+      open.append(note);
+    }
+    const target = row.open;
+    if (target !== undefined) {
+      open.addEventListener("click", () => {
+        void openFromStart(
+          target.kind === "gpx"
+            ? () => shell().invoke<OpenedProject>("cmd_open_project", { path: target.gpx })
+            : () => shell().invoke<OpenedProject>("cmd_open_project_folder", { folder: target.folder }),
+        );
+      });
+    }
+    item.append(open);
+    if (row.forgettable) {
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "start-forget";
+      forget.textContent = "Forget";
+      forget.title = "Take it off the list. The project itself is not touched.";
+      forget.addEventListener("click", () => {
+        void shell()
+          .invoke("cmd_forget_recent_project", { gpx: row.detail })
+          .then(renderStartList, (error) => { ui.startError.textContent = describe(error); });
+      });
+      item.append(forget);
+    }
+    ui.startList.append(item);
+  }
+}
+
+function setStartView(view: "home" | "new"): void {
+  ui.startHome.hidden = view !== "home";
+  ui.startForm.hidden = view !== "new";
+  ui.startError.textContent = "";
+  ui.startNewError.textContent = "";
+  if (view === "new") {
+    ui.startName.focus();
+    updateStartPreview();
+  } else {
+    void renderStartList();
+  }
+}
+
+/** The form is New project, or Save project as (the same name and folder, for a copy of the open project). */
+type StartMode = "new" | "save-as";
+let startMode: StartMode = "new";
+
+function applyStartMode(mode: StartMode): void {
+  startMode = mode;
+  ui.startFormTitle.textContent = mode === "save-as" ? "Save project as" : "New project";
+  // A copy keeps the original's depth and space; they are not chosen again.
+  ui.startDepthField.hidden = mode === "save-as";
+  ui.startCreate.textContent = mode === "save-as" ? "Save a copy" : "Create";
+  ui.startBack.textContent = mode === "save-as" ? "Cancel" : "Back";
+}
+
+function updateStartPreview(): void {
+  const parent = ui.startParent.value || undefined;
+  const target = previewGpx(parent, ui.startName.value);
+  if (target === undefined) {
+    ui.startPreview.textContent = "Choose a name and a folder.";
+  } else if (startMode === "save-as" && openProject !== undefined) {
+    ui.startPreview.textContent = `Will be saved as ${target} (${renderingLabel(openProject)}, as ${openProject.name}). ${openProject.name} stays as it was last saved.`;
+  } else {
+    ui.startPreview.textContent = `Will be saved as ${target}`;
+  }
+  ui.startCreate.disabled = !canCreate(parent, ui.startName.value);
+}
+
+let startSettled: ((opened: OpenedProject | undefined) => void) | undefined;
+
+/**
+ * Run an open or create call from the Start dialog; on success the dialog closes. A copy
+ * (`reload`) starts the page afresh, whether or not scenes were open: the project it shows changed.
+ */
+async function openFromStart(
+  call: () => Promise<OpenedProject>,
+  options: { verb?: string; reload?: boolean } = {},
+): Promise<void> {
+  ui.startError.textContent = "";
+  ui.startNewError.textContent = "";
+  try {
+    const opened = await call();
+    log(`${options.verb ?? "Opened project"} ${opened.name} (${opened.gpx})`, "good");
+    ui.startDialog.close();
+    if (options.reload) {
+      applyOpenedProject(opened);
+      window.location.reload();
+      return;
+    }
+    if (afterSwitch(opened) === "continue") startSettled?.(opened);
+  } catch (error) {
+    const text = describe(error);
+    ui.startError.textContent = text;
+    ui.startNewError.textContent = text;
+    log(text, "bad");
+  }
+}
+
+/**
+ * Show Start. `required` is the first run: it cannot be dismissed until a project is open. Resolves
+ * with the project that was opened or created, or `undefined` if the dialog was dismissed.
+ */
+function showStart(options: {
+  required: boolean;
+  view?: "home" | "new";
+  mode?: StartMode;
+}): Promise<OpenedProject | undefined> {
+  ui.startDismiss.hidden = options.required;
+  applyStartMode(options.mode ?? "new");
+  if (options.mode === "save-as" && openProject !== undefined) {
+    // Beside the original, with a name that is not it.
+    ui.startParent.value = openProject.root;
+    ui.startName.value = suggestCopyName(openProject.name);
+  } else {
+    ui.startParent.value = "";
+    ui.startName.value = "";
+  }
+  setStartView(options.view ?? "home");
+  return new Promise((resolve) => {
+    startSettled = (opened) => {
+      startSettled = undefined;
+      resolve(opened);
+    };
+    ui.startDialog.returnValue = "";
+    const onClose = (): void => {
+      ui.startDialog.removeEventListener("close", onClose);
+      // Closing without a project open (dismissed) settles with nothing.
+      startSettled?.(undefined);
+    };
+    ui.startDialog.addEventListener("close", onClose);
+    if (!ui.startDialog.open) ui.startDialog.showModal();
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Settings (11.81, over the settings service 2.28): one window for the user's and this computer's
+// settings. Each change is sent as it is made; the shell checks it and a refusal is shown as written.
+
+interface SettingsSnapshot {
+  user: UserSettings;
+  machine: MachineSettings;
+  revision: number;
+}
+
+let settingsSnapshot: SettingsSnapshot | undefined;
+
+/** The Pen and path settings in force (11.116): read from the settings service, the spec's defaults until then. */
+const editorPen = { angle: 15, pick: PICK_RADIUS, doubleClickEnds: true, snap: true, fit: 1 };
+
+function applyPenSettings(user: UserSettings | undefined): void {
+  if (user === undefined) return;
+  editorPen.angle = user.penAngleStep;
+  editorPen.pick = user.penPickRadius;
+  editorPen.doubleClickEnds = user.penDoubleClickEnds;
+  editorPen.snap = user.penSnap;
+  editorPen.fit = user.penFitTolerance;
+}
+
+async function readSettings(): Promise<SettingsSnapshot | undefined> {
+  try {
+    settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_get");
+    applyPenSettings(settingsSnapshot.user);
+  } catch (error) {
+    log(`settings unavailable: ${describe(error)}`, "bad");
+  }
+  return settingsSnapshot;
+}
+
+async function setSetting(scope: SettingsScope, key: string, value: string | number | boolean): Promise<void> {
+  settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_set", { scope, key, value });
+  applyPenSettings(settingsSnapshot.user);
+}
+
+/** The folder the last file window was in, so the next one opens there (the `lastUsedFolder` setting). */
+async function lastFolder(): Promise<string | undefined> {
+  const settings = settingsSnapshot ?? (await readSettings());
+  const folder = settings?.user.lastUsedFolder;
+  return folder ? folder : undefined;
+}
+
+/** Remember where a file window was left; a failure to remember is not worth stopping for. */
+async function rememberFolder(folder: string): Promise<void> {
+  if (folder === "" || folder === settingsSnapshot?.user.lastUsedFolder) return;
+  try {
+    await setSetting("user", "lastUsedFolder", folder);
+  } catch {
+    // The setting is a convenience.
+  }
+}
+
+function settingControl(scope: SettingsScope, key: string, spec: FieldSpec, current: string | number | boolean): HTMLElement {
+  const id = `setting-${scope}-${key}`;
+  let control: HTMLInputElement | HTMLSelectElement;
+  if (spec.kind === "choice") {
+    const select = document.createElement("select");
+    for (const [value, words] of spec.options ?? []) select.append(new Option(words, value));
+    select.value = String(current);
+    control = select;
+  } else {
+    const input = document.createElement("input");
+    if (spec.kind === "toggle") {
+      input.type = "checkbox";
+      input.checked = current === true;
+    } else {
+      input.type = "text";
+      input.value = String(current);
+      if (spec.kind === "number") input.inputMode = "numeric";
+    }
+    control = input;
+  }
+  control.id = id;
+  control.addEventListener("change", () => void commitSetting(scope, key, spec, control));
+  return control;
+}
+
+async function commitSetting(scope: SettingsScope, key: string, spec: FieldSpec, control: HTMLInputElement | HTMLSelectElement): Promise<void> {
+  ui.settingsError.textContent = "";
+  const raw = control instanceof HTMLInputElement && control.type === "checkbox" ? control.checked : control.value;
+  const parsed = toValue(spec, raw);
+  if (!parsed.ok) {
+    ui.settingsError.textContent = `${spec.label}: ${parsed.why}`;
+    await renderSettings();
+    return;
+  }
+  try {
+    await setSetting(scope, key, parsed.value);
+    log(`Setting ${spec.label} saved`, "good");
+  } catch (error) {
+    ui.settingsError.textContent = `${spec.label}: ${describe(error)}`;
+    log(`setting refused: ${describe(error)}`, "bad");
+    await renderSettings();
+  }
+}
+
+type SettingValues = Record<string, string | number | boolean>;
+
+async function renderSettings(): Promise<void> {
+  const settings = await readSettings();
+  ui.settingsBody.replaceChildren();
+  if (!settings) {
+    ui.settingsError.textContent = "Settings could not be read. The reason is in the Activity log.";
+    return;
+  }
+  const sections: [SettingsScope, string, string, Record<string, FieldSpec>, SettingValues][] = [
+    ["user", "Yours", "Follows you to another computer.", USER_FIELDS, settings.user as unknown as SettingValues],
+    ["machine", "This computer", "Stays on this computer.", MACHINE_FIELDS, settings.machine as unknown as SettingValues],
+  ];
+  for (const [scope, title, note, fields, values] of sections) {
+    const section = document.createElement("section");
+    section.className = "settings-section";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const sub = document.createElement("span");
+    sub.className = "settings-note";
+    sub.textContent = note;
+    heading.append(sub);
+    section.append(heading);
+    for (const [key, spec] of Object.entries(fields)) {
+      const row = document.createElement("div");
+      row.className = "settings-row";
+      const label = document.createElement("label");
+      label.htmlFor = `setting-${scope}-${key}`;
+      label.textContent = spec.label;
+      const control = settingControl(scope, key, spec, values[key] ?? "");
+      const help = document.createElement("p");
+      help.className = "settings-help";
+      help.textContent = `${spec.help} ${usageLine(spec)}`;
+      row.append(label, control, help);
+      section.append(row);
+    }
+    ui.settingsBody.append(section);
+  }
+}
+
+async function openSettings(): Promise<void> {
+  ui.settingsError.textContent = "";
+  await renderSettings();
+  if (!ui.settingsDialog.open) ui.settingsDialog.showModal();
+}
+
+async function resetSettings(scope: SettingsScope): Promise<void> {
+  try {
+    settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_reset", { scope, key: null });
+    log(scope === "user" ? "Your settings were put back to their defaults" : "This computer's settings were put back to their defaults", "good");
+    await renderSettings();
+  } catch (error) {
+    ui.settingsError.textContent = describe(error);
+  }
+}
+
+/** What the Editor does at start (the `startup` setting): the last project, if it is still there. */
+async function reopenLastProject(): Promise<OpenedProject | undefined> {
+  const settings = await readSettings();
+  if (settings?.user.startup !== "reopenLast") return undefined;
+  try {
+    const recent = await shell().invoke<ListedRecent[]>("cmd_recent_projects");
+    const last = recent.find((r) => r.exists);
+    if (!last) return undefined;
+    const opened = await shell().invoke<OpenedProject>("cmd_open_project", { path: last.gpx });
+    log(`Opened the last project, ${opened.name}, as your setting says`, "good");
+    return opened;
+  } catch (error) {
+    log(`the last project could not be opened: ${describe(error)}`, "bad");
+    return undefined;
+  }
+}
+
+async function chooseSaveFolder(): Promise<void> {
+  const defaultPath = await lastFolder();
+  const picked = await openFileDialog({
+    directory: true,
+    multiple: false,
+    title: "Choose where to save the project",
+    ...(defaultPath !== undefined ? { defaultPath } : {}),
+  });
+  if (typeof picked === "string") {
+    ui.startParent.value = picked;
+    updateStartPreview();
+    void rememberFolder(picked);
+  }
+}
+
+async function chooseProjectFile(): Promise<void> {
+  const defaultPath = await lastFolder();
+  const picked = await openFileDialog({
+    multiple: false,
+    title: "Open project",
+    ...(defaultPath !== undefined ? { defaultPath } : {}),
+    filters: [{ name: "GrapiX project", extensions: ["gpx"] }],
+  });
+  if (typeof picked === "string") {
+    await openFromStart(() => shell().invoke<OpenedProject>("cmd_open_project", { path: picked }));
+  }
+}
+
+/**
+ * File > Save project as: a copy of the open project under a new name and folder, carrying the
+ * scenes' unsaved work; the original stays as it was last saved. The shell refuses by name (a name
+ * that is taken, a folder inside the project, a scene with unsaved work stored nowhere in it).
+ */
+async function saveProjectAs(): Promise<void> {
+  if (openProject === undefined) {
+    log("save project as refused: no project is open", "bad");
+    return;
+  }
+  await showStart({ required: false, view: "new", mode: "save-as" });
+}
+
+async function closeProject(): Promise<void> {
+  try {
+    await shell().invoke("cmd_close_project");
+  } catch (error) {
+    log(`close project refused: ${describe(error)}`, "bad");
+    return;
+  }
+  applyOpenedProject(undefined);
+  window.location.reload();
+}
+
+function wireStart(): void {
+  ui.startNew.addEventListener("click", () => setStartView("new"));
+  ui.startOpen.addEventListener("click", () => void chooseProjectFile());
+  ui.startBack.addEventListener("click", () => {
+    // New project goes back to Start; Save as has no Start to go back to, so it cancels.
+    if (startMode === "save-as") ui.startDialog.close();
+    else setStartView("home");
+  });
+  ui.startChoose.addEventListener("click", () => void chooseSaveFolder());
+  ui.startName.addEventListener("input", updateStartPreview);
+  ui.startDismiss.addEventListener("click", () => ui.startDialog.close());
+  ui.startForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const parent = ui.startParent.value;
+    const name = ui.startName.value.trim();
+    if (startMode === "save-as") {
+      void openFromStart(() => shell().invoke<OpenedProject>("cmd_save_project_as", { parent, name }), {
+        verb: "Saved project as",
+        reload: true,
+      });
+      return;
+    }
+    void openFromStart(() =>
+      shell().invoke<OpenedProject>("cmd_new_project", { parent, name, colorDepth: ui.startDepth.value }),
+    );
+  });
+  // Until a project is open, Escape does not dismiss Start: there is nothing to go back to.
+  ui.startDialog.addEventListener("cancel", (event) => {
+    if (openProject === undefined) event.preventDefault();
+  });
+  ui.projectClose.addEventListener("click", () => void closeProject());
+  ui.settingsResetUser.addEventListener("click", () => void resetSettings("user"));
+  ui.historyOpen.addEventListener("click", openHistory);
+  ui.historyClose.addEventListener("click", () => ui.historyDialog.close());
+  ui.settingsResetMachine.addEventListener("click", () => void resetSettings("machine"));
+  ui.projectSaveAs.addEventListener("click", () => void saveProjectAs());
 }
 
 let managerCreateKind: "container" | "graphic" = "container";
@@ -5100,20 +7534,6 @@ async function submitManagerCreate(): Promise<void> {
   }
 }
 
-async function selectProject(): Promise<void> {
-  const project = ui.projectSelect.value;
-  if (!project || project === currentProject) return;
-  currentProject = project;
-  ui.graphicSearch.value = "";
-  projectCatalog = undefined;
-  renderProjectManager();
-  try {
-    await refreshProjectCatalog();
-  } catch (error) {
-    log(describe(error), "bad");
-  }
-}
-
 async function saveProjectScene(): Promise<void> {
   const session = activeSession(workspace);
   if (!scene || !session) {
@@ -5141,6 +7561,71 @@ async function saveProjectScene(): Promise<void> {
     `${boundHere ? "updated" : "created"} ${project}/${id}`,
   );
   if (!saved) return;
+  try {
+    await refreshProjectCatalog();
+  } catch (error) {
+    log(describe(error), "bad");
+  }
+}
+
+/** File > Save and Ctrl+S (11.30): write the open scene where it already lives, and never make a version.
+ *  A scene stored in a project updates that stored copy; one saved to a file rewrites the file; a scene
+ *  saved nowhere is saved for the first time (into the open project, or to a file the author names). A
+ *  refusal is shown by name and the unsaved mark stays. */
+async function saveInPlace(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
+    log("Save: no scene is open", "bad");
+    return;
+  }
+  const origin = session.view.origin;
+  switch (saveRoute(saveState(session.view.origin !== undefined))) {
+    case "stored": {
+      if (origin === undefined || !(await applyPendingIdentity())) return;
+      const saved = await runCommand(
+        { command: "saveScene", session: session.key, to: { to: "origin" } },
+        { label: `Saved ${origin.project}/${origin.sceneId}`, refusal: "Save" },
+      );
+      if (saved) await refreshCatalogAfterSave();
+      return;
+    }
+    case "project":
+      await saveProjectScene();
+      return;
+    case "file":
+    case "dialog":
+      await saveScene();
+      return;
+  }
+}
+
+function saveState(stored: boolean): SaveState {
+  return { stored, file: Boolean(scenePath), project: currentProject !== undefined };
+}
+
+/** File > Save as next version and Ctrl+Shift+S (11.30): the next numbered copy of the scene, beside the
+ *  current one. The version it came from is not written to; the session continues in the new one. A scene
+ *  saved nowhere has no version to number from, so this is its first save. */
+async function saveNextVersion(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
+    log("Save as next version: no scene is open", "bad");
+    return;
+  }
+  if (isFirstSave(saveState(session.view.origin !== undefined))) {
+    log("This scene has not been saved yet, so this is its first save, not a new version");
+    await saveInPlace();
+    return;
+  }
+  if (!(await applyPendingIdentity())) return;
+  const saved = await runCommand(
+    { command: "saveScene", session: session.key, to: { to: "nextVersion" } },
+    { label: versionLabel, refusal: "Save as next version" },
+  );
+  if (saved) await refreshCatalogAfterSave();
+}
+
+async function refreshCatalogAfterSave(): Promise<void> {
   try {
     await refreshProjectCatalog();
   } catch (error) {
@@ -5498,10 +7983,8 @@ async function start(): Promise<void> {
   ui.openScene.addEventListener("click", () => void openScene());
   ui.importSvg.addEventListener("click", () => void importSvg());
   ui.saveScene.addEventListener("click", () => void saveScene());
-  ui.projectCreate.addEventListener("click", () => void createProject());
   ui.projectRefresh.addEventListener("click", () => void loadProjects(currentProject));
   ui.projectSaveScene.addEventListener("click", () => void saveProjectScene());
-  ui.projectSelect.addEventListener("change", () => void selectProject());
   ui.graphicCreate.addEventListener("click", () => showManagerCreate("graphic"));
   ui.graphicSearch.addEventListener("input", renderProjectManager);
   ui.managerForm.addEventListener("submit", (event) => { event.preventDefault(); void submitManagerCreate(); });
@@ -5512,6 +7995,14 @@ async function start(): Promise<void> {
     if (!ui.managerCustomRate.hidden) ui.managerRateNum.focus();
   });
   ui.canvasRate.addEventListener("change", () => void changeCanvasRate());
+  ui.viewportView.addEventListener("change", () => {
+    try {
+      localStorage.setItem(VIEW_KEY, ui.viewportView.value);
+    } catch {
+      /* the choice then lasts until reload */
+    }
+    applyViewportSource();
+  });
   ui.timelineRulerTicks.addEventListener("pointerdown", onRulerPointerDown);
   ui.timelinePlayhead.addEventListener("pointerdown", onRulerPointerDown);
   ui.timelineRulerTicks.addEventListener("pointermove", onRulerPointerMove);
@@ -5519,17 +8010,6 @@ async function start(): Promise<void> {
   ui.timelineRulerTicks.addEventListener("pointercancel", onRulerPointerUp);
   ui.timelinePlayhead.addEventListener("keydown", onPlayheadKeyDown);
   document.getElementById("manager-create-cancel")!.addEventListener("click", () => ui.managerDialog.close());
-  // Help ▸ Export diagnostic bundle (2.14). The Editor has no live telemetry:
-  // it has nothing to do with live broadcast (user, 18 Nov 2026), so Help carries
-  // only the diagnostic export, in the page's own menu beside Window.
-  for (const [id, allModules] of [["export-diagnostics-all", true], ["export-diagnostics-editor", false]] as const) {
-    document.getElementById(id)!.addEventListener("click", () => {
-      void shell().invoke<void>("cmd_export_diagnostics", { allModules }).then(
-        () => log(allModules ? "Exporting a diagnostic bundle for every module" : "Exporting the Editor's diagnostic bundle"),
-        (error: unknown) => log(`Diagnostic export failed: ${describe(error)}`, "bad"),
-      );
-    });
-  }
   ui.sceneManagerMount.addEventListener("click", onSceneManagerClick);
   ui.sceneViewToggle.addEventListener("click", () => setSceneView(sceneView === "list" ? "thumbnails" : "list"));
   ui.sceneManagerMount.addEventListener("contextmenu", (event) => {
@@ -5594,6 +8074,53 @@ async function start(): Promise<void> {
   ui.objectDuplicate.addEventListener("click", () => void duplicateObject());
   ui.objectRename.addEventListener("click", () => void renameObject());
   ui.objectDelete.addEventListener("click", () => void deleteObject());
+  ui.objectCopySvg.addEventListener("click", () => {
+    const object = scene?.objects.find((candidate) => candidate.id === selection[0]);
+    if (!object || selection.length !== 1 || object.type !== "shape") {
+      log("Copy SVG: select one shape to copy its path as SVG path data.", "bad");
+      return;
+    }
+    void copySvg(shapeSvgPath(object), `${object.name}`);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && matteWhip !== undefined) {
+      endMatteWhip();
+      log("Pick whip: cancelled; the matte is as it was.");
+    }
+    if (event.key === "Escape" && featherArm !== undefined) {
+      featherArm = undefined;
+      document.body.classList.remove("matte-whip");
+      log("Feather point: cancelled.");
+    }
+  });
+  ui.guideAdd.addEventListener("click", () => guideEdit("add"));
+  ui.guideMove.addEventListener("click", () => guideEdit("move"));
+  ui.guideRemove.addEventListener("click", () => guideEdit("remove"));
+  ui.guideShow.addEventListener("change", () => {
+    guidesShown = ui.guideShow.checked;
+    renderOverlayLayer();
+  });
+  ui.pathKeying.addEventListener("change", () => {
+    pathKeying = ui.pathKeying.checked;
+  });
+  ui.pathKeySet.addEventListener("click", () => void keyPathAtPlayhead());
+  ui.pathKeyRemove.addEventListener("click", () => void removePathKeyAtPlayhead());
+  ui.pathUnlink.addEventListener("click", () => void unlinkEditedPath());
+  ui.subpathRemove.addEventListener("click", () => void removeSelectedSubpath());
+  for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-vertex-kind]")) {
+    button.addEventListener("click", () => setSelectedVertexKind(button.dataset.vertexKind as VertexKind));
+  }
+  ui.autoTension.addEventListener("change", () => setPathAutoTension(Number(ui.autoTension.value)));
+  ui.objectJoin.addEventListener("click", () => {
+    if (!scene) return;
+    const outcome = joinEdits(scene, selection);
+    if (isRefused(outcome)) {
+      log(`Join: ${outcome.refused}`, "bad");
+      return;
+    }
+    const keep = selection[0]!;
+    void runEdits(outcome, { label: "Joined two paths", select: () => [keep] }, "viewport");
+  });
   ui.fontMount.addEventListener("click", onFontManagerClick);
   ui.fontMount.addEventListener("change", onFontManagerChange);
   ui.fontMount.addEventListener("keydown", (event) => {
@@ -5672,7 +8199,6 @@ async function start(): Promise<void> {
       if (scene) renderTimeline(scene, false);
     },
   );
-  document.addEventListener("keydown", onTimelineKeyDown);
   window.addEventListener("resize", () => {
     applyLayoutSizes();
     if (scene) renderTimeline(scene);
@@ -5689,10 +8215,21 @@ async function start(): Promise<void> {
     viewport?.render();
     log(`display scale changed to ${Math.round(ratio * 100)}%`);
   });
+  wirePivotPanel();
+  ui.canvas.closest<HTMLElement>(".viewport-stage")?.addEventListener("wheel", onViewWheel, { passive: false });
+  syncCamera();
+  ui.overlay.addEventListener("dblclick", (event) => {
+    // The click that closed a path has already made it; the double click after it has nothing left to finish.
+    if (activeTool === "pen" && editorPen.doubleClickEnds && event.timeStamp - penFinishedAt >= 500) finishPen();
+    if (activeTool === "path") pathDoubleClick(event);
+  });
+  ui.overlay.addEventListener("keyup", (event) => {
+    if (event.key === " " && penSpace) penSpace = false;
+  });
   ui.undo.addEventListener("click", () => void undo());
   ui.redo.addEventListener("click", () => void redo());
   ui.previewPlay.addEventListener("click", () => togglePreview());
-  document.addEventListener("keydown", onPreviewShortcut);
+  document.addEventListener("keydown", onCommandKey);
   ui.autoKey.addEventListener("change", () => {
     autoKey = ui.autoKey.checked;
     log(`Auto-Key ${autoKey ? "on" : "off"}`);
@@ -5741,32 +8278,26 @@ async function start(): Promise<void> {
       event.stopPropagation();
       return;
     }
-    // Undo/redo, but never steal a text field's own edit history.
-    const target = event.target;
-    const editing =
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLSelectElement;
-    if (editing || !(event.ctrlKey || event.metaKey) || animationBusy) return;
-    const key = event.key.toLowerCase();
-    if (key === "z" && !event.shiftKey) {
-      event.preventDefault();
-      void undo(focusedPanelModule());
-    } else if (key === "y" || (key === "z" && event.shiftKey)) {
-      event.preventDefault();
-      void redo(focusedPanelModule());
-    }
   });
   ui.overlay.addEventListener("pointerdown", onOverlayPointerDown);
   ui.overlay.addEventListener("pointermove", onOverlayPointerMove);
   ui.overlay.addEventListener("pointerup", (event) => finishOverlayPointer(event, false));
   ui.overlay.addEventListener("pointercancel", (event) => finishOverlayPointer(event, true));
+  ui.penCreates.addEventListener("change", () => {
+    penCreates = ui.penCreates.value as PenCreates;
+    showPenCreates();
+  });
   ui.overlay.addEventListener("keydown", (event) => {
+    if (activeTool === "pen" && penKey(event)) return;
+    if (isPathTool(activeTool) && pathKey(event)) return;
     if (event.key !== "Escape") return;
+    const dropped = overlayDrag?.tool !== undefined || toolPreview !== null;
     overlayDrag = undefined;
     marquee = undefined;
     guides = [];
-    setSelection([]);
+    dropToolPreview();
+    // Escape in the middle of a drag drops the drag and keeps the selection; otherwise it clears it.
+    if (!dropped) setSelection([]);
   });
 
   // 11.2: measure WebGPU once at startup and say what it means for the WASM
@@ -5791,7 +8322,21 @@ async function start(): Promise<void> {
   }
   await loadMotionLibrary();
   await loadObjectKinds();
-  await loadProjects();
+  wireStart();
+  // 11.43: no work before a project. The shell may already have one open (a reload); if not, Start
+  // asks for one and cannot be dismissed.
+  const current = await shell().invoke<OpenedProject | null>("cmd_current_project");
+  if (current) {
+    applyOpenedProject(current);
+  } else {
+    applyOpenedProject(undefined);
+    // The `startup` setting may say to open the last project instead of showing Start.
+    const reopened = await reopenLastProject();
+    if (reopened) applyOpenedProject(reopened);
+    const opened = reopened ?? (await showStart({ required: true }));
+    if (opened === undefined) return;
+  }
+  await loadProjects(openProject?.name);
   applyStoredLayout();
   wireDocking();
 

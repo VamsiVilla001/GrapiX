@@ -678,3 +678,173 @@ fn unknown_and_invalid_effects_refuse_by_name() {
         "{refused:?}"
     );
 }
+
+/// The effect stack the depth gates use: one exposure change on every
+/// effect layer, so a result is rounded at the effect and again at the blend.
+fn depth_stack(exposure: f64) -> Value {
+    json!([effect_json(
+        "e",
+        Effect::Exposure(Exposure {
+            exposure,
+            ..Default::default()
+        })
+    )])
+}
+
+fn depth_document(
+    name: &str,
+    depth: gx_contracts::color::ColorDepth,
+    exposure: f64,
+) -> SceneDocument {
+    let mut doc = document(
+        name,
+        WorkingColorSpace::Srgb,
+        objects(&depth_stack(exposure)),
+        vec![],
+    )
+    .unwrap();
+    doc.color_depth = depth;
+    doc
+}
+
+/// Colour depth: at 8 and 16 bits every working component the engine
+/// produces is a whole level, at 32 it is not, and the depths agree to within
+/// the rounding they apply. A darkening exposure keeps every value inside 0-1
+/// so the comparison measures rounding alone; a brightening one shows the
+/// difference After Effects has between depths: 32-bit keeps a value above 1
+/// and composites it, 8 and 16 bit hold it to 1 first.
+#[test]
+fn a_project_colour_depth_stores_whole_levels_on_the_cpu_reference() {
+    use crate::rasterise::RasterSurface;
+    use gx_contracts::color::ColorDepth;
+    let ticks = Arc::new(AtomicU64::new(0));
+    let mut engine = Engine::new(ticks, Locality::CoLocated);
+    let mut working = |depth: ColorDepth, exposure: f64| -> RasterSurface {
+        let name = format!("depth-cpu-{}-{exposure}", depth.as_str());
+        let pin = publish(&mut engine, depth_document(&name, depth, exposure)).unwrap();
+        engine
+            .prepared_scene(&pin.0, pin.1)
+            .unwrap()
+            .working_at(0)
+            .unwrap()
+    };
+    let values = |s: &RasterSurface| -> Vec<f32> {
+        s.pixels()
+            .iter()
+            .flat_map(|p| [p.r, p.g, p.b, p.a])
+            .collect()
+    };
+    let e8 = working(ColorDepth::Bits8, -0.37);
+    let e16 = working(ColorDepth::Bits16, -0.37);
+    let e32 = working(ColorDepth::Bits32, -0.37);
+    assert!(values(&e8)
+        .iter()
+        .all(|v| ColorDepth::Bits8.store(*v) == *v));
+    assert!(values(&e16)
+        .iter()
+        .all(|v| ColorDepth::Bits16.store(*v) == *v));
+    assert!(
+        values(&e32)
+            .iter()
+            .any(|v| ColorDepth::Bits16.store(*v) != *v),
+        "32-bit keeps values between 16-bit levels"
+    );
+    let delta = |a: &RasterSurface, b: &RasterSurface| {
+        values(a)
+            .iter()
+            .zip(values(b))
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0_f32, f32::max)
+    };
+    // Rounding twice (effect, then blend) moves a value by about a level at
+    // 8 bit and a small fraction of one at 16.
+    assert!(delta(&e8, &e32) <= 2.0 / 255.0, "{}", delta(&e8, &e32));
+    assert!(delta(&e16, &e32) <= 2.0 / 65535.0, "{}", delta(&e16, &e32));
+    assert!(
+        delta(&e8, &e32) > 1.0 / 255.0 / 8.0,
+        "8-bit must differ from float, or nothing was rounded"
+    );
+    let peak = |s: &RasterSurface| values(s).iter().copied().fold(0.0_f32, f32::max);
+    assert!(peak(&working(ColorDepth::Bits32, 0.37)) > 1.0);
+    assert!(peak(&working(ColorDepth::Bits8, 0.37)) <= 1.0);
+    assert!(peak(&working(ColorDepth::Bits16, 0.37)) <= 1.0);
+}
+
+/// Colour depth on the GPU: the compositor and the effect passes round as the
+/// CPU reference does, so an 8- or 16-bit project's Program frame is the
+/// reference frame, and every GPU working component is a whole level.
+#[test]
+#[ignore = "requires hardware GPU; colour depth matches the CPU reference"]
+fn a_project_colour_depth_matches_its_cpu_reference_on_the_gpu() {
+    use gx_contracts::color::ColorDepth;
+    let (mut engine, ticks) = hardware_engine();
+    let expected = dispatches(&depth_stack(-0.37), 3);
+    for depth in [ColorDepth::Bits8, ColorDepth::Bits16, ColorDepth::Bits32] {
+        for exposure in [-0.37, 0.37] {
+            let name = format!("gpu-depth-{}-{exposure}", depth.as_str());
+            let pin = publish(&mut engine, depth_document(&name, depth, exposure)).unwrap();
+            take(&mut engine, &pin);
+            let row = check_frame(&mut engine, &ticks, &pin, 0, expected);
+            let key = (pin.0.clone(), pin.1);
+            let reference = engine
+                .prepared_scene(&pin.0, pin.1)
+                .unwrap()
+                .working_at(0)
+                .unwrap();
+            let (_, _, gpu_working) = engine
+                .gpu_prepared
+                .get_mut(&key)
+                .unwrap()
+                .render_with_working(0)
+                .unwrap();
+            if let Some(levels) = depth.levels() {
+                // The GPU draws its sources at half precision, so a value
+                // that sits near a rounding step can land on the other side
+                // of it: at most one level apart, and only where it does.
+                // (At 32 bits the existing 4.4 tie-aware gate applies.)
+                let step = 1.0 / levels as f32;
+                let (mut worst, mut differing, mut total) = (0.0_f32, 0usize, 0usize);
+                for (g, c) in gpu_working.pixels.iter().zip(reference.pixels()) {
+                    for (g, c) in [(g.r, c.r), (g.g, c.g), (g.b, c.b), (g.a, c.a)] {
+                        let d = (g - c).abs();
+                        worst = worst.max(d);
+                        differing += usize::from(d > step * 0.01);
+                        total += 1;
+                    }
+                }
+                assert!(
+                    worst <= step * 1.01,
+                    "{name}: {worst} is more than one level"
+                );
+                assert!(
+                    differing * 4 <= total,
+                    "{name}: {differing} of {total} components moved a level"
+                );
+                eprintln!("{name}: worst {worst}, {differing} of {total} components one level off");
+            } else {
+                let worst = gpu_working
+                    .pixels
+                    .iter()
+                    .zip(reference.pixels())
+                    .flat_map(|(g, c)| [(g.r, c.r), (g.g, c.g), (g.b, c.b), (g.a, c.a)])
+                    .map(|(g, c)| (g - c).abs())
+                    .fold(0.0_f32, f32::max);
+                assert!(worst < 1e-4, "{name}: working delta {worst}");
+                assert_eq!(row["pass"], json!(true), "{name}: {row}");
+            }
+            if depth.is_integer() {
+                let off_grid = gpu_working
+                    .pixels
+                    .iter()
+                    .flat_map(|p| [p.r, p.g, p.b, p.a])
+                    .filter(|v| {
+                        // A whole level, to the GPU's division error.
+                        let n = depth.levels().unwrap() as f32;
+                        (v * n - (v * n).round()).abs() > 0.02 || !(0.0..=1.0).contains(v)
+                    })
+                    .count();
+                assert_eq!(off_grid, 0, "{name} left components between levels");
+            }
+        }
+    }
+}

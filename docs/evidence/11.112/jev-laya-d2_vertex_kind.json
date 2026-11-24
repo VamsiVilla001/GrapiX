@@ -1,0 +1,110 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the Editor and engine should store a path vertex's kind (corner, smooth, symmetric, auto) and derive the handles of an auto vertex.",
+   "what_exists_today": "BezierPath stores only the handles as offsets. The Editor infers smooth when a vertex has two opposite handles and corner otherwise; it cannot tell smooth from symmetric, and there is no auto vertex. Dragging a handle of a smooth vertex keeps the other handle's length; Alt breaks it. Every renderer reads the stored handles as they are.",
+   "requirements_from_the_specs": "Pen spec v2 sections 4 and 6: a stored kind per anchor; for auto, store the mode and tension and DERIVE the handles at evaluation, materialising them only on conversion to a manual mode; never silently overwrite hand edits; smooth keeps the other handle collinear and opposite with its own length, symmetric mirrors it.",
+   "options": {
+    "A": "An optional parallel list vertex_kinds on BezierPath (absent on old scenes), with an optional auto tension; an auto vertex's stored handles are ignored and derived (centripetal Catmull-Rom from its neighbours) by one function used by every consumer of the path (renderer, bounds, hit tests).",
+    "B": "No stored kind: keep inferring from handles; auto is an Editor action that writes manual handles once.",
+    "C": "Store the kind in a separate side table keyed by object and vertex index, outside the path."
+   }
+  },
+  "questions": {
+   "best_storage": {
+    "type": "choice",
+    "instructions": "Which storage should GrapiX adopt for the vertex kind?",
+    "criteria": {
+     "A": "Option A: an optional vertex_kinds list on the path, handles of auto vertices derived by one shared function.",
+     "B": "Option B: no stored kind, infer from handles, auto writes manual handles once.",
+     "C": "Option C: a side table outside the path."
+    }
+   },
+   "derive_in_one_place": {
+    "type": "noul",
+    "instructions": "Must the derivation of an auto vertex's handles live in one function that every consumer (render preparation, bounds, hit testing, export) calls, so editor and playout cannot disagree?",
+    "criteria": {
+     "true": "Yes: one derivation, called everywhere.",
+     "false": "No: each consumer may derive them its own way."
+    }
+   },
+   "auto_never_overwrites_hand_edits": {
+    "type": "noul",
+    "instructions": "When the author drags a handle of an auto vertex, should the vertex first become a manual smooth vertex with the derived handles written out, so a hand edit is never lost to re-derivation?",
+    "criteria": {
+     "true": "Yes: materialise then edit; the author's work is never silently overwritten.",
+     "false": "No: keep it auto and discard the drag."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "best_storage": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "derive_in_one_place": {
+    "type": "noul",
+    "noul": 0.85
+   },
+   "auto_never_overwrites_hand_edits": {
+    "type": "noul",
+    "noul": 0.92
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1166,
+   "output_tokens": 0,
+   "state_tokens": 312,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "best_storage": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.0327,
+     "B": 0.7657,
+     "C": 0.2016
+    },
+    "confidence": 0.4183,
+    "answer_confidence": 0.7657,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "derive_in_one_place": {
+    "type": "noul",
+    "noul": 0.9724,
+    "confidence": 0.9724,
+    "answer_confidence": 0.9724,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "auto_never_overwrites_hand_edits": {
+    "type": "noul",
+    "noul": 0.9549,
+    "confidence": 0.9549,
+    "answer_confidence": 0.9549,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

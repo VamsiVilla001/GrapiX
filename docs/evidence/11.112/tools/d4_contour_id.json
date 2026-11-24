@@ -1,0 +1,31 @@
+{
+ "state": {
+  "decision": "Whether a compound shape's subpaths (contours) need a stable id, beyond the vertex ids already in place.",
+  "what_exists_today": "A shape has a main path and compound subpaths, addressed by their place (0 is the main path, 1 and on the compound ones). Path channels and path links name a shape subpath by that place. The only edit that changes how many subpaths a shape has is setShapePath (and createShape, SVG paste, join); every other path edit works inside one subpath. When setShapePath changes the count while a channel or a link names a subpath of that shape, the validator refuses the edit by name. Vertices already carry stable ids.",
+  "requirements_from_the_specs": "The Pen and Masking specs v2 ask for a stable id per vertex (anchorId) and per subpath (contourId) that survives edits, undo and save."
+ },
+ "options": {
+  "A": "Add an optional contourIds list to ShapeObject (one id per subpath), keep it through setShapePath where the subpath is kept, and make channels and links resolve a subpath by its contour id instead of its place.",
+  "B": "Add the optional contourIds list and have the edits that add or remove a subpath maintain it, but keep addressing by place in channels and links, refusing by name when the count would break one.",
+  "C": "No contour ids: place is enough while no edit adds or removes a single subpath; the refusal by name stays."
+ },
+ "questions": {
+  "best_option": {
+   "type": "choice",
+   "instructions": "Which option should GrapiX adopt for subpath ids?",
+   "criteria": {
+    "A": "Option A: contour ids, and channels and links resolve by them.",
+    "B": "Option B: contour ids kept by the edits, addressing still by place with a refusal.",
+    "C": "Option C: no contour ids yet."
+   }
+  },
+  "ids_needed_for_spec": {
+   "type": "noul",
+   "instructions": "Do the specs require a stable subpath id to exist in the scene contract, whether or not an edit uses it yet?",
+   "criteria": {
+    "true": "Yes: the id must exist and survive edits, undo and save.",
+    "false": "No: it may wait until an edit needs it."
+   }
+  }
+ }
+}

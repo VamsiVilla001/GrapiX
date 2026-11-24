@@ -1,0 +1,356 @@
+{
+ "decision": "Verification of the external design review (D:\\Downloads_Chrome\\GrapiX_Editor_Playout_Design_Review.md)",
+ "note": "All numbers are model confidences (0 to 1), not versions. Jev = jev-1.14.0. Laya = laya-multilingual, max_len 8192, not truncated. Both are second opinions on design questions only, never verifiers; zero-shot Laya is uncalibrated.",
+ "input": {
+  "state": {
+   "decision": "Design decisions for GrapiX, a professional real-time broadcast graphics suite for live esports and sports TV, raised by an external design review of the wireframes.",
+   "product": "GrapiX has an Editor (design studio, never live, cannot put anything on air) and Playout (the only application that takes, cues or clears graphics on air). Operators are live-broadcast crews; designers are motion graphics professionals who know After Effects and Ross XPression. The Editor shows parts, a stage and one selected-part card with Look, Motion and Data sections, each with a More button for advanced properties. Animation is organised into four moments: Appears, Stays, Changes, Leaves; Moments are a simple front over keyframes and a Fine-tune button opens keyframes and curves. The engine is frame-exact and the sole clock. Scene logic runs in a per-scene sandbox with a JS editor and a node view that share one vocabulary of actions and events. Layouts are named, saved files with light docking. The Editor has six menus plus Ctrl K command search. A scene has a Scene ID shared by Editor and Playout, automatic from 1 and editable, with takes referencing the scene by an internal key; a Take ID exists only in Playout, typed by the operator and unique. In Playout the word Cued already means a scene preloaded in preview. Names are working titles kept in one terms table.",
+   "review_summary": "An external review says: keep a full professional timeline beside a simple Motion Builder, both on one animation model; use an expandable Inspector; use ten menus and named workspaces (Design, Animation, Effects, Data, Logic); give Scene an immutable internal ID plus an editable display ID; make live field updates configurable per field; build JavaScript scene logic first and nodes later; let the Editor control the field schema and Playout control the values; keep established broadcast terms (Take, Take ID, Preview, Program) and rename only where it helps."
+  },
+  "questions": {
+   "timeline": {
+    "type": "choice",
+    "instructions": "How should motion authoring be offered to professional designers?",
+    "criteria": {
+     "A": "Moments only; keyframes stay hidden behind a Fine-tune button.",
+     "B": "A full timeline as a first-class view beside the simple Moments view, both editing the same keyframes so a preset becomes editable keyframes and custom curves are never overwritten.",
+     "C": "A full timeline only, with no Moments view."
+    }
+   },
+   "inspector": {
+    "type": "choice",
+    "instructions": "How should the properties of the selected part be presented?",
+    "criteria": {
+     "A": "One card with Look, Motion and Data sections; advanced properties under More buttons.",
+     "B": "An expandable inspector with property categories, tabs and a searchable full property list."
+    }
+   },
+   "menus": {
+    "type": "choice",
+    "instructions": "Which menu structure suits a professional graphics application that also has Ctrl K command search?",
+    "criteria": {
+     "A": "Six menus (File, Edit, Graphic, Publish, View, Help) plus command search.",
+     "B": "About ten menus (File, Edit, Scene, Object, Motion, Effects, Data, View, Window, Help) plus command search."
+    }
+   },
+   "workspaces": {
+    "type": "choice",
+    "instructions": "How should panel arrangements be handled?",
+    "criteria": {
+     "A": "Every module is available at once through toggles and named saved layouts; no workspace restricts any tool.",
+     "B": "Fixed named workspaces (Design, Animation, Effects, Data, Logic) that designers switch between, each a saved panel arrangement."
+    }
+   },
+   "scene_id": {
+    "type": "choice",
+    "instructions": "What should the Scene ID rule be?",
+    "criteria": {
+     "A": "One Scene ID, automatic from 1 and editable, shared by Editor and Playout; takes reference the scene by an internal key so renaming it is safe.",
+     "B": "An immutable auto-generated internal ID that all references use, plus a separate editable display identifier."
+    }
+   },
+   "live_fields": {
+    "type": "choice",
+    "instructions": "How should live data updates to an on-air graphic be governed?",
+    "criteria": {
+     "A": "Every published field updates live in the same way once the take is verified.",
+     "B": "Each published field is configured as live-updating or locked, with validation rules, so score and timer fields update without re-preview while others require a new take."
+    }
+   },
+   "logic_first": {
+    "type": "choice",
+    "instructions": "Which scene-logic authoring comes first?",
+    "criteria": {
+     "A": "JavaScript first, nodes later, sharing one vocabulary of actions and events.",
+     "B": "A node view first, JavaScript later.",
+     "C": "Both at once in the first version."
+    }
+   },
+   "schema_values": {
+    "type": "choice",
+    "instructions": "Who controls what for published fields?",
+    "criteria": {
+     "A": "The Editor controls the field schema (names, types, limits, permissions); Playout controls the values.",
+     "B": "Playout can also add or change fields."
+    }
+   },
+   "take_word": {
+    "type": "choice",
+    "instructions": "What should happen to the established words Take, Take ID, Preview and Program, given Playout already uses Cued for preloaded?",
+    "criteria": {
+     "A": "Keep Take, Take ID, Preview and Program as they are.",
+     "B": "Rename Take to Cue and Take ID to Cue ID."
+    }
+   },
+   "naming_principle": {
+    "type": "choice",
+    "instructions": "What naming principle should GrapiX follow?",
+    "criteria": {
+     "A": "Rename most standard design and broadcast terms to create a product identity.",
+     "B": "Keep standard design and broadcast terms and give distinct names only to signature features."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "timeline": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 1,
+    "probabilities": {
+     "A": 0,
+     "B": 1,
+     "C": 0
+    }
+   },
+   "inspector": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.7,
+    "probabilities": {
+     "A": 0.15,
+     "B": 0.85
+    }
+   },
+   "menus": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.82,
+    "probabilities": {
+     "A": 0.09,
+     "B": 0.91
+    }
+   },
+   "workspaces": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.84,
+    "probabilities": {
+     "A": 0.08,
+     "B": 0.92
+    }
+   },
+   "scene_id": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.96,
+    "probabilities": {
+     "A": 0.02,
+     "B": 0.98
+    }
+   },
+   "live_fields": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 1,
+    "probabilities": {
+     "A": 0,
+     "B": 1
+    }
+   },
+   "logic_first": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "schema_values": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0
+    }
+   },
+   "take_word": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0
+    }
+   },
+   "naming_principle": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 1,
+    "probabilities": {
+     "A": 0,
+     "B": 1
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 4749,
+   "output_tokens": 0,
+   "state_tokens": 410,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "seconds": 56.0,
+  "answers": {
+   "timeline": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2697,
+     "B": 0.3357,
+     "C": 0.3946
+    },
+    "confidence": 0.0108,
+    "answer_confidence": 0.3946,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "inspector": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6183,
+     "B": 0.3817
+    },
+    "confidence": 0.0407,
+    "answer_confidence": 0.6183,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "menus": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3058,
+     "B": 0.6942
+    },
+    "confidence": 0.1117,
+    "answer_confidence": 0.6942,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "workspaces": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3771,
+     "B": 0.6229
+    },
+    "confidence": 0.044,
+    "answer_confidence": 0.6229,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "scene_id": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5046,
+     "B": 0.4954
+    },
+    "confidence": 0.0001,
+    "answer_confidence": 0.5046,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "live_fields": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.7404,
+     "B": 0.2596
+    },
+    "confidence": 0.1738,
+    "answer_confidence": 0.7404,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "logic_first": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.2964,
+     "B": 0.4106,
+     "C": 0.293
+    },
+    "confidence": 0.0118,
+    "answer_confidence": 0.4106,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "schema_values": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.7917,
+     "B": 0.2083
+    },
+    "confidence": 0.2617,
+    "answer_confidence": 0.7917,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "take_word": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.9515,
+     "B": 0.0485
+    },
+    "confidence": 0.7201,
+    "answer_confidence": 0.9515,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "naming_principle": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3932,
+     "B": 0.6068
+    },
+    "confidence": 0.0332,
+    "answer_confidence": 0.6068,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ },
+ "reading": {
+  "agree_with_external_review": [
+   "menus (both B)",
+   "workspaces (both B)",
+   "schema_values (both A: Editor controls schema)",
+   "take_word (both keep Take / Take ID: Laya 0.95, Jev 1.0)",
+   "naming_principle (both B: keep standard terms)"
+  ],
+  "disagree_between_models": [
+   "timeline: Jev B (full timeline beside Moments, same keyframes), confidence 1.0; Laya picked C with only 0.39, effectively undecided",
+   "inspector: Jev B expandable inspector (0.70); Laya A single card (0.62)",
+   "scene_id: Jev B immutable internal ID plus editable display ID (0.96); Laya A (0.50, a coin toss)",
+   "live_fields: Jev B configurable per field (1.0); Laya A (0.74)",
+   "logic_first: Jev A JavaScript first (1.0); Laya B nodes first (0.41, weak)"
+  ],
+  "my_reading": "Where Jev is confident and Laya is near 0.5 (timeline, scene_id, logic_first) I treat Jev as the signal; both models are weak on the inspector and live_fields split, so those are decided by evidence in the verification report, not by either model."
+ }
+}

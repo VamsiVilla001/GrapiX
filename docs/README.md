@@ -39,13 +39,19 @@ CPU-prepared vector and glyph textures bridge 3.17/3.18 at prepare only;
 full-frame CPU rendering remains the headless/pixel reference. GPU drawing,
 the full blend/effect set and asynchronous output remain 3.17-3.22.
 
-**ADR numbering.** ADR files are numbered `0001`, `0002`, `0003`, and the
-Data Server ADR planned by step `19.1` will be `0004`. ADR-0001 contains its
-own sections headed ADR-001 to ADR-005; cite those as "ADR-0001 §3" and so
-on, never as a bare "ADR-003", so a section is never mistaken for a file.
+**ADR numbering.** One number, one decision (row `1.14`, 24 Nov 2026). The files are:
+`0001` distributed architecture, `0002` platform and MCP schema, `0003` the
+EffectCraft render core, `0004` debugging and broadcast logging (its section 5
+is the as-run record of row `12.11`). The Data Server ADR planned by step `19.1`
+is **`0005`**: it was called `0004` in the plan until `0004` was written for
+logging on 16 Nov 2026. ADR-0001 contains its own sections headed ADR-001 to
+ADR-005; cite those as "ADR-0001 §3" and so on, never as a bare "ADR-003", so a
+section is never mistaken for a file.
 
-`/memory.md` at the repository root is the session log: what changed, when, and
-what was verified. It records history; it does not grant authority.
+`/memory.md` at the repository root is the agents' working handoff: the working rules,
+"Resume here" and an index. The dated history (what changed, when, and what was verified)
+is under `/docs/log/`, one file per day. Neither grants authority; the binding rules are in
+`invariants.md` and `/AGENTS.md`.
 
 `proposals/` holds merge proposals after they have been merged into
 `/GrapiX-Build-Plan.md`. They are records only and grant no authority; the
@@ -82,5 +88,5 @@ Used verbatim from the ADR. Nothing may be described in any other terms.
 | **External gate** | Blocked on hardware, vendor SDK or lab time |
 | **Not present** | Not built, and not currently decided |
 
-Everything in GrapiX 2.0 is **Planned** until a memory.md entry records
+Everything in GrapiX 2.0 is **Planned** until a `docs/log/` entry records
 execution evidence. The skeleton is not an implementation.

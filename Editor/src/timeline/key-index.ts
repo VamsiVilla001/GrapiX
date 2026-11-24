@@ -35,7 +35,7 @@ export function emptyKeyIndex(): KeyIndex {
 /// Sorts defensively even though the contract's `set_keyframe` keeps channels
 /// ordered: every lookup below is a binary search, and a binary search over an
 /// unsorted array does not fail loudly — it silently returns the wrong key.
-export function buildKeyIndex(keys: readonly SceneKeyframe[]): KeyIndex {
+export function buildKeyIndex(keys: readonly { readonly frame: SceneKeyframe["frame"] }[]): KeyIndex {
   if (keys.length === 0) return EMPTY;
   const frames = new Int32Array(keys.length);
   for (let index = 0; index < keys.length; index += 1) {

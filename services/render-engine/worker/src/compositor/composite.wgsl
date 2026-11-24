@@ -10,7 +10,7 @@
 struct Params {
     row_x: vec4<f32>,
     row_y: vec4<f32>,
-    state: vec4<f32>, // opacity, reserved
+    state: vec4<f32>, // opacity, clip, track mode, depth levels (0 = 32-bit float)
     // mode (position in BlendMode::ALL), Dissolve seed, and the tile's first
     // stage pixel as integers: a hash key for Dissolve, never a coordinate.
     key: vec4<u32>,
@@ -100,6 +100,11 @@ fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         s = s * v;
     }
+    // 3.28: Preserve Underlying Transparency: the layer shows only as much as
+    // what is already below it does.
+    if (params.row_x.w > 0.5) {
+        s = s * d.a;
+    }
     let mode = params.key.x;
     // Where the source is exactly zero the backdrop is kept bit for bit, as
     // it is outside the region, which is never dispatched: inside and outside
@@ -112,5 +117,12 @@ fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
     if (mode == M_Dissolve || mode == M_DancingDissolve) {
         noise = hash_noise(params.key.z + px.x, params.key.w + px.y, params.key.y);
     }
-    textureStore(out, vec2<i32>(px), blend_pixel(mode, d, s, noise));
+    var blended = blend_pixel(mode, d, s, noise);
+    // The project's colour depth: 8 and 16 bit store a whole level held to
+    // 0-1, as `blend::store_pixel` does on the CPU.
+    let levels = params.state.w;
+    if (levels > 0.0) {
+        blended = floor(clamp(blended, vec4<f32>(0.0), vec4<f32>(1.0)) * levels + 0.5) / levels;
+    }
+    textureStore(out, vec2<i32>(px), blended);
 }

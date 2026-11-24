@@ -75,6 +75,56 @@ describe("selection outlines and handles", () => {
     expect(hitTestOverlay(scene([object]), { x: 150, y: 100 })).toBeUndefined();
   });
 
+  it("draws the path the Pen is drawing, and nothing before it has a point", () => {
+    const document = scene([rect("a")]);
+    const sketch = { d: "M 0 0 C 0 0 10 10 10 10", vertices: [{ x: 0, y: 0, first: true }], handles: [], closing: false };
+    expect(buildViewportOverlay(document, { selectedIds: [], pen: sketch }).primitives).toContainEqual({ kind: "pen", sketch });
+    expect(buildViewportOverlay(document, { selectedIds: [], pen: { ...sketch, vertices: [] } }).primitives.some((p) => p.kind === "pen")).toBe(false);
+    expect(buildViewportOverlay(document, { selectedIds: [] }).primitives.some((p) => p.kind === "pen")).toBe(false);
+  });
+
+  it("picks a straight line, which has no height, within a few pixels", () => {
+    const zero = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
+    const line = {
+      ...rect("line"),
+      type: "shape",
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 0,
+      path: { closed: false, vertices: [{ x: 100, y: 500 }, { x: 400, y: 500 }], inTangents: zero, outTangents: zero },
+    } as unknown as SceneObject;
+    const document = scene([line]);
+    expect(hitTestOverlay(document, { x: 250, y: 500 })).toBe("line");
+    expect(hitTestOverlay(document, { x: 250, y: 503 })).toBe("line");
+    expect(hitTestOverlay(document, { x: 250, y: 520 })).toBeUndefined();
+    expect(hitTestOverlay(document, { x: 50, y: 500 })).toBeUndefined();
+    // And a vertical one, which has no width.
+    const zero2 = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
+    const upright = {
+      ...rect("upright"),
+      type: "shape",
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 300,
+      path: { closed: false, vertices: [{ x: 700, y: 100 }, { x: 700, y: 400 }], inTangents: zero2, outTangents: zero2 },
+    } as unknown as SceneObject;
+    expect(hitTestOverlay(scene([upright]), { x: 703, y: 250 })).toBe("upright");
+    expect(hitTestOverlay(scene([upright]), { x: 720, y: 250 })).toBeUndefined();
+  });
+
+  it("marks where each selected object's pivot is, only when asked (the Pivot tool, 11.102)", () => {
+    const document = scene([rect("a", { x: 300, y: 200 }), rect("b", { x: 10, y: 20 })]);
+    const without = buildViewportOverlay(document, { selectedIds: ["a"] });
+    expect(without.primitives.some((p) => p.kind === "pivot")).toBe(false);
+    const withPivots = buildViewportOverlay(document, { selectedIds: ["a"], pivots: true });
+    expect(withPivots.primitives.filter((p) => p.kind === "pivot")).toEqual([{ kind: "pivot", objectId: "a", point: { x: 300, y: 200 } }]);
+    // A group draws nothing of its own, so it has no pivot to mark.
+    const group = { ...rect("g"), type: "group", childIds: [] } as unknown as SceneObject;
+    expect(buildViewportOverlay(scene([group]), { selectedIds: ["g"], pivots: true }).primitives.some((p) => p.kind === "pivot")).toBe(false);
+  });
+
   it("emits one outline and eight handles for an editable selection", () => {
     const model = buildViewportOverlay(scene([rect("title")]), { selectedIds: ["title"] });
     expect(model.primitives.filter((primitive) => primitive.kind === "selection")).toHaveLength(1);

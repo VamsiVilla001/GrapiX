@@ -12,6 +12,8 @@
 //! connection state. They are never a property of an engine request, which
 //! prevents a request path from accidentally missing an authorization check.
 
+pub mod cli;
+
 use std::fmt;
 
 use gx_contracts::auth::{Role, Scope};
@@ -185,6 +187,23 @@ pub enum TokenError {
     InvalidMacEncoding,
     /// The full-length constant-time MAC comparison found a difference.
     MacMismatch,
+}
+
+impl TokenError {
+    /// A word for the fault, safe to log: the `Display` text of `UnknownPrefix` quotes what the
+    /// caller sent, and a credential that fails to parse must never reach a log.
+    pub const fn fault_name(&self) -> &'static str {
+        match self {
+            Self::UnknownPrefix { .. } => "unknownPrefix",
+            Self::MalformedToken => "malformedToken",
+            Self::InvalidPayloadEncoding => "invalidPayloadEncoding",
+            Self::InvalidPayload => "invalidPayload",
+            Self::InvalidClaims(_) => "invalidClaims",
+            Self::WrongMacLength { .. } => "wrongMacLength",
+            Self::InvalidMacEncoding => "invalidMacEncoding",
+            Self::MacMismatch => "macMismatch",
+        }
+    }
 }
 
 impl fmt::Display for TokenError {

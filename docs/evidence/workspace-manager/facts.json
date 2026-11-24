@@ -1,0 +1,233 @@
+[
+ {
+  "id": "E1",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "movePanel(\"ghost-1\" to the centre of group \"left\")",
+  "outcome": "REFUSED PANEL_NOT_AVAILABLE: \"no open panel is called ghost-1\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E2",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "movePanel(\"viewport-1\", beside its own group \"viewport-group\", left); it is the only panel in that group",
+  "outcome": "REFUSED INVALID_DOCK_TARGET: \"a panel that is alone in its group cannot be docked beside its own group\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E3",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "moveGroup(\"left\" onto itself)",
+  "outcome": "REFUSED INVALID_DOCK_TARGET: \"a group cannot be moved onto itself\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E4",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "dragDivider(root, divider 0, by NaN)",
+  "outcome": "REFUSED INVALID_DOCK_TARGET: \"a divider cannot be moved by an amount that is not a number\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E5",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "setSplitWeights(root, [1, 2]) on a split with 3 children",
+  "outcome": "REFUSED INVALID_DOCK_TARGET: \"split root has 3 children, not 2 weights\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E6",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "openPanel(\"from-the-future\")",
+  "outcome": "REFUSED PANEL_NOT_AVAILABLE: \"this build does not know a panel called from-the-future\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E7",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "openPanel(\"rundown\") in the Editor",
+  "outcome": "REFUSED PANEL_NOT_AVAILABLE: \"Rundown belongs to the playout application\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E8",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "openPanel(\"timeline\", a second one asked for) while one is open",
+  "outcome": "REFUSED DUPLICATE_SINGLETON: \"Timeline can only be open once, and it is already open\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E9",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "closePanelChecked(\"viewport-1\"), a panel registered as not closable",
+  "outcome": "REFUSED PANEL_NOT_CLOSABLE: \"Composition cannot be closed. It can be moved to another place, or its group shown at full size.\"; the layout it was given is unchanged"
+ },
+ {
+  "id": "E10",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "parseWorkspaceText(\"{ nope\")",
+  "outcome": "REFUSED LAYOUT_VALIDATION_FAILED: \"this is not a layout file: its text could not be read at all (it is not JSON). Choose a layout that GrapiX exported. Nothing was changed.\""
+ },
+ {
+  "id": "E11",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "a saved layout whose root split has weights 0.9, 0.9, 0.9",
+  "outcome": "REFUSED LAYOUT_VALIDATION_FAILED: \"the layout breaks rule 4: the weights of split root do not add up to one\""
+ },
+ {
+  "id": "E12",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "a saved layout with schemaVersion 2 (this build reads up to 1)",
+  "outcome": "REFUSED LAYOUT_SCHEMA_NEWER: \"this layout was saved by a newer GrapiX (layout version 2; this one reads up to 1). Nothing was changed. Open it with that version, or use a layout saved by this one.\""
+ },
+ {
+  "id": "E13",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "a saved layout with viewState {\"api\": {\"password\": \"x\"}}",
+  "outcome": "REFUSED LAYOUT_VALIDATION_FAILED: \"the layout breaks rule 9: viewState.api.password looks like a password, token or secret, which a layout never keeps\""
+ },
+ {
+  "id": "E14",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "registering panel type object-manager twice",
+  "outcome": "REFUSED PANEL_REGISTRATION_INVALID: \"panel \"object-manager\" cannot be registered: that type is already registered\""
+ },
+ {
+  "id": "E15",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "registering a panel that is both a singleton and allows more than one",
+  "outcome": "REFUSED PANEL_REGISTRATION_INVALID: \"panel \"object-manager\" cannot be registered: a panel cannot be both a singleton and allow more than one\""
+ },
+ {
+  "id": "E16",
+  "kind": "error",
+  "rule": "A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+  "call": "a saved layout whose first column has kind \"grid\"",
+  "outcome": "REFUSED LAYOUT_VALIDATION_FAILED: \"this is not a layout GrapiX can read: root.children[0].kind must be tabs or split. The file may be damaged or made by something else. Nothing was changed.\""
+ },
+ {
+  "id": "A1",
+  "kind": "accuracy",
+  "rule": "Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "movePanel(\"objects-1\" to the centre of \"timeline-group\")",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: assets-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1, objects-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group)"
+ },
+ {
+  "id": "A2",
+  "kind": "accuracy",
+  "rule": "Dropping a panel on the right side of a group whose parent runs the other way makes a new side-by-side split in the target's place, sharing its room equally.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "movePanel(\"assets-1\" to the right of \"viewport-group\")",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: {split side-by-side weights 0.5 0.5: [viewport-group: viewport-1*] [asset-browser-group: assets-1*]} [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)"
+ },
+ {
+  "id": "A3",
+  "kind": "accuracy",
+  "rule": "Dropping a panel above a group whose parent already runs the same way adds one more child to that parent and takes half of the target's share; the parent's other shares do not change.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "movePanel(\"assets-1\" above \"timeline-group\")",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.16 0.16: [viewport-group: viewport-1*] [asset-browser-group: assets-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=asset-browser-group)"
+ },
+ {
+  "id": "A4",
+  "kind": "accuracy",
+  "rule": "Closing the last panel of a group removes the group, and a split left with one child is replaced by that child; weights add up to one.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "closePanel(\"viewport-1\")",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] [timeline-group: timeline-1*, curves-1] [right: inspector-1*, bindings-1]}"
+ },
+ {
+  "id": "A5",
+  "kind": "accuracy",
+  "rule": "Closing every panel of two groups leaves the remaining groups sharing the room, weights adding up to one.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "closePanel on viewport-1, timeline-1 and curves-1",
+  "outcome": "{root side-by-side weights 0.5 0.5: [left: objects-1*, assets-1] [right: inspector-1*, bindings-1]}"
+ },
+ {
+  "id": "A6",
+  "kind": "accuracy",
+  "rule": "Maximising a group does not change the arrangement, so restoring brings back exactly the same proportions.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "maximizeGroup(\"viewport-group\") then restoreGroup(\"viewport-group\")",
+  "outcome": "after maximise: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (maximised=viewport-group focus=viewport-group)\nafter restore: {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=viewport-group)\nthe tree is identical to the start"
+ },
+ {
+  "id": "A7",
+  "kind": "accuracy",
+  "rule": "Dragging a divider far past the end stops where the neighbour reaches its smallest share (0.04), and the two shares still add up to what they did.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "dragDivider(root, divider 0, by +5)",
+  "outcome": "{root side-by-side weights 0.76 0.04 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+ },
+ {
+  "id": "A8",
+  "kind": "accuracy",
+  "rule": "Showing a panel that is behind another tab brings its tab forward and gives its group focus.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "focusPanel(\"curves-1\")",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group)"
+ },
+ {
+  "id": "A9",
+  "kind": "accuracy",
+  "rule": "Reopening a closed panel puts it back in the group its registration names, and shows it.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "openPanel(\"asset-browser\") after it was closed",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1, asset-browser-1*] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]} (focus=left) (new instance asset-browser-1, created true)"
+ },
+ {
+  "id": "A10",
+  "kind": "accuracy",
+  "rule": "Opening a panel that is already open shows it instead of making a second copy.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "openPanel(\"curve-editor\") while it is open behind another tab",
+  "outcome": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1, curves-1*]} [right: inspector-1*, bindings-1]} (focus=timeline-group) (instance curves-1, created false; instances now 7, before 7)"
+ },
+ {
+  "id": "A11",
+  "kind": "accuracy",
+  "rule": "An author's older four-region layout is migrated as the old page showed it: the left dock, the centre and the right dock side by side with the left dock at 0.19 of the width and the right dock at 0.21 (the centre takes the rest), and the timeline under all three across the whole width; every panel kept exactly once and each tab group keeping its tabs.",
+  "before": "old layout panels: 18 (left 7, centre 1, right 9, bottom 1; groups delivery-group, inspector-group, library-group)",
+  "call": "workspaceFromLayout(the shipped four-region layout)",
+  "outcome": "{root stacked weights 0.66 0.34: {top-row side-by-side weights 0.19 0.6 0.21: {left-column stacked weights 0.25 0.25 0.25 0.25: [scene-manager-group: scene-manager-1*] [object-manager-group: object-manager-1*] [assets-group: assets-1*] [delivery-group: take-page-1*, control-contract-1, bindings-1, publish-1]} [viewport-group: viewport-1*] {right-column stacked weights 0.25 0.25 0.25 0.25: [preview-group: preview-1*] [unsupported-group: unsupported-1*] [inspector-group: inspector-1*, animation-1, effect-controls-1, text-styles-1, fonts-1] [library-group: effects-1*, materials-1]}} [timeline-group: timeline-1*]}\npanels in the new layout: 18; unique: 18; rule problems: 0"
+ },
+ {
+  "id": "A12",
+  "kind": "accuracy",
+  "rule": "A panel kind renamed since the layout was saved keeps its place under its new name, and the rename is reported.",
+  "before": "instances objects-1 has panelType \"object-manager\"",
+  "call": "migrateWorkspace(layout, aliases {\"object-manager\": \"objects\"})",
+  "outcome": "objects-1 is now \"objects\", renamed [\"object-manager -> objects\"], {root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}"
+ },
+ {
+  "id": "A13",
+  "kind": "accuracy",
+  "rule": "A layout from a build that had more panels is not damaged: panels this build cannot show stay where they are and are named, with the reason.",
+  "before": "{root side-by-side weights 0.2 0.6 0.2: [left: objects-1*, assets-1] {center stacked weights 0.68 0.32: [viewport-group: viewport-1*] [timeline-group: timeline-1*, curves-1]} [right: inspector-1*, bindings-1]}",
+  "call": "unavailableInstances(layout from a newer build)",
+  "outcome": "[{\"instanceId\":\"assets-1\",\"panelType\":\"from-the-future\",\"reason\":\"this build does not know a panel called from-the-future\"}]; layout rule problems: 0"
+ },
+ {
+  "id": "A14",
+  "kind": "accuracy",
+  "rule": "A layout that breaks rules is reported with every broken rule named, by number and in words.",
+  "before": "a layout with viewState {\"token\": \"x\"} and a maximised group that does not exist",
+  "call": "validateWorkspace(layout)",
+  "outcome": "rule 3: the maximised group ghost does not exist; rule 9: viewState.token looks like a password, token or secret, which a layout never keeps"
+ },
+ {
+  "id": "D1",
+  "kind": "accuracy",
+  "rule": "UI state that is only about now (which group is maximised, which has focus) may be kept in the saved workspace if it is optional, validated and never changes the arrangement.",
+  "call": "SavedWorkspace has optional maximizedGroupId and activeGroupId",
+  "outcome": "Both are optional fields; validateWorkspace checks they name a group that exists; normalising drops one whose group is gone; neither changes the tree or any weight; a baseline saved by the author can omit them."
+ }
+]

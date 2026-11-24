@@ -387,6 +387,7 @@ mod tests {
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "s".into(),
             name: "S".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,
@@ -407,6 +408,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects,
         }
     }

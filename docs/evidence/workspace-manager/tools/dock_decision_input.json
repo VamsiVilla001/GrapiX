@@ -1,0 +1,41 @@
+{
+  "state": {
+    "decision": "How GrapiX should build the dockable Workspace Manager that a 23 Nov 2026 hand-off specifies (recursive dock tree, five-zone drop targets, tab groups, saved named workspaces with session/baseline/last-known-good, floating groups, Editor and Playout catalogs).",
+    "what_exists_today": "The Editor page is plain TypeScript and DOM, with no UI framework. It already has its own pure layout module of about 700 lines with 600 lines of tests: four fixed regions (left, centre, right, bottom), panels stacked in a region, tab groups of two or more adjacent panels, splitters between entries, collapse, a saved layout in the browser's local storage (layout version 3), and reset. It has no nested splits, no five-zone drop overlay, no named workspaces, no floating panels yet; plan rows exist for pop-out windows and named workspaces and are pending. The Playout app is a separate plain-JavaScript page with a fixed operator surface and no docking. Studios using GrapiX are often air-gapped, so nothing may need the internet. Adding an npm package needs the user's explicit approval each time. The hand-off says: keep the saved layout schema independent of any docking library, keep the panel registry and persistence separate, and that existing implementations win over new duplicates.",
+    "option_A": "Build the whole thing in house: a new pure DockModel (recursive tree with invariants and operations), registry, presets and persistence, then a renderer on the page's own DOM, in steps, reusing and migrating the existing layout module. No new dependency.",
+    "option_B": "Adopt the open-source Dockview library (MIT, has a framework-free core, JSON layouts and popouts) for the docking and floating behaviour, behind an adapter, and keep only the model, registry and persistence in house.",
+    "option_C": "Own model first (pure, tested, no dependency) with a thin adapter interface, build the renderer in house for the P0 scope, and revisit a library only if floating or native pop-out windows turn out too costly to build.",
+    "option_migrate_replace": "Replace the four-region layout with the recursive tree, and keep a reader that migrates a stored version 3 layout into the new form, so authors keep their arrangement.",
+    "option_migrate_keep": "Keep the four-region layout as it is and add the new dock tree beside it for new features only.",
+    "constraints": "No internet needed to dock or save. Existing tests and the user's saved layouts must keep working. Layout is interface state and must never change a scene, a revision, undo history or any playout output. The Editor and Playout need separate panel catalogs on one engine."
+  },
+  "questions": {
+    "best_approach": {
+      "type": "choice",
+      "instructions": "Which approach should GrapiX take to build the Workspace Manager?",
+      "criteria": {
+        "A": "Option A: build everything in house.",
+        "B": "Option B: adopt Dockview behind an adapter.",
+        "C": "Option C: own model first and renderer in house, revisit a library only if floating or pop-out proves costly."
+      }
+    },
+    "best_migration": {
+      "type": "choice",
+      "instructions": "What should happen to the existing four-region layout?",
+      "criteria": {
+        "replace": "Replace it with the recursive tree and migrate stored layouts.",
+        "keep": "Keep it and add the new tree beside it."
+      }
+    },
+    "library_needs_approval_first": {
+      "type": "noul",
+      "instructions": "Given that adding any npm package needs the user's explicit approval and studios are often air-gapped, is it right to start with no new dependency and ask for approval only if a library is later wanted?",
+      "criteria": {"true": "Yes, start without a dependency and ask later if needed.", "false": "No, decide on the library first."}
+    },
+    "pure_model_first_is_safe": {
+      "type": "noul",
+      "instructions": "Is building and fully testing a pure dock model before touching the page's renderer a safe order of work for a layout system that must never break the Editor?",
+      "criteria": {"true": "Yes, a tested pure model first is the safe order.", "false": "No, the renderer should come first."}
+    }
+  }
+}

@@ -8,6 +8,7 @@ members = [
   "Shared/asset-plane",
   "Shared/media-plane",
   "Shared/control-transport",
+  "Shared/credential",
   "Shared/telemetry",
   "Shared/console-stop",
   "Shared/diag",
@@ -23,10 +24,13 @@ members = [
   "tools/contract-codegen",
   "Shared/project-store",
   "Shared/write-semantics",
+  "Shared/settings",
+  "Shared/workspace-store",
   "Editor/shell",
   "Playout/shell",
   "services/editor",
   "services/editor-mcp",
+  "services/figma-link",
   "services/mcp-server",
   "services/playout",
   "services/playout-mcp",
@@ -50,9 +54,12 @@ gx-diag          = { path = "Shared/diag" }
 gx-shell-log     = { path = "Shared/shell-log" }
 gx-fs            = { path = "Shared/fs" }
 gx-write-semantics = { path = "Shared/write-semantics" }
+gx-settings      = { path = "Shared/settings" }
+gx-workspace-store = { path = "Shared/workspace-store" }
 gx-editor        = { path = "services/editor" }
 gx-decklink      = { path = "Shared/decklink" }
 gx-control-transport = { path = "Shared/control-transport" }
+gx-credential   = { path = "Shared/credential" }
 serde            = { version = "1", features = ["derive"] }
 schemars = { version = "1", default-features = false, features = ["derive", "std"] }
 # `float_roundtrip` is required, not cosmetic. Every scene object flattens

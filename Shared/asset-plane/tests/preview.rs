@@ -17,7 +17,7 @@ use gx_contracts::{Locality, Refusal};
 fn scene(name: &str) -> SceneDocument {
     serde_json::from_value(serde_json::json!({
         "version": gx_contracts::scene::SCENE_SCHEMA_VERSION,
-        "id": "draft", "name": name, "workingColorSpace": "linear-srgb",
+        "id": "draft", "name": name, "workingColorSpace": "linear-srgb", "colorDepth": "32",
         "canvas": { "width": 4, "height": 2, "frameRate": { "num": 50, "den": 1 } },
         "timeline": { "durationFrames": 10, "channels": [] },
         "objects": []

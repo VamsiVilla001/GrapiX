@@ -206,6 +206,7 @@ pub fn create_shape(
         trim_start: None,
         trim_end: None,
         trim_offset: None,
+        contour_ids: None,
     }));
     refuse_what_cannot_be_drawn(before, scene, &[(&id, &["path", "compoundPaths"])])?;
     Ok(EditEffect::ObjectCreated { object_id: id })
@@ -397,6 +398,15 @@ pub fn set_shape_path(
     let before = scene.clone();
     let (width, height) = path_box(std::iter::once(path).chain(compound_paths));
     if let SceneObject::Shape(shape) = &mut scene.objects[index] {
+        // Contour ids stay with the subpaths that stay: a count that changes keeps the first ids and gives new ones to what is added.
+        if let Some(ids) = &mut shape.contour_ids {
+            let want = 1 + compound.as_ref().map_or(0, Vec::len);
+            ids.truncate(want);
+            while ids.len() < want {
+                let fresh = ids.iter().copied().max().map_or(0, |m| m + 1);
+                ids.push(fresh);
+            }
+        }
         shape.path = path.clone();
         shape.compound_paths = compound;
         if let Some(rule) = fill_rule {
@@ -411,6 +421,717 @@ pub fn set_shape_path(
         &[(shape_id, &["path", "compoundPaths", "fillRule"])],
     )?;
     Ok(changed(vec![shape_id.to_owned()]))
+}
+
+/// Put a guide on the canvas (11.44). Refused by name for a position that is not a finite number, or one that already has a guide.
+pub fn add_guide(scene: &mut SceneDocument, axis: crate::scene::GuideAxis, position: f64) -> Result<EditEffect, Refusal> {
+    if !position.is_finite() {
+        return Err(Refusal::ObjectFieldValueInvalid { field: "guides".into(), detail: "a guide's position must be a finite number".into() });
+    }
+    if scene.guides.iter().any(|g| g.axis == axis && g.position == position) {
+        return Err(Refusal::ObjectFieldUnchanged { field: "guides".into() });
+    }
+    let id = (1..).find(|n| !scene.guides.iter().any(|g| g.id == *n)).expect("an unbounded range has a free id");
+    scene.guides.push(crate::scene::Guide { id, axis, position });
+    Ok(EditEffect::None)
+}
+
+/// Move a guide to another position.
+pub fn move_guide(scene: &mut SceneDocument, id: u32, position: f64) -> Result<EditEffect, Refusal> {
+    if !position.is_finite() {
+        return Err(Refusal::ObjectFieldValueInvalid { field: "guides".into(), detail: "a guide's position must be a finite number".into() });
+    }
+    let Some(guide) = scene.guides.iter_mut().find(|g| g.id == id) else {
+        return Err(Refusal::ObjectFieldValueInvalid { field: "guides".into(), detail: format!("there is no guide {id}") });
+    };
+    if guide.position == position {
+        return Err(Refusal::ObjectFieldUnchanged { field: "guides".into() });
+    }
+    guide.position = position;
+    Ok(EditEffect::None)
+}
+
+/// Take a guide off the canvas.
+pub fn remove_guide(scene: &mut SceneDocument, id: u32) -> Result<EditEffect, Refusal> {
+    let Some(at) = scene.guides.iter().position(|g| g.id == id) else {
+        return Err(Refusal::ObjectFieldValueInvalid { field: "guides".into(), detail: format!("there is no guide {id}") });
+    };
+    scene.guides.remove(at);
+    Ok(EditEffect::None)
+}
+
+/// Take one subpath out of a compound shape (11.112). The others keep their contour ids (given ids first if the shape had none), the
+/// path channels and links of the shape follow them to their new places, and those of the subpath taken out end with it.
+pub fn remove_subpath(scene: &mut SceneDocument, shape_id: &str, subpath: usize) -> Result<EditEffect, Refusal> {
+    use crate::path_geometry::PathTarget;
+    let index = object_index(scene, shape_id)?;
+    let SceneObject::Shape(shape) = &scene.objects[index] else {
+        return Err(not_applicable("path", &[&scene.objects[index]]));
+    };
+    let mut paths = vec![shape.path.clone()];
+    paths.extend(shape.compound_paths.clone().unwrap_or_default());
+    if paths.len() < 2 {
+        return Err(Refusal::ObjectFieldValueInvalid {
+            field: "compoundPaths".into(),
+            detail: "a shape keeps at least one path".into(),
+        });
+    }
+    if subpath >= paths.len() {
+        return Err(Refusal::ObjectFieldValueInvalid {
+            field: crate::path_anim::target_field(PathTarget::Shape { subpath }),
+            detail: "the shape has no such subpath".into(),
+        });
+    }
+    let mut ids = shape.contour_ids.clone().unwrap_or_else(|| (0..paths.len() as u32).collect());
+    let before = scene.clone();
+    paths.remove(subpath);
+    ids.remove(subpath);
+    let (width, height) = path_box(paths.iter());
+    let main = paths.remove(0);
+    if let SceneObject::Shape(shape) = &mut scene.objects[index] {
+        shape.path = main;
+        shape.compound_paths = (!paths.is_empty()).then_some(paths);
+        shape.contour_ids = Some(ids);
+        shape.base.width = width;
+        shape.base.height = height;
+    }
+    // Channels of the subpath end with it; those of later subpaths move up one place.
+    scene.timeline.path_channels.retain(|c| !(c.object_id == shape_id && c.target == PathTarget::Shape { subpath }));
+    for channel in &mut scene.timeline.path_channels {
+        if channel.object_id == shape_id {
+            if let PathTarget::Shape { subpath: at } = &mut channel.target {
+                if *at > subpath {
+                    *at -= 1;
+                }
+            }
+        }
+    }
+    // Links: the user in the subpath goes, later ones move up; a link left with fewer than two users ends.
+    for link in &mut scene.path_links {
+        link.users.retain(|u| !(u.object_id == shape_id && u.subpath == Some(subpath)));
+        for user in &mut link.users {
+            if user.object_id == shape_id {
+                if let Some(at) = &mut user.subpath {
+                    if *at > subpath {
+                        *at -= 1;
+                    }
+                }
+            }
+        }
+    }
+    scene.path_links.retain(|link| link.users.len() >= 2);
+    refuse_what_cannot_be_drawn(before, scene, &[(shape_id, &["path", "compoundPaths", "contourIds"])])?;
+    Ok(changed(vec![shape_id.to_owned()]))
+}
+
+/// One semantic path operation (plan row 11.107) on a shape's path or
+/// subpath, or on one of an object's masks. The shape goes through
+/// [`set_shape_path`] and the mask through [`set_object_masks`], so the box,
+/// the drawability check and the refusals are theirs; an operation the path
+/// cannot take is refused by name (`objectFieldValueInvalid`).
+///
+/// 11.112: with a `frame`, or on a path that already has a channel, the edit
+/// is an edit of an animated path (see [`edit_animated_path`]).
+pub fn edit_path(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    op: &crate::path_geometry::PathOp,
+    frame: Option<u64>,
+    base_revision: Option<u64>,
+) -> Result<EditEffect, Refusal> {
+    use crate::path_geometry::PathTarget;
+    let index = object_index(scene, object_id)?;
+    let invalid = |field: String, detail: &str| Refusal::ObjectFieldValueInvalid {
+        field,
+        detail: detail.into(),
+    };
+    // A linked path is one path in several places, keys included: the edit lands in all of them (11.112).
+    let linked = crate::path_link::link_at(scene, &crate::path_link::PathAddress { object_id: object_id.to_owned(), target }).is_some();
+    let animated_edit = path_channel_index(scene, object_id, target).is_some() || (frame.is_some() && !op.changes_topology());
+    if linked && animated_edit {
+        return through_link(scene, object_id, target, base_revision, |scene, gate| {
+            edit_animated_path(scene, object_id, target, op, frame, gate)?
+                .ok_or(Refusal::ObjectFieldUnchanged { field: crate::path_anim::target_field(target) })
+        });
+    }
+    if let Some(effect) = edit_linked_path(scene, object_id, target, op, base_revision)? {
+        return Ok(effect);
+    }
+    if let Some(effect) = edit_animated_path(scene, object_id, target, op, frame, true)? {
+        return Ok(effect);
+    }
+    match target {
+        PathTarget::Shape { subpath } => {
+            let SceneObject::Shape(shape) = &scene.objects[index] else {
+                return Err(not_applicable("path", &[&scene.objects[index]]));
+            };
+            let mut paths = vec![shape.path.clone()];
+            paths.extend(shape.compound_paths.clone().unwrap_or_default());
+            let field = if subpath == 0 {
+                "path".to_owned()
+            } else {
+                format!("compoundPaths[{}]", subpath - 1)
+            };
+            let Some(current) = paths.get(subpath) else {
+                return Err(invalid(field, "the shape has no such subpath"));
+            };
+            paths[subpath] = op.apply(current).map_err(|why| invalid(field, why))?;
+            let main = paths.remove(0);
+            set_shape_path(scene, object_id, &main, &paths, None)
+        }
+        PathTarget::Mask { index: mask } => {
+            let mut masks = scene.objects[index].base().masks().to_vec();
+            let field = format!("masks[{mask}].path");
+            let Some(current) = masks.get(mask) else {
+                return Err(invalid(field, "the object has no such mask"));
+            };
+            masks[mask].path = op.apply(&current.path).map_err(|why| invalid(field, why))?;
+            set_object_masks(scene, object_id, &masks)
+        }
+    }
+}
+
+/// An edit of a still linked path (11.112): the path every user shares is changed, written to all of them and its revision goes up by one.
+/// `Ok(None)` when the path is not linked. An edit made on an older revision than the path has is refused by name.
+fn edit_linked_path(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    op: &crate::path_geometry::PathOp,
+    base_revision: Option<u64>,
+) -> Result<Option<EditEffect>, Refusal> {
+    use crate::path_anim::{put_target_path, target_field, target_path};
+    use crate::path_link::{link_at, objects_of, PathAddress};
+    let address = PathAddress { object_id: object_id.to_owned(), target };
+    let Some(link_index) = link_at(scene, &address) else {
+        if base_revision.is_some() {
+            return Err(Refusal::ObjectFieldValueInvalid {
+                field: target_field(target),
+                detail: "a revision was named, but this path is not linked".into(),
+            });
+        }
+        return Ok(None);
+    };
+    let field = target_field(target);
+    let invalid = |detail: String| Refusal::ObjectFieldValueInvalid { field: field.clone(), detail };
+    let link = scene.path_links[link_index].clone();
+    if let Some(named) = base_revision {
+        if named != link.revision {
+            return Err(invalid(format!(
+                "the shared path {} was changed since revision {named}; it is revision {} now. Look at it again, then edit",
+                link.id, link.revision
+            )));
+        }
+    }
+    let Some(current) = target_path(scene, object_id, target) else {
+        return Err(invalid("there is no such path".into()));
+    };
+    let next = op.apply(&current).map_err(|why| invalid(why.into()))?;
+    if next == current {
+        return Err(Refusal::ObjectFieldUnchanged { field });
+    }
+    let before = scene.clone();
+    for user in &link.users {
+        if let Some(place) = user.target(scene) {
+            put_target_path(scene, &user.object_id, place, next.clone());
+        }
+    }
+    scene.path_links[link_index].revision += 1;
+    let objects = objects_of(&link);
+    for id in &objects {
+        refresh_shape_box(scene, id);
+    }
+    let edited: Vec<(&str, &[&str])> = objects.iter().map(|id| (id.as_str(), &["path", "compoundPaths", "masks"][..])).collect();
+    refuse_what_cannot_be_drawn(before, scene, &edited)?;
+    Ok(Some(changed(objects)))
+}
+
+/// Make `destination`'s path the same path as `source`'s (11.112): the numbers are copied in and the two are one linked path from then
+/// on. A mask is given an id when it has none. Refused by name when a path is not there, either is animated, they are the same path,
+/// or `destination` is linked already.
+pub fn link_paths(
+    scene: &mut SceneDocument,
+    source: &crate::path_link::PathAddress,
+    destination: &crate::path_link::PathAddress,
+) -> Result<EditEffect, Refusal> {
+    use crate::path_anim::{put_target_path, target_field, target_path};
+    use crate::path_link::{ensure_mask_id, link_at, next_link_id, user_at, PathLink};
+    let words = |a: &crate::path_link::PathAddress| format!("{} ({})", a.object_id, target_field(a.target));
+    let invalid = |detail: String| Refusal::ObjectFieldValueInvalid { field: "pathLinks".into(), detail };
+    object_index(scene, &source.object_id)?;
+    object_index(scene, &destination.object_id)?;
+    if source == destination {
+        return Err(invalid("a path cannot be linked to itself".into()));
+    }
+    let Some(shared) = target_path(scene, &source.object_id, source.target) else {
+        return Err(invalid(format!("{} has no such path", words(source))));
+    };
+    let Some(existing) = target_path(scene, &destination.object_id, destination.target) else {
+        return Err(invalid(format!("{} has no such path", words(destination))));
+    };
+    // The destination takes the source's path and keys; one that has keys of its own would lose them, so it is refused by name.
+    if scene.timeline.path_channels.iter().any(|c| c.object_id == destination.object_id && c.target == destination.target && !c.keys.is_empty()) {
+        return Err(invalid(format!("{} is animated: remove its path keys first, or link the other way round", words(destination))));
+    }
+    if link_at(scene, destination).is_some() {
+        return Err(invalid(format!("{} is linked already: unlink it first", words(destination))));
+    }
+    let before = scene.clone();
+    for address in [source, destination] {
+        if let crate::path_geometry::PathTarget::Mask { index } = address.target {
+            ensure_mask_id(scene, &address.object_id, index);
+        }
+    }
+    let (Some(source_user), Some(destination_user)) = (user_at(scene, source), user_at(scene, destination)) else {
+        return Err(invalid("a path to link is not there".into()));
+    };
+    let link_index = match scene.path_links.iter().position(|l| l.users.contains(&source_user)) {
+        Some(i) => i,
+        None => {
+            let id = next_link_id(scene);
+            scene.path_links.push(PathLink { id, revision: 1, users: vec![source_user] });
+            scene.path_links.len() - 1
+        }
+    };
+    put_target_path(scene, &destination.object_id, destination.target, shared.clone());
+    scene.path_links[link_index].users.push(destination_user);
+    if existing != shared {
+        scene.path_links[link_index].revision += 1;
+    }
+    // The keys of the source go to the destination too.
+    crate::path_link::sync_channels(scene, link_index, source);
+    refresh_shape_box(scene, &source.object_id);
+    refresh_shape_box(scene, &destination.object_id);
+    let mut edited: Vec<(&str, &[&str])> = vec![(source.object_id.as_str(), &["path", "compoundPaths", "masks"][..])];
+    if destination.object_id != source.object_id {
+        edited.push((destination.object_id.as_str(), &["path", "compoundPaths", "masks"][..]));
+    }
+    refuse_what_cannot_be_drawn(before, scene, &edited)?;
+    let mut ids = vec![source.object_id.clone()];
+    if destination.object_id != source.object_id {
+        ids.push(destination.object_id.clone());
+    }
+    Ok(changed(ids))
+}
+
+/// Take one path out of its link (11.112): it keeps the path it has and is independent from then on. A link left with one user ends.
+pub fn unlink_path(scene: &mut SceneDocument, address: &crate::path_link::PathAddress) -> Result<EditEffect, Refusal> {
+    use crate::path_link::{link_at, user_at};
+    object_index(scene, &address.object_id)?;
+    let (Some(link_index), Some(user)) = (link_at(scene, address), user_at(scene, address)) else {
+        return Err(Refusal::ObjectFieldUnchanged { field: "pathLinks".into() });
+    };
+    scene.path_links[link_index].users.retain(|u| u != &user);
+    if scene.path_links[link_index].users.len() < 2 {
+        scene.path_links.remove(link_index);
+    }
+    Ok(changed(vec![address.object_id.clone()]))
+}
+
+/// Run a path-key edit of `object_id`'s `target`; when that path is linked, the edit is made on it, then the rest path and the keys go to
+/// every other user of the link and the revision goes up (11.112). `run` is told whether to check drawability itself (it does not when the
+/// users are about to be brought in line). `base_revision`, when named, must be the link's.
+fn through_link(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    base_revision: Option<u64>,
+    run: impl FnOnce(&mut SceneDocument, bool) -> Result<EditEffect, Refusal>,
+) -> Result<EditEffect, Refusal> {
+    use crate::path_anim::{put_target_path, target_field, target_path};
+    use crate::path_link::{link_at, objects_of, sync_channels, PathAddress};
+    let address = PathAddress { object_id: object_id.to_owned(), target };
+    let Some(link_index) = link_at(scene, &address) else {
+        if base_revision.is_some() {
+            return Err(Refusal::ObjectFieldValueInvalid {
+                field: target_field(target),
+                detail: "a revision was named, but this path is not linked".into(),
+            });
+        }
+        return run(scene, true);
+    };
+    let link = scene.path_links[link_index].clone();
+    if let Some(named) = base_revision {
+        if named != link.revision {
+            return Err(Refusal::ObjectFieldValueInvalid {
+                field: target_field(target),
+                detail: format!(
+                    "the shared path {} was changed since revision {named}; it is revision {} now. Look at it again, then edit",
+                    link.id, link.revision
+                ),
+            });
+        }
+    }
+    let before = scene.clone();
+    if let Err(refusal) = run(scene, false) {
+        *scene = before;
+        return Err(refusal);
+    }
+    // The rest path and the keys of the edited user go to the others.
+    if let Some(rest) = target_path(scene, object_id, target) {
+        for user in &link.users {
+            if let Some(place) = user.target(scene) {
+                if !(user.object_id == object_id && place == target) {
+                    put_target_path(scene, &user.object_id, place, rest.clone());
+                }
+            }
+        }
+    }
+    sync_channels(scene, link_index, &address);
+    scene.path_links[link_index].revision += 1;
+    let objects = objects_of(&link);
+    for id in &objects {
+        refresh_shape_box(scene, id);
+    }
+    let edited: Vec<(&str, &[&str])> = objects.iter().map(|id| (id.as_str(), &["path", "compoundPaths", "masks"][..])).collect();
+    if let Err(refusal) = refuse_what_cannot_be_drawn(before.clone(), scene, &edited) {
+        *scene = before;
+        return Err(refusal);
+    }
+    Ok(changed(objects))
+}
+
+/// The index of the channel of one target, if it has one.
+fn path_channel_index(
+    scene: &SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+) -> Option<usize> {
+    scene
+        .timeline
+        .path_channels
+        .iter()
+        .position(|c| c.object_id == object_id && c.target == target)
+}
+
+/// The vertex box of one shape: its path, its subpaths and every key of its
+/// channels (11.112), so an animated shape's box holds all its keys.
+fn refresh_shape_box(scene: &mut SceneDocument, object_id: &str) {
+    let Ok(index) = object_index(scene, object_id) else {
+        return;
+    };
+    let SceneObject::Shape(shape) = &scene.objects[index] else {
+        return;
+    };
+    let keys: Vec<BezierPath> = scene
+        .timeline
+        .path_channels
+        .iter()
+        .filter(|c| c.object_id == object_id)
+        .flat_map(|c| c.keys.iter().map(|k| k.path.clone()))
+        .collect();
+    let (width, height) = path_box(
+        std::iter::once(&shape.path)
+            .chain(shape.compound_paths.iter().flatten())
+            .chain(keys.iter()),
+    );
+    if let SceneObject::Shape(shape) = &mut scene.objects[index] {
+        shape.base.width = width;
+        shape.base.height = height;
+    }
+}
+
+/// The object fields a path edit of `target` may change, for the drawability gate.
+fn path_fields(target: crate::path_geometry::PathTarget) -> &'static [&'static str] {
+    if matches!(target, crate::path_geometry::PathTarget::Mask { .. }) {
+        &["masks"]
+    } else {
+        &["path", "compoundPaths"]
+    }
+}
+
+/// An edit of a path that is, or is becoming, animated (11.112). `Ok(None)` when
+/// the path is static and the edit is one of the plain static edits.
+///
+/// - an edit of WHICH vertices there are (insert, delete, keep-shape delete,
+///   reverse, first vertex, close) lands in every key and the rest path at
+///   once; an inserted vertex takes the same new id in each and splits each
+///   curve exactly, so the shape at every key is unchanged;
+/// - any other edit needs a `frame` and sets the key there (made from the
+///   path as it is at that frame when the frame has no key yet);
+/// - a geometry edit with a frame on a static path starts its channel.
+fn edit_animated_path(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    op: &crate::path_geometry::PathOp,
+    frame: Option<u64>,
+    gate: bool,
+) -> Result<Option<EditEffect>, Refusal> {
+    use crate::path_anim::{
+        evaluate_path_channel, fresh_channel_id, put_target_path, target_field, target_path,
+        PathChannel, PathKey,
+    };
+    use crate::path_geometry::{same_topology, with_ids};
+    let field = target_field(target);
+    let invalid = |detail: &str| Refusal::ObjectFieldValueInvalid {
+        field: field.clone(),
+        detail: detail.into(),
+    };
+    let channel_at = path_channel_index(scene, object_id, target);
+    let topology = op.changes_topology();
+    match (channel_at, frame) {
+        (None, None) => return Ok(None),
+        (None, Some(_)) if topology => return Ok(None),
+        (Some(_), None) if !topology => {
+            return Err(invalid("this path is animated: say at which frame the edit is made"));
+        }
+        _ => {}
+    }
+    object_index(scene, object_id)?;
+    let Some(base) = target_path(scene, object_id, target) else {
+        return Err(invalid("there is no such path"));
+    };
+    let before = scene.clone();
+    if topology {
+        let channel_index = channel_at.expect("a topology edit reaches here only with a channel");
+        let channel = scene.timeline.path_channels[channel_index].clone();
+        // Every key must be the same vertices as the rest path, or "vertex 3"
+        // would mean different vertices in different keys.
+        let base = with_ids(&base);
+        let keys: Vec<PathKey> = channel
+            .keys
+            .iter()
+            .map(|k| PathKey { path: with_ids(&k.path), ..k.clone() })
+            .collect();
+        if let Some(odd) = keys.iter().find(|k| !same_topology(&base, &k.path)) {
+            return Err(invalid(&format!(
+                "the key at frame {} does not have the same vertices as the others; make them agree first",
+                odd.frame
+            )));
+        }
+        let fresh = fresh_channel_id(&base, Some(&PathChannel { keys: keys.clone(), ..channel.clone() }));
+        let apply = |path: &BezierPath, at: Option<u64>| {
+            op.apply_with(path, Some(fresh)).map_err(|why| {
+                invalid(&match at {
+                    Some(frame) => format!("at frame {frame}: {why}"),
+                    None => why.to_owned(),
+                })
+            })
+        };
+        let new_base = apply(&base, None)?;
+        let mut new_keys = Vec::with_capacity(keys.len());
+        for key in &keys {
+            new_keys.push(PathKey { path: apply(&key.path, Some(key.frame))?, ..key.clone() });
+        }
+        put_target_path(scene, object_id, target, new_base);
+        scene.timeline.path_channels[channel_index].keys = new_keys;
+    } else {
+        let frame = frame.expect("a geometry edit reaches here only with a frame");
+        let base = with_ids(&base);
+        let (current, easing, bezier, at_key) = match channel_at {
+            Some(i) => {
+                let channel = &scene.timeline.path_channels[i];
+                let at = channel.keys.iter().find(|k| k.frame == frame);
+                let previous = channel.keys.iter().rev().find(|k| k.frame < frame);
+                let path = match at {
+                    Some(key) => key.path.clone(),
+                    None => evaluate_path_channel(channel, frame)?
+                        .map(|v| v.path)
+                        .unwrap_or_else(|| base.clone()),
+                };
+                let (easing, bezier) = at
+                    .or(previous)
+                    .map_or((crate::animation::SceneEasing::Linear, None), |k| (k.easing, k.bezier));
+                (with_ids(&path), easing, bezier, at.is_some())
+            }
+            None => (base.clone(), crate::animation::SceneEasing::Linear, None, false),
+        };
+        let edited = op.apply(&current).map_err(invalid)?;
+        if edited == current && at_key {
+            return Err(Refusal::ObjectFieldUnchanged { field });
+        }
+        if channel_at.is_none() {
+            // The rest path takes the ids, so its keys and it correspond.
+            put_target_path(scene, object_id, target, base);
+            scene.timeline.path_channels.push(PathChannel {
+                object_id: object_id.to_owned(),
+                target,
+                keys: Vec::new(),
+            });
+        }
+        let i = path_channel_index(scene, object_id, target).expect("the channel exists now");
+        let keys = &mut scene.timeline.path_channels[i].keys;
+        let key = PathKey { frame, path: edited, easing, bezier };
+        match keys.iter().position(|k| k.frame >= frame) {
+            Some(at) if keys[at].frame == frame => keys[at] = key,
+            Some(at) => keys.insert(at, key),
+            None => keys.push(key),
+        }
+    }
+    refresh_shape_box(scene, object_id);
+    if gate {
+        refuse_what_cannot_be_drawn(before, scene, &[(object_id, path_fields(target))])?;
+    }
+    Ok(Some(changed(vec![object_id.to_owned()])))
+}
+
+/// Put a whole path key on a path channel (11.112), creating the channel with
+/// its first key. A key already at that frame is replaced; the same path and
+/// easing again is refused by name. A path with no ids takes the vertex index
+/// as the id, so keys of the same shape correspond.
+pub fn set_path_key(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    frame: u64,
+    path: &BezierPath,
+    easing: crate::animation::SceneEasing,
+    bezier: Option<crate::animation::CubicBezier>,
+) -> Result<EditEffect, Refusal> {
+    through_link(scene, object_id, target, None, |scene, gate| {
+        set_path_key_inner(scene, object_id, target, frame, path, easing, bezier, gate)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_path_key_inner(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    frame: u64,
+    path: &BezierPath,
+    easing: crate::animation::SceneEasing,
+    bezier: Option<crate::animation::CubicBezier>,
+    gate: bool,
+) -> Result<EditEffect, Refusal> {
+    use crate::path_anim::{put_target_path, target_field, target_path, PathChannel, PathKey};
+    use crate::path_geometry::with_ids;
+    object_index(scene, object_id)?;
+    let field = target_field(target);
+    let Some(base) = target_path(scene, object_id, target) else {
+        return Err(Refusal::ObjectFieldValueInvalid {
+            field,
+            detail: "there is no such path".into(),
+        });
+    };
+    if (easing == crate::animation::SceneEasing::CustomBezier) != bezier.is_some() {
+        return Err(Refusal::InvalidKeyframeEasing {
+            object: object_id.to_owned(),
+            property: field,
+            detail: "custom-bezier and its control points go together".into(),
+        });
+    }
+    let path = with_ids(path);
+    let before = scene.clone();
+    if path_channel_index(scene, object_id, target).is_none() {
+        put_target_path(scene, object_id, target, with_ids(&base));
+        scene.timeline.path_channels.push(PathChannel {
+            object_id: object_id.to_owned(),
+            target,
+            keys: Vec::new(),
+        });
+    }
+    let i = path_channel_index(scene, object_id, target).expect("the channel exists now");
+    let keys = &mut scene.timeline.path_channels[i].keys;
+    let key = PathKey { frame, path, easing, bezier };
+    match keys.iter().position(|k| k.frame >= frame) {
+        Some(at) if keys[at].frame == frame => {
+            if keys[at] == key {
+                *scene = before;
+                return Err(Refusal::ObjectFieldUnchanged { field });
+            }
+            keys[at] = key;
+        }
+        Some(at) => keys.insert(at, key),
+        None => keys.push(key),
+    }
+    refresh_shape_box(scene, object_id);
+    if gate {
+        refuse_what_cannot_be_drawn(before, scene, &[(object_id, path_fields(target))])?;
+    }
+    Ok(changed(vec![object_id.to_owned()]))
+}
+
+/// Move one key of a path channel to another frame (11.112). The new frame must be inside the timeline and
+/// free, as for a numeric key.
+pub fn move_path_key(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    from: u64,
+    to: u64,
+) -> Result<EditEffect, Refusal> {
+    through_link(scene, object_id, target, None, |scene, _| move_path_key_inner(scene, object_id, target, from, to))
+}
+
+fn move_path_key_inner(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    from: u64,
+    to: u64,
+) -> Result<EditEffect, Refusal> {
+    use crate::path_anim::target_field;
+    object_index(scene, object_id)?;
+    let field = target_field(target);
+    let Some(i) = path_channel_index(scene, object_id, target) else {
+        return Err(Refusal::AnimationChannelUnknown { object: object_id.to_owned(), property: field });
+    };
+    let Some(at) = scene.timeline.path_channels[i].keys.iter().position(|k| k.frame == from) else {
+        return Err(Refusal::KeyframeUnknown { object: object_id.to_owned(), property: field, frame: from });
+    };
+    if from == to {
+        return Err(Refusal::ObjectFieldUnchanged { field });
+    }
+    if to > scene.timeline.duration_frames {
+        return Err(Refusal::KeyframeOutOfRange {
+            object: object_id.to_owned(),
+            property: field,
+            frame: to,
+            duration_frames: scene.timeline.duration_frames,
+        });
+    }
+    if scene.timeline.path_channels[i].keys.iter().any(|k| k.frame == to) {
+        return Err(Refusal::DuplicateKeyframeFrame { object: object_id.to_owned(), property: field, frame: to });
+    }
+    let keys = &mut scene.timeline.path_channels[i].keys;
+    let mut key = keys.remove(at);
+    key.frame = to;
+    let place = keys.partition_point(|k| k.frame < to);
+    keys.insert(place, key);
+    Ok(changed(vec![object_id.to_owned()]))
+}
+
+/// Take one key off a path channel (11.112). Removing the last key ends the
+/// channel; the path then stays as that key had it, so nothing jumps.
+pub fn remove_path_key(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    frame: u64,
+) -> Result<EditEffect, Refusal> {
+    through_link(scene, object_id, target, None, |scene, gate| remove_path_key_inner(scene, object_id, target, frame, gate))
+}
+
+fn remove_path_key_inner(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    target: crate::path_geometry::PathTarget,
+    frame: u64,
+    gate: bool,
+) -> Result<EditEffect, Refusal> {
+    use crate::path_anim::{put_target_path, target_field};
+    object_index(scene, object_id)?;
+    let field = target_field(target);
+    let Some(i) = path_channel_index(scene, object_id, target) else {
+        return Err(Refusal::AnimationChannelUnknown { object: object_id.to_owned(), property: field });
+    };
+    let Some(at) = scene.timeline.path_channels[i].keys.iter().position(|k| k.frame == frame) else {
+        return Err(Refusal::KeyframeUnknown { object: object_id.to_owned(), property: field, frame });
+    };
+    let before = scene.clone();
+    let removed = scene.timeline.path_channels[i].keys.remove(at);
+    if scene.timeline.path_channels[i].keys.is_empty() {
+        scene.timeline.path_channels.remove(i);
+        put_target_path(scene, object_id, target, removed.path);
+    }
+    refresh_shape_box(scene, object_id);
+    if gate {
+        refuse_what_cannot_be_drawn(before, scene, &[(object_id, path_fields(target))])?;
+    }
+    Ok(changed(vec![object_id.to_owned()]))
 }
 
 /// The width and height of the vertex bounds of `paths`.
@@ -477,6 +1198,8 @@ pub fn set_object_masks(
     }
     let before = scene.clone();
     scene.objects[index].base_mut().masks = (!masks.is_empty()).then(|| masks.to_vec());
+    // A mask taken away leaves its link: the link ends with fewer than two users (11.112).
+    crate::path_link::prune_path_links(scene);
     refuse_what_cannot_be_drawn(before, scene, &[(object_id, &["masks"])])?;
     Ok(changed(vec![object_id.to_owned()]))
 }
@@ -511,6 +1234,15 @@ pub fn set_track_matte(
     matte: Option<&TrackMatte>,
 ) -> Result<EditEffect, Refusal> {
     let index = object_index(scene, object_id)?;
+    // A matte is set to a source that is there; one that goes later passes through with a warning (3.30).
+    if let Some(matte) = matte {
+        if !scene.objects.iter().any(|o| o.base().id == matte.source_id) {
+            return Err(Refusal::TrackMatteInvalid {
+                object: object_id.to_owned(),
+                detail: format!("the track matte source {} is not in the scene", matte.source_id),
+            });
+        }
+    }
     if scene.objects[index].base().track_matte() == matte {
         return Err(Refusal::ObjectFieldUnchanged {
             field: "trackMatte".into(),
@@ -519,6 +1251,23 @@ pub fn set_track_matte(
     let before = scene.clone();
     scene.objects[index].base_mut().track_matte = matte.cloned();
     refuse_what_cannot_be_drawn(before, scene, &[(object_id, &["trackMatte"])])?;
+    Ok(changed(vec![object_id.to_owned()]))
+}
+
+/// Turn Preserve Underlying Transparency on or off for one layer (3.28).
+/// Refuses by name when it is already so.
+pub fn set_preserve_transparency(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    preserve: bool,
+) -> Result<EditEffect, Refusal> {
+    let index = object_index(scene, object_id)?;
+    if scene.objects[index].base().preserves_underlying_transparency() == preserve {
+        return Err(Refusal::ObjectFieldUnchanged {
+            field: "preserveUnderlyingTransparency".into(),
+        });
+    }
+    scene.objects[index].base_mut().preserve_underlying_transparency = preserve.then_some(true);
     Ok(changed(vec![object_id.to_owned()]))
 }
 
@@ -731,14 +1480,21 @@ mod tests {
             vertices: vec![v(0.0, 0.0), v(100.0, 0.0), v(50.0, 80.0)],
             in_tangents: vec![v(0.0, 0.0); 3],
             out_tangents: vec![v(0.0, 0.0); 3],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         }
     }
 
     fn mask(mode: MaskMode) -> Mask {
         Mask {
+            id: None,
             path: triangle(),
             mode,
             feather: 0.0,
+            feather_y: None,
+            falloff: Default::default(),
+            feather_points: None,
             expansion: 0.0,
             opacity: 1.0,
             inverted: false,
@@ -771,6 +1527,9 @@ mod tests {
                 vertices: vec![v(0.0, 0.0), v(100.0, 0.0)],
                 in_tangents: vec![v(0.0, 0.0); 2],
                 out_tangents: vec![v(0.0, 0.0); 2],
+                vertex_ids: None,
+                vertex_kinds: None,
+                auto_tension: None,
             },
             compound_paths: None,
             fill_enabled: true,
@@ -779,6 +1538,7 @@ mod tests {
             trim_start: None,
             trim_end: None,
             trim_offset: None,
+            contour_ids: None,
         })
     }
 
@@ -940,13 +1700,10 @@ mod tests {
             set_track_matte(&mut s, "path", Some(&matte("ghost"))),
             Err(Refusal::TrackMatteInvalid { .. })
         ));
-        // `disc` is `card`'s matte source, so it cannot take a matte of its
-        // own: the refusal is at `card`, which the edit did not name.
-        assert!(matches!(
-            set_track_matte(&mut s, "disc", Some(&matte("path"))),
-            Err(Refusal::TrackMatteInvalid { object, .. }) if object == "card"
-        ));
-        assert!(s.objects[1].base().track_matte().is_none());
+        // 3.30: `disc` is `card`'s matte source and may take a matte of its own: a matte reads its source before the source's matte.
+        assert!(set_track_matte(&mut s, "disc", Some(&matte("path"))).is_ok());
+        assert!(s.objects[1].base().track_matte().is_some());
+        assert!(set_track_matte(&mut s, "disc", None).is_ok());
         assert!(set_track_matte(&mut s, "card", None).is_ok());
         assert!(set_track_matte(&mut s, "disc", Some(&matte("path"))).is_ok());
     }
@@ -1161,6 +1918,9 @@ mod tests {
             vertices: vec![v(10.0, 20.0), v(110.0, 60.0)],
             in_tangents: vec![v(0.0, 0.0); 2],
             out_tangents: vec![v(0.0, 0.0); 2],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         };
         let Ok(EditEffect::ObjectCreated { object_id }) =
             create_shape(&mut s, " Wipe ", &line, &[])
@@ -1306,6 +2066,9 @@ mod tests {
             ],
             in_tangents: vec![v(0.0, 0.0); 4],
             out_tangents: vec![v(0.0, 0.0); 4],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         }
     }
 
@@ -1403,6 +2166,9 @@ mod tests {
             vertices: vec![v(0.0, 0.0)],
             in_tangents: vec![v(0.0, 0.0)],
             out_tangents: vec![v(0.0, 0.0)],
+            vertex_ids: None,
+            vertex_kinds: None,
+            auto_tension: None,
         };
         assert!(matches!(
             create_shape(&mut s, "Bad", &square(0.0, 0.0, 10.0), std::slice::from_ref(&short)),
@@ -1489,5 +2255,538 @@ mod tests {
             set_object_field(&mut s, &ids(&["disc"]), &ObjectField::ZIndex(3)),
             Err(Refusal::ObjectFieldUnchanged { .. })
         ));
+    }
+    #[test]
+    fn edit_path_changes_a_shape_subpath_or_a_mask_by_name() {
+        use crate::path_geometry::{HandleCoupling, HandleSide, PathOp, PathTarget};
+        let mut s = new_scene("s", "S", WorkingColorSpace::NEW_PROJECT);
+        let Ok(EditEffect::ObjectCreated { object_id }) = create_shape(
+            &mut s,
+            "Pair",
+            &square(0.0, 0.0, 50.0),
+            &[square(100.0, 0.0, 50.0)],
+        ) else {
+            panic!("a compound shape is created");
+        };
+        // The main path takes an insert and keeps its curve (a square's side is straight).
+        edit_path(
+            &mut s,
+            &object_id,
+            PathTarget::Shape { subpath: 0 },
+            &PathOp::InsertVertex { segment: 0, t: 0.5 }, None, None
+        )
+        .unwrap();
+        let SceneObject::Shape(shape) = &s.objects[0] else {
+            panic!("a shape");
+        };
+        assert_eq!(shape.path.vertices.len(), 5);
+        assert_eq!(shape.path.vertices[1].x, 25.0);
+        assert_eq!(
+            shape.compound_paths.as_ref().unwrap()[0],
+            square(100.0, 0.0, 50.0)
+        );
+        // A subpath is reached by its place, and the box follows the vertices.
+        edit_path(
+            &mut s,
+            &object_id,
+            PathTarget::Shape { subpath: 1 },
+            &PathOp::MoveVertices {
+                indices: vec![0, 1, 2, 3],
+                delta: Vec2 { x: 200.0, y: 0.0 },
+            }, None, None
+        )
+        .unwrap();
+        assert_eq!(s.objects[0].base().width, 350.0);
+        let one_handle = PathOp::SetHandle {
+            index: 0,
+            side: HandleSide::Out,
+            vector: Vec2 { x: 5.0, y: 5.0 },
+            coupling: HandleCoupling::Mirror,
+        };
+        edit_path(
+            &mut s,
+            &object_id,
+            PathTarget::Shape { subpath: 0 },
+            &one_handle, None, None
+        )
+        .unwrap();
+        // Refused by name: a subpath that is not there, a path that cannot take it, an unchanged result.
+        assert!(matches!(
+            edit_path(&mut s, &object_id, PathTarget::Shape { subpath: 5 }, &PathOp::Reverse, None, None),
+            Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "compoundPaths[4]"
+        ));
+        assert!(matches!(
+            edit_path(
+                &mut s,
+                &object_id,
+                PathTarget::Shape { subpath: 0 },
+                &PathOp::DeleteVertices { indices: vec![9] }, None, None
+            ),
+            Err(Refusal::ObjectFieldValueInvalid { field, detail }) if field == "path" && detail == "there is no such vertex"
+        ));
+        assert!(matches!(
+            edit_path(
+                &mut s,
+                &object_id,
+                PathTarget::Shape { subpath: 0 },
+                &PathOp::SetClosed { closed: true }, None, None
+            ),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        assert!(matches!(
+            edit_path(&mut s, &object_id, PathTarget::Mask { index: 0 }, &PathOp::Reverse, None, None),
+            Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "masks[0].path"
+        ));
+        assert!(matches!(
+            edit_path(
+                &mut s,
+                "nope",
+                PathTarget::Shape { subpath: 0 },
+                &PathOp::Reverse, None, None
+            ),
+            Err(Refusal::SceneObjectUnknown { .. })
+        ));
+    }
+
+    fn animated_shape() -> (SceneDocument, String) {
+        let mut s = new_scene("s", "S", WorkingColorSpace::NEW_PROJECT);
+        s.timeline.duration_frames = 100;
+        let Ok(EditEffect::ObjectCreated { object_id }) =
+            create_shape(&mut s, "Box", &square(0.0, 0.0, 50.0), &[])
+        else {
+            panic!("a shape");
+        };
+        (s, object_id)
+    }
+
+    fn shape_path(s: &SceneDocument) -> BezierPath {
+        let SceneObject::Shape(shape) = &s.objects[0] else { panic!("a shape") };
+        shape.path.clone()
+    }
+
+    #[test]
+    fn a_geometry_edit_at_a_frame_makes_keys_and_the_path_moves_between_them() {
+        use crate::path_anim::evaluate_path_channel;
+        use crate::path_geometry::{PathOp, PathTarget};
+        let (mut s, id) = animated_shape();
+        let target = PathTarget::Shape { subpath: 0 };
+        let move_all = |dx: f64| PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: dx, y: 0.0 } };
+        // No frame, no channel: a plain static edit, as before.
+        edit_path(&mut s, &id, target, &move_all(1.0), None, None).unwrap();
+        assert!(s.timeline.path_channels.is_empty());
+        // A frame on a geometry edit starts the channel with that key; the rest path takes ids.
+        // (A key set at the value the path has is a key: Set Keyframe at the current value.)
+        edit_path(&mut s, &id, target, &move_all(0.0), Some(0), None).unwrap();
+        assert_eq!(s.timeline.path_channels[0].keys.len(), 1);
+        edit_path(&mut s, &id, target, &move_all(10.0), Some(0), None).unwrap();
+        assert_eq!(s.timeline.path_channels.len(), 1);
+        assert_eq!(shape_path(&s).vertex_ids, Some(vec![0, 1, 2, 3]));
+        edit_path(&mut s, &id, target, &move_all(100.0), Some(20), None).unwrap();
+        let channel = &s.timeline.path_channels[0];
+        assert_eq!(channel.keys.iter().map(|k| k.frame).collect::<Vec<_>>(), vec![0, 20]);
+        let mid = evaluate_path_channel(channel, 10).unwrap().unwrap().path;
+        assert_eq!(mid.vertices[0].x, (11.0 + 111.0) / 2.0);
+        // The box holds every key, so the layer source is big enough for all of them.
+        assert_eq!(s.objects[0].base().width, 160.0); // x from 1 (the rest path) to 161 (the last key)
+        // Editing at a frame that has a key changes that key; an edit that changes nothing is refused by name.
+        edit_path(&mut s, &id, target, &move_all(5.0), Some(20), None).unwrap();
+        assert!(matches!(
+            edit_path(&mut s, &id, target, &move_all(0.0), Some(20), None),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        // An animated path refuses a geometry edit that names no frame, and a frame past the timeline.
+        assert!(matches!(
+            edit_path(&mut s, &id, target, &move_all(3.0), None, None),
+            Err(Refusal::ObjectFieldValueInvalid { detail, .. }) if detail.contains("which frame")
+        ));
+        assert!(matches!(
+            edit_path(&mut s, &id, target, &move_all(3.0), Some(101), None),
+            Err(Refusal::KeyframeOutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn a_topology_edit_lands_in_every_key_with_one_new_id_and_the_shape_at_each_key_is_unchanged() {
+        use crate::path_geometry::{cubic_of, point_at, PathOp, PathTarget};
+        let (mut s, id) = animated_shape();
+        let target = PathTarget::Shape { subpath: 0 };
+        let move_all = |dx: f64| PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: dx, y: 0.0 } };
+        edit_path(&mut s, &id, target, &move_all(10.0), Some(0), None).unwrap();
+        edit_path(&mut s, &id, target, &PathOp::SetHandle {
+            index: 0,
+            side: crate::path_geometry::HandleSide::Out,
+            vector: Vec2 { x: 5.0, y: 12.0 },
+            coupling: crate::path_geometry::HandleCoupling::None,
+        }, Some(20), None).unwrap();
+        let before: Vec<BezierPath> = s.timeline.path_channels[0].keys.iter().map(|k| k.path.clone()).collect();
+        // No frame needed: which vertices there are is the same at every frame.
+        edit_path(&mut s, &id, target, &PathOp::InsertVertex { segment: 0, t: 0.25 }, None, None).unwrap();
+        let channel = &s.timeline.path_channels[0];
+        for (key, old) in channel.keys.iter().zip(&before) {
+            assert_eq!(key.path.vertex_ids, Some(vec![0, 4, 1, 2, 3]), "the same new id in every key");
+            let (whole, left, right) = (cubic_of(old, 0), cubic_of(&key.path, 0), cubic_of(&key.path, 1));
+            for k in 0..=10 {
+                let u = k as f64 / 10.0;
+                let (a, b) = (point_at(&left, u), point_at(&whole, 0.25 * u));
+                assert!((a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9);
+                let (a, b) = (point_at(&right, u), point_at(&whole, 0.25 + 0.75 * u));
+                assert!((a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9);
+            }
+        }
+        assert_eq!(shape_path(&s).vertex_ids, Some(vec![0, 4, 1, 2, 3]));
+        // Delete follows its stated policy: the vertex goes from every key and the rest path.
+        edit_path(&mut s, &id, target, &PathOp::DeleteVertices { indices: vec![1] }, None, None).unwrap();
+        for key in &s.timeline.path_channels[0].keys {
+            assert_eq!(key.path.vertex_ids, Some(vec![0, 1, 2, 3]));
+        }
+        // Reverse and first vertex keep keys corresponding.
+        edit_path(&mut s, &id, target, &PathOp::SetFirstVertex { index: 2 }, None, None).unwrap();
+        for key in &s.timeline.path_channels[0].keys {
+            assert_eq!(key.path.vertex_ids, Some(vec![2, 3, 0, 1]));
+        }
+        // A key that does not share the vertices stops a topology edit, by name and frame.
+        s.timeline.path_channels[0].keys[1].path = crate::path_geometry::reverse_path(&s.timeline.path_channels[0].keys[1].path);
+        let err = edit_path(&mut s, &id, target, &PathOp::Reverse, None, None).unwrap_err();
+        assert!(matches!(&err, Refusal::ObjectFieldValueInvalid { detail, .. } if detail.contains("frame 20")), "{err:?}");
+    }
+
+    #[test]
+    fn a_mask_path_animates_the_same_way_and_a_key_can_be_set_and_removed_whole() {
+        use crate::animation::SceneEasing;
+        use crate::path_geometry::{PathOp, PathTarget};
+        use crate::scene::{Mask, MaskMode};
+        let (mut s, id) = animated_shape();
+        let mask = Mask {
+            id: Some("m1".into()),
+            mode: MaskMode::Add,
+            path: square(0.0, 0.0, 30.0),
+            feather: 0.0,
+            feather_y: None,
+            falloff: None,
+            feather_points: None,
+            expansion: 0.0,
+            opacity: 1.0,
+            inverted: false,
+        };
+        set_object_masks(&mut s, &id, &[mask]).unwrap();
+        let target = PathTarget::Mask { index: 0 };
+        let op = PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: 40.0, y: 0.0 } };
+        edit_path(&mut s, &id, target, &op, Some(10), None).unwrap();
+        assert_eq!(s.timeline.path_channels[0].target, target);
+        // A whole key by value, with an easing; the same again is refused by name.
+        let mut far = square(0.0, 0.0, 30.0);
+        far.vertices[2].y += 40.0;
+        set_path_key(&mut s, &id, target, 30, &far, SceneEasing::Linear, None).unwrap();
+        assert!(matches!(
+            set_path_key(&mut s, &id, target, 30, &far, SceneEasing::Linear, None),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        assert!(matches!(
+            set_path_key(&mut s, &id, target, 31, &far, SceneEasing::CustomBezier, None),
+            Err(Refusal::InvalidKeyframeEasing { .. })
+        ));
+        assert!(matches!(
+            set_path_key(&mut s, &id, PathTarget::Mask { index: 4 }, 3, &far, SceneEasing::Linear, None),
+            Err(Refusal::ObjectFieldValueInvalid { .. })
+        ));
+        // A key moves to a free frame inside the timeline; an occupied or out-of-range frame is refused by name.
+        move_path_key(&mut s, &id, target, 10, 12).unwrap();
+        assert_eq!(s.timeline.path_channels[0].keys.iter().map(|k| k.frame).collect::<Vec<_>>(), vec![12, 30]);
+        move_path_key(&mut s, &id, target, 30, 5).unwrap();
+        assert_eq!(s.timeline.path_channels[0].keys.iter().map(|k| k.frame).collect::<Vec<_>>(), vec![5, 12]);
+        assert!(matches!(move_path_key(&mut s, &id, target, 5, 12), Err(Refusal::DuplicateKeyframeFrame { frame: 12, .. })));
+        assert!(matches!(move_path_key(&mut s, &id, target, 5, 500), Err(Refusal::KeyframeOutOfRange { .. })));
+        assert!(matches!(move_path_key(&mut s, &id, target, 5, 5), Err(Refusal::ObjectFieldUnchanged { .. })));
+        assert!(matches!(move_path_key(&mut s, &id, target, 6, 7), Err(Refusal::KeyframeUnknown { frame: 6, .. })));
+        move_path_key(&mut s, &id, target, 5, 30).unwrap();
+        move_path_key(&mut s, &id, target, 12, 10).unwrap();
+        // Removing keys: the last one's removal ends the channel and the mask keeps that key's path.
+        assert!(matches!(
+            remove_path_key(&mut s, &id, target, 5),
+            Err(Refusal::KeyframeUnknown { frame: 5, .. })
+        ));
+        remove_path_key(&mut s, &id, target, 10).unwrap();
+        remove_path_key(&mut s, &id, target, 30).unwrap();
+        assert!(s.timeline.path_channels.is_empty());
+        assert_eq!(s.objects[0].base().masks()[0].path.vertices[2], far.vertices[2]);
+        assert!(matches!(
+            remove_path_key(&mut s, &id, target, 30),
+            Err(Refusal::AnimationChannelUnknown { .. })
+        ));
+    }
+
+    fn linked_scene() -> (SceneDocument, String) {
+        use crate::scene::{Mask, MaskMode};
+        let (mut s, id) = animated_shape();
+        let mut card = rect("card");
+        card.base_mut().masks = Some(vec![Mask {
+            id: None,
+            path: square(0.0, 0.0, 30.0),
+            mode: MaskMode::Add,
+            feather: 0.0,
+            feather_y: None,
+            falloff: None,
+            feather_points: None,
+            expansion: 0.0,
+            opacity: 1.0,
+            inverted: false,
+        }]);
+        s.objects.push(card);
+        (s, id)
+    }
+
+    fn address(object: &str, target: crate::path_geometry::PathTarget) -> crate::path_link::PathAddress {
+        crate::path_link::PathAddress { object_id: object.into(), target }
+    }
+
+    #[test]
+    fn a_linked_path_is_one_path_in_two_places_and_an_edit_names_the_revision_it_was_made_on() {
+        use crate::path_geometry::{PathOp, PathTarget};
+        let (mut s, id) = linked_scene();
+        let (shape, mask) = (address(&id, PathTarget::Shape { subpath: 0 }), address("card", PathTarget::Mask { index: 0 }));
+        // Nothing is shared until the author links: a copy stays independent.
+        edit_path(&mut s, &id, shape.target, &PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: 1.0, y: 0.0 } }, None, None).unwrap();
+        assert_ne!(s.objects[1].base().masks()[0].path, shape_path(&s));
+        link_paths(&mut s, &shape, &mask).unwrap();
+        // The mask took the shape's numbers, got an id, and the two are one link at revision 2 (the path changed).
+        assert_eq!(s.objects[1].base().masks()[0].path, shape_path(&s));
+        assert_eq!(s.objects[1].base().masks()[0].id.as_deref(), Some("mask-1"));
+        assert_eq!(s.path_links.len(), 1);
+        assert_eq!((s.path_links[0].revision, s.path_links[0].users.len()), (2, 2));
+        assert_eq!(crate::path_link::validate_path_links(&s), Ok(()));
+        // An edit of the shape changes the mask, and the revision goes up; so does an edit of the mask.
+        let by = |dx: f64| PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: dx, y: 0.0 } };
+        edit_path(&mut s, &id, shape.target, &by(5.0), None, Some(2)).unwrap();
+        assert_eq!(s.objects[1].base().masks()[0].path, shape_path(&s));
+        assert_eq!(s.path_links[0].revision, 3);
+        edit_path(&mut s, "card", mask.target, &by(7.0), None, Some(3)).unwrap();
+        assert_eq!(s.objects[1].base().masks()[0].path, shape_path(&s));
+        assert_eq!(s.path_links[0].revision, 4);
+        // An edit made on an older revision is refused by name, and the path is as it was.
+        let before = s.clone();
+        let stale = edit_path(&mut s, &id, shape.target, &by(1.0), None, Some(2)).unwrap_err();
+        assert!(matches!(&stale, Refusal::ObjectFieldValueInvalid { detail, .. } if detail.contains("since revision 2") && detail.contains("revision 4")), "{stale:?}");
+        assert_eq!(s, before);
+        // A revision named for a path that is not linked is refused, and an edit that changes nothing is too.
+        let mut loose = linked_scene().0;
+        assert!(matches!(edit_path(&mut loose, "card", mask.target, &by(1.0), None, Some(1)), Err(Refusal::ObjectFieldValueInvalid { detail, .. }) if detail.contains("not linked")));
+        assert!(matches!(edit_path(&mut s, &id, shape.target, &by(0.0), None, None), Err(Refusal::ObjectFieldUnchanged { .. })));
+        // Anything that would make the two differ by another route is refused: the validator holds them to one path.
+        let mut other = square(0.0, 0.0, 60.0);
+        other.vertex_ids = None;
+        let off_route = set_shape_path(&mut s, &id, &other, &[], None).unwrap_err();
+        assert!(matches!(&off_route, Refusal::ObjectFieldValueInvalid { detail, .. } | Refusal::VectorTessellationFailed { detail, .. } if detail.contains("linked paths differ")), "{off_route:?}");
+    }
+
+    #[test]
+    fn linking_refuses_by_name_and_a_link_ends_when_a_mask_goes_or_the_author_unlinks() {
+        use crate::path_geometry::{PathOp, PathTarget};
+        use crate::scene::{Mask, MaskMode};
+        let (mut s, id) = linked_scene();
+        let (shape, mask) = (address(&id, PathTarget::Shape { subpath: 0 }), address("card", PathTarget::Mask { index: 0 }));
+        let text = |r: Result<EditEffect, Refusal>| match r {
+            Err(Refusal::ObjectFieldValueInvalid { detail, .. }) => detail,
+            other => format!("{other:?}"),
+        };
+        assert!(text(link_paths(&mut s, &shape, &shape)).contains("itself"));
+        assert!(text(link_paths(&mut s, &shape, &address("card", PathTarget::Mask { index: 4 }))).contains("no such path"));
+        assert!(matches!(link_paths(&mut s, &shape, &address("nope", PathTarget::Shape { subpath: 0 })), Err(Refusal::SceneObjectUnknown { .. })));
+        // A linked path animates as one (11.112): an animated path may be linked, its keys go to the other user, a key set on either
+        // user is on both, and a destination that has keys of its own is refused by name.
+        let nudge = PathOp::MoveVertices { indices: vec![0], delta: Vec2 { x: 1.0, y: 1.0 } };
+        edit_path(&mut s, &id, shape.target, &nudge, Some(0), None).unwrap();
+        let masked = s.objects[1].base().masks()[0].path.clone();
+        link_paths(&mut s, &shape, &mask).unwrap();
+        assert_eq!(s.timeline.path_channels.len(), 2, "the mask took the shape's keys");
+        assert_eq!(s.timeline.path_channels[0].keys, s.timeline.path_channels[1].keys);
+        assert_ne!(s.objects[1].base().masks()[0].path, masked);
+        assert_eq!(crate::path_link::validate_path_links(&s), Ok(()));
+        // A key set at another frame on the MASK is on the shape too, and the revision goes up.
+        let revision = s.path_links[0].revision;
+        edit_path(&mut s, "card", mask.target, &PathOp::MoveVertices { indices: vec![1], delta: Vec2 { x: 9.0, y: 0.0 } }, Some(5), Some(revision)).unwrap();
+        assert_eq!(s.timeline.path_channels.iter().map(|c| c.keys.len()).collect::<Vec<_>>(), vec![2, 2]);
+        assert_eq!(s.timeline.path_channels[0].keys, s.timeline.path_channels[1].keys);
+        assert_eq!(s.path_links[0].revision, revision + 1);
+        // An insert lands in every key of both, one new id each.
+        edit_path(&mut s, &id, shape.target, &PathOp::InsertVertex { segment: 0, t: 0.5 }, None, None).unwrap();
+        for channel in &s.timeline.path_channels {
+            assert!(channel.keys.iter().all(|k| k.path.vertices.len() == 5));
+        }
+        assert_eq!(s.timeline.path_channels[0].keys, s.timeline.path_channels[1].keys);
+        assert_eq!(crate::path_link::validate_path_links(&s), Ok(()));
+        // The keys move and go together, and one removed from one is removed from both.
+        move_path_key(&mut s, &id, shape.target, 5, 7).unwrap();
+        assert_eq!(s.timeline.path_channels[1].keys.iter().map(|k| k.frame).collect::<Vec<_>>(), vec![0, 7]);
+        remove_path_key(&mut s, "card", mask.target, 7).unwrap();
+        assert_eq!(s.timeline.path_channels.iter().map(|c| c.keys.len()).collect::<Vec<_>>(), vec![1, 1]);
+        remove_path_key(&mut s, &id, shape.target, 0).unwrap();
+        assert!(s.timeline.path_channels.is_empty(), "the last key ends both channels");
+        assert_eq!(crate::path_link::validate_path_links(&s), Ok(()));
+        // A stale revision on a keyed edit is refused, with nothing changed.
+        let before = s.clone();
+        assert!(text(edit_path(&mut s, &id, shape.target, &nudge, Some(1), Some(1))).contains("since revision 1"));
+        assert_eq!(s, before);
+        // A destination with keys of its own is refused; the same two the other way round link.
+        unlink_path(&mut s, &mask).unwrap();
+        edit_path(&mut s, "card", mask.target, &nudge, Some(2), None).unwrap();
+        assert!(text(link_paths(&mut s, &shape, &mask)).contains("is animated"));
+        link_paths(&mut s, &mask, &shape).unwrap();
+        assert_eq!(s.timeline.path_channels.len(), 2);
+        unlink_path(&mut s, &mask).unwrap();
+        s.timeline.path_channels.clear();
+        // A destination that is linked already must be unlinked first.
+        link_paths(&mut s, &shape, &mask).unwrap();
+        assert!(text(link_paths(&mut s, &shape, &mask)).contains("linked already"));
+        // A second mask on the card keeps the link when masks are reordered or one is added in front: it is held by id.
+        let mut masks = s.objects[1].base().masks().to_vec();
+        masks.insert(
+            0,
+            Mask { id: Some("front".into()), path: square(0.0, 0.0, 10.0), mode: MaskMode::Add, feather: 0.0, feather_y: None, falloff: None, feather_points: None, expansion: 0.0, opacity: 1.0, inverted: false },
+        );
+        set_object_masks(&mut s, "card", &masks).unwrap();
+        assert_eq!(s.path_links.len(), 1);
+        assert_eq!(crate::path_link::validate_path_links(&s), Ok(()));
+        let moved = address("card", PathTarget::Mask { index: 1 });
+        edit_path(&mut s, "card", moved.target, &PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: 2.0, y: 0.0 } }, None, None).unwrap();
+        assert_eq!(s.objects[1].base().masks()[1].path, shape_path(&s));
+        // Taking the linked mask away ends the link; the shape keeps its path.
+        let kept = shape_path(&s);
+        let only_front = vec![s.objects[1].base().masks()[0].clone()];
+        set_object_masks(&mut s, "card", &only_front).unwrap();
+        assert!(s.path_links.is_empty());
+        assert_eq!(shape_path(&s), kept);
+        // Unlinking: each keeps its path and the two are independent afterwards.
+        let (mut t, tid) = linked_scene();
+        let (shape, mask) = (address(&tid, PathTarget::Shape { subpath: 0 }), address("card", PathTarget::Mask { index: 0 }));
+        link_paths(&mut t, &shape, &mask).unwrap();
+        assert!(unlink_path(&mut t, &address("card", PathTarget::Mask { index: 0 })).is_ok());
+        assert!(t.path_links.is_empty(), "a link of one user ends");
+        let same = shape_path(&t);
+        edit_path(&mut t, &tid, shape.target, &PathOp::MoveVertices { indices: vec![0], delta: Vec2 { x: 9.0, y: 0.0 } }, None, None).unwrap();
+        assert_eq!(t.objects[1].base().masks()[0].path, same);
+        assert!(matches!(unlink_path(&mut t, &mask), Err(Refusal::ObjectFieldUnchanged { .. })));
+        // Deleting an object drops what it shared; duplicating one copies no link.
+        let (mut u, uid) = linked_scene();
+        link_paths(&mut u, &address(&uid, PathTarget::Shape { subpath: 0 }), &address("card", PathTarget::Mask { index: 0 })).unwrap();
+        let copy = crate::authoring::duplicate_object(&mut u, "card").unwrap();
+        assert_eq!(u.path_links.len(), 1);
+        assert_eq!(u.path_links[0].users.len(), 2, "the copy of the card is not a user: {}", copy.new_object_id);
+        crate::authoring::delete_object(&mut u, &uid).unwrap();
+        assert!(u.path_links.is_empty());
+        assert_eq!(crate::path_link::validate_path_links(&u), Ok(()));
+    }
+
+    #[test]
+    fn taking_a_subpath_out_keeps_the_others_ids_and_moves_their_channels_and_links() {
+        use crate::path_geometry::{PathOp, PathTarget};
+        let mut s = new_scene("s", "S", WorkingColorSpace::NEW_PROJECT);
+        s.timeline.duration_frames = 100;
+        let Ok(EditEffect::ObjectCreated { object_id: id }) = create_shape(
+            &mut s,
+            "Trio",
+            &square(0.0, 0.0, 50.0),
+            &[square(100.0, 0.0, 50.0), square(200.0, 0.0, 50.0)],
+        ) else {
+            panic!("a compound shape");
+        };
+        let mv = PathOp::MoveVertices { indices: vec![0, 1, 2, 3], delta: Vec2 { x: 5.0, y: 0.0 } };
+        // The third subpath is animated, and the second is linked to a mask of another layer.
+        edit_path(&mut s, &id, PathTarget::Shape { subpath: 2 }, &mv, Some(10), None).unwrap();
+        let mut card = rect("card");
+        card.base_mut().masks = Some(vec![crate::scene::Mask {
+            id: None,
+            path: square(0.0, 0.0, 30.0),
+            mode: crate::scene::MaskMode::Add,
+            feather: 0.0,
+            feather_y: None,
+            falloff: None,
+            feather_points: None,
+            expansion: 0.0,
+            opacity: 1.0,
+            inverted: false,
+        }]);
+        s.objects.push(card);
+        link_paths(&mut s, &address(&id, PathTarget::Shape { subpath: 1 }), &address("card", PathTarget::Mask { index: 0 })).unwrap();
+        // The middle one goes: the last moves up to place 1 with its channel, and the link (one user left) ends.
+        remove_subpath(&mut s, &id, 1).unwrap();
+        let SceneObject::Shape(shape) = &s.objects[0] else { panic!("a shape") };
+        assert_eq!(shape.contour_ids, Some(vec![0, 2]), "the ids of the others stay");
+        assert_eq!(shape.compound_paths.as_ref().map(Vec::len), Some(1));
+        assert_eq!(s.timeline.path_channels.len(), 1);
+        assert_eq!(s.timeline.path_channels[0].target, PathTarget::Shape { subpath: 1 });
+        assert!(s.path_links.is_empty());
+        assert_eq!(crate::path_anim::validate_path_channels(&s), Ok(()));
+        // The animated one goes: its channel ends with it. The first goes: the second becomes the main path, ids still 2.
+        remove_subpath(&mut s, &id, 1).unwrap();
+        assert!(s.timeline.path_channels.is_empty());
+        let SceneObject::Shape(shape) = &s.objects[0] else { panic!("a shape") };
+        assert_eq!(shape.contour_ids, Some(vec![0]));
+        // A shape keeps one path, and there is no subpath past the last.
+        assert!(matches!(remove_subpath(&mut s, &id, 0), Err(Refusal::ObjectFieldValueInvalid { detail, .. }) if detail.contains("at least one")));
+        assert!(matches!(remove_subpath(&mut s, "card", 0), Err(Refusal::ObjectFieldNotApplicable { .. })));
+        // Setting a shape's paths keeps the ids of the subpaths that stay and gives new ones to what is added.
+        set_shape_path(&mut s, &id, &square(0.0, 0.0, 60.0), &[square(70.0, 0.0, 10.0), square(90.0, 0.0, 10.0)], None).unwrap();
+        let SceneObject::Shape(shape) = &s.objects[0] else { panic!("a shape") };
+        assert_eq!(shape.contour_ids, Some(vec![0, 1, 2]));
+    }
+
+    #[test]
+    fn guides_are_put_moved_and_taken_off_and_refused_by_name() {
+        use crate::scene::GuideAxis;
+        let mut s = new_scene("s", "S", WorkingColorSpace::NEW_PROJECT);
+        add_guide(&mut s, GuideAxis::X, 960.0).unwrap();
+        add_guide(&mut s, GuideAxis::Y, 540.0).unwrap();
+        assert_eq!(s.guides.iter().map(|g| g.id).collect::<Vec<_>>(), vec![1, 2]);
+        // The same line twice, a position that is not a number, and a guide that is not there.
+        assert!(matches!(add_guide(&mut s, GuideAxis::X, 960.0), Err(Refusal::ObjectFieldUnchanged { .. })));
+        assert!(matches!(add_guide(&mut s, GuideAxis::Y, f64::NAN), Err(Refusal::ObjectFieldValueInvalid { .. })));
+        assert!(matches!(move_guide(&mut s, 9, 1.0), Err(Refusal::ObjectFieldValueInvalid { detail, .. }) if detail.contains("no guide 9")));
+        move_guide(&mut s, 1, 100.5).unwrap();
+        assert!(matches!(move_guide(&mut s, 1, 100.5), Err(Refusal::ObjectFieldUnchanged { .. })));
+        // The lowest free id is used again.
+        remove_guide(&mut s, 1).unwrap();
+        add_guide(&mut s, GuideAxis::X, 10.0).unwrap();
+        assert_eq!(s.guides.iter().map(|g| g.id).collect::<Vec<_>>(), vec![2, 1]);
+        assert!(matches!(remove_guide(&mut s, 7), Err(Refusal::ObjectFieldValueInvalid { .. })));
+        // A scene with none has no field in its JSON, and the validator refuses a hand-made duplicate id.
+        assert!(!serde_json::to_string(&new_scene("s", "S", WorkingColorSpace::NEW_PROJECT)).unwrap().contains("guides"));
+        s.guides[0].id = s.guides[1].id;
+        assert!(!crate::drawability::drawability_refusals(&s).is_empty());
+    }
+
+    #[test]
+    fn edit_path_reaches_a_mask_of_any_object() {
+        use crate::path_geometry::{PathOp, PathTarget};
+        use crate::scene::{Mask, MaskMode};
+        let mut s = new_scene("s", "S", WorkingColorSpace::NEW_PROJECT);
+        let Ok(EditEffect::ObjectCreated { object_id }) =
+            create_shape(&mut s, "Host", &square(0.0, 0.0, 80.0), &[])
+        else {
+            panic!("a shape");
+        };
+        let mask = Mask {
+            id: None,
+            path: square(10.0, 10.0, 40.0),
+            mode: MaskMode::Add,
+            feather: 0.0,
+            feather_y: None,
+            falloff: Default::default(),
+            feather_points: None,
+            expansion: 0.0,
+            opacity: 1.0,
+            inverted: false,
+        };
+        set_object_masks(&mut s, &object_id, &[mask]).unwrap();
+        edit_path(
+            &mut s,
+            &object_id,
+            PathTarget::Mask { index: 0 },
+            &PathOp::InsertVertex {
+                segment: 1,
+                t: 0.25,
+            }, None, None
+        )
+        .unwrap();
+        assert_eq!(s.objects[0].base().masks()[0].path.vertices.len(), 5);
     }
 }

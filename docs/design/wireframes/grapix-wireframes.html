@@ -1,0 +1,572 @@
+<title>GrapiX Editor Wireframes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anybody:wght@600;700&family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@500;600;700;800&display=swap">
+<style>
+/* Layout: one reading column; each wireframe is a scaled copy of the 1920 x 1080 window in its own scroll box.
+   Single dark look on purpose: these are wireframes of a dark-only app (SKWAD live mode). */
+:root{
+  color-scheme:dark;
+  --bg:#131210; --panel:#1B1916; --raised:#24221E; --line:#34312A; --line2:#46423A;
+  --ink:#F2F0EB; --ink2:#D3CEC6; --ink3:#95908A; --ink4:#6E6A63;
+  --ember:#F58138; --ember-tint:#2C1B11; --take:#F15A29; --ok:#5DB08A; --warn:#DDA543; --danger:#E06A5E; --info:#5AA9E6; --track:#4B55A8;
+  --f-ui:"Manrope",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace; --f-disp:"Anybody","Arial Narrow",sans-serif;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:500 14px/1.5 var(--f-ui);font-variant-numeric:tabular-nums;margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:48px}
+h1{font:700 34px/1.1 var(--f-disp);letter-spacing:.01em;margin:0;text-wrap:balance}
+h2{font:700 22px/1.2 var(--f-ui);margin:0;text-wrap:balance}
+h3{font:600 15px/1.3 var(--f-ui);margin:0}
+p{margin:0;max-width:72ch;color:var(--ink2)}
+.eyebrow{font:600 11px/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+.intro{display:grid;gap:12px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:500 11px/1 var(--f-mono);text-transform:uppercase;letter-spacing:.04em;padding:5px 7px;border:1px solid var(--line2);border-radius:2px;color:var(--ink3)}
+.chip.em{border-color:var(--ember);color:var(--ember);background:var(--ember-tint)}
+.chip.new{border-color:var(--info);color:var(--info)}
+.chip.dec{border-color:var(--warn);color:var(--warn)}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px}
+nav.toc a{color:var(--ink2);text-decoration:none;font:500 12px/1 var(--f-mono);padding:6px 8px;border:1px solid var(--line);border-radius:2px}
+nav.toc a:hover,nav.toc a:focus-visible{border-color:var(--ember);color:var(--ink);outline:none}
+section{display:grid;gap:16px;min-width:0}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 11px/1.2 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);background:var(--panel)}
+td code,p code,li code{font:500 12px var(--f-mono);color:var(--ember)}
+td.ec{color:var(--ink3)}
+.wf-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px}
+.wf-head .code{font:700 13px var(--f-mono);color:var(--ember)}
+.wfbox{overflow-x:auto;border:1px solid var(--line2);border-radius:4px;background:#0c0b0a}
+.wf{width:1180px;aspect-ratio:16/9.4;display:grid;gap:2px;padding:0;font:500 10px/1.35 var(--f-ui);color:var(--ink2);background:var(--bg);position:relative}
+.bar{display:flex;align-items:center;gap:10px;padding:0 8px;background:var(--panel);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.bar .m{color:var(--ink2)}
+.bar .ws{margin-left:auto;display:flex;gap:10px}
+.bar .ws{align-items:center}
+.bar .ws .mt{color:var(--ink3);padding:2px 6px;border:1px solid var(--line);border-radius:2px;display:inline-flex;gap:4px;align-items:center}
+.bar .ws .mt::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--line2)}
+.bar .ws .mt.on{color:var(--ember);border-color:var(--ember);background:var(--ember-tint)}
+.bar .ws .mt.on::before{background:var(--ember)}
+.bar .ws .mt.lay{color:var(--ink2);background:var(--raised);border-color:var(--line2)}
+.bar .ws .mt.lay::before{display:none}
+.tool{width:14px;height:14px;border:1px solid var(--line2);border-radius:2px;display:inline-block}
+.tool.on{border-color:var(--ember);background:var(--ember-tint)}
+.sep{width:1px;height:14px;background:var(--line2)}
+.brand{font:800 12px var(--f-ui);color:var(--ink)}
+.status{font:500 9.5px var(--f-mono);color:var(--ink3)}
+.p{background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;position:relative}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);background:var(--raised);flex:none}
+.tabs span{padding:4px 8px;color:var(--ink3);white-space:nowrap}
+.tabs span.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--ember)}
+.tabs span.new::after{content:" new";color:var(--info);font:500 8px var(--f-mono)}
+.body{padding:5px 6px;display:flex;flex-direction:column;gap:3px;min-height:0;overflow:hidden;flex:1}
+.row{display:flex;gap:6px;align-items:center;padding:1px 4px;border-radius:2px;white-space:nowrap;overflow:hidden}
+.row.sel{background:var(--ember-tint);box-shadow:inset 2px 0 0 var(--ember);color:var(--ink)}
+.row .meta{margin-left:auto;font:500 9px var(--f-mono);color:var(--ink3)}
+.lbl{font:600 8px/1.4 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-top:3px}
+.hint{color:var(--ink4);font-style:italic;white-space:normal}
+.btns{display:flex;gap:4px;flex-wrap:wrap}
+.btns b{font-weight:600;border:1px solid var(--line2);background:var(--raised);padding:2px 6px;border-radius:2px;color:var(--ink2)}
+.btns b.pri{border-color:var(--ember);background:var(--ember-tint);color:var(--ember)}
+.btns b.take{border-color:var(--take);background:var(--take);color:#1B0C10;font:700 13px var(--f-disp);letter-spacing:.12em;padding:6px 18px}
+.btns b.cue{border-color:var(--info);color:var(--info)}
+.btns b.dz{border-color:var(--danger);color:var(--danger)}
+.fld{display:grid;grid-template-columns:72px 1fr;gap:6px;align-items:center}
+.fld span:first-child{color:var(--ink3)}
+.fld span:last-child{font:500 9.5px var(--f-mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);padding:1px 4px;border-radius:2px;white-space:nowrap;overflow:hidden}
+.fld span.bound{color:var(--info)!important;border-color:var(--info)!important}
+.st{font:500 8.5px var(--f-mono);text-transform:uppercase;padding:1px 4px;border:1px solid var(--line2);border-radius:1px;color:var(--ink3)}
+.st.ok{color:var(--ok);border-color:var(--ok)} .st.warn{color:var(--warn);border-color:var(--warn)} .st.bad{color:var(--danger);border-color:var(--danger)} .st.info{color:var(--info);border-color:var(--info)} .st.air{color:#1B0C10;background:var(--take);border-color:var(--take)}
+.viewer{flex:1;display:flex;align-items:center;justify-content:center;background:var(--bg);min-height:0;position:relative}
+.comp{aspect-ratio:16/9;height:78%;max-width:92%;background:#000;border:1px solid var(--line2);position:relative}
+.comp .safe{position:absolute;inset:5%;border:1px dashed var(--ink4)}
+.comp .l3{position:absolute;left:12%;bottom:13%;width:52%;height:8.5%;background:#F3EDE4;border-left:4px solid var(--take);display:flex;flex-direction:column;justify-content:center;padding-left:2%}
+.comp .l3 i{font:700 normal 10px var(--f-disp);letter-spacing:.1em;color:#1B0C10}
+.comp .l3 u{text-decoration:none;font:600 6px var(--f-ui);letter-spacing:.1em;color:#1B0C10}
+.comp .sel{position:absolute;left:11.5%;bottom:12.3%;width:53%;height:10%;border:1px solid var(--ember)}
+.comp .ghost{position:absolute;left:12%;bottom:24%;width:40%;height:7%;border:1px dashed var(--info);background:rgba(90,169,230,.12);display:flex;align-items:center;padding-left:6px;font:500 7px var(--f-mono);color:var(--info)}
+.comp .bind{position:absolute;left:13.5%;bottom:16.6%;width:22%;height:3.5%;border:1px dashed var(--info)}
+.comp svg{position:absolute;inset:0;width:100%;height:100%}
+.vbar{display:flex;gap:8px;align-items:center;padding:3px 6px;border-top:1px solid var(--line);background:var(--panel);font:500 9px var(--f-mono);color:var(--ink3);white-space:nowrap;flex:none}
+.vbar .tc{color:var(--ember);font-weight:700}
+.rec{display:flex;gap:6px;align-items:center;padding:3px 6px;background:var(--raised);border-bottom:1px solid var(--line);font:500 9px var(--f-mono);color:var(--ink2);flex:none}
+.tl{display:grid;grid-template-columns:var(--tlc,330px) 1fr;flex:1;min-height:0}
+.tl .names{border-right:1px solid var(--line);display:flex;flex-direction:column}
+.tl .hdr{display:flex;gap:6px;align-items:center;height:16px;padding:0 5px;font:600 7.5px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.tl .lr{display:flex;gap:6px;align-items:center;height:15px;padding:0 5px;white-space:nowrap;overflow:hidden;border-bottom:1px solid #1f1d1a}
+.tl .lr.sel{background:var(--ember-tint)}
+.tl .lr.prop{padding-left:22px;color:var(--ink3)}
+.tl .lr .sw{width:7px;height:7px;background:var(--track);border-radius:1px;flex:none}
+.tl .lr .col{margin-left:auto;display:flex;gap:6px;font:500 8px var(--f-mono);color:var(--ink3)}
+.tl .lr .col .d{color:var(--info)}
+.tl .tracks{position:relative;display:flex;flex-direction:column;background:#100f0d;min-width:0}
+.tl .ruler{height:16px;border-bottom:1px solid var(--line);display:flex;font:500 7.5px var(--f-mono);color:var(--ink4)}
+.tl .ruler span{flex:1;padding-left:3px;border-left:1px solid var(--line)}
+.tl .phase{display:flex;height:11px;font:600 7px var(--f-ui);letter-spacing:.06em}
+.tl .phase span{padding-left:4px;border-right:1px solid var(--line2);overflow:hidden;white-space:nowrap}
+.tl .tr{height:15px;position:relative;border-bottom:1px solid #1f1d1a}
+.tl .tr .b{position:absolute;top:4px;height:7px;background:var(--track);border-radius:1px;opacity:.8}
+.tl .tr .k{position:absolute;top:4px;width:6px;height:6px;background:var(--ink3);transform:rotate(45deg)}
+.tl .tr .k.s{background:var(--ember)}
+.tl .ph{position:absolute;top:0;bottom:0;width:1px;background:var(--ember)}
+.tl .graph{flex:1;position:relative;border-top:1px solid var(--line)}
+.tl .graph svg{position:absolute;inset:0;width:100%;height:100%}
+.mon{flex:1;display:flex;flex-direction:column;gap:4px;padding:6px;min-height:0}
+.mon .scr{flex:1;background:#000;border:2px solid var(--line2);position:relative;display:flex;align-items:flex-end;padding:8px}
+.mon .scr.air{border-color:var(--take)}
+.mon .scr.cue{border-color:var(--info)}
+.mon .scr .mini{width:55%;height:14%;background:#F3EDE4;border-left:4px solid var(--take)}
+.mon .cap{display:flex;gap:8px;align-items:center;font:600 9px var(--f-ui)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1;min-height:0}
+.card{border:1px solid var(--line2);border-radius:3px;background:var(--raised);padding:6px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.card h4{margin:0;font:600 10px var(--f-ui);color:var(--ink);display:flex;gap:6px;align-items:center}
+.score{font:700 20px var(--f-disp);color:var(--ink);display:flex;gap:10px;align-items:center}
+.spark{height:34px;border-bottom:1px solid var(--line);position:relative}
+.spark svg{position:absolute;inset:0;width:100%;height:100%}
+.band{display:flex;align-items:center;gap:10px;padding:0 10px;font:600 10px var(--f-ui);white-space:nowrap}
+.band.warn{background:#2A2212;color:var(--warn);border-bottom:1px solid var(--warn)}
+.n{position:absolute;top:3px;right:4px;display:flex;gap:2px}
+.n i{font:700 normal 8.5px/1 var(--f-mono);color:#1B0C10;background:var(--ember);border-radius:8px;min-width:13px;height:13px;display:grid;place-items:center}
+.dialog{position:absolute;inset:12% 20%;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 6px 24px rgba(0,0,0,.55);display:grid;grid-template-columns:170px 1fr;overflow:hidden}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+ol.notes{margin:0;padding-left:22px;display:grid;gap:6px;max-width:90ch}
+ol.notes li{color:var(--ink2)}
+ol.notes li::marker{font:700 12px var(--f-mono);color:var(--ember)}
+.qs{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.q{border:1px solid var(--line);border-radius:4px;padding:12px 14px;display:grid;gap:6px;background:var(--panel)}
+.q h3{display:flex;gap:8px;align-items:center}
+a{color:var(--ember)}
+
+.mom{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px;flex:1;min-height:0}
+.mb{height:4px;background:var(--track);border-radius:1px;margin:3px 0;opacity:.9}
+.castbar{display:flex;gap:6px;align-items:center;padding:5px 8px;overflow:hidden;white-space:nowrap;height:100%;background:var(--panel)}
+.cc{border:1px solid var(--line2);border-radius:2px;padding:2px 7px;white-space:nowrap;color:var(--ink2)}
+.cc.on{border-color:var(--ember);background:var(--ember-tint);color:var(--ink)}
+.cc.bad{border-color:var(--warn);color:var(--warn)}
+
+.names input{font:500 13px var(--f-mono);background:var(--bg);color:var(--ink);border:1px solid var(--line2);border-radius:2px;padding:5px 8px;width:100%;max-width:260px}
+.names input:focus-visible,.resetbtn:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
+.resetbtn{font:600 12px var(--f-ui);background:var(--raised);color:var(--ink2);border:1px solid var(--line2);border-radius:2px;padding:6px 10px;cursor:pointer}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <span class="eyebrow">GrapiX by SKWAD · concept wireframes v2 · 24 Nov 2026</span>
+    <h1>GrapiX Editor, built around the broadcast job</h1>
+    <p>Not After Effects, and not EffectCraft's panels. A broadcast graphic has a short life: someone makes the style, gives it a few moments of motion, connects it to live data, proves it works with real names and scores, and sends it to an operator who takes it on air. These wireframes organise the Editor around that. The Editor is the design studio: nothing in it is live. Today it has two readers: Playout, and AI models over MCP (Claude, ChatGPT and others). A planned module would also feed Prism, which makes automatic highlights, with overlays designed in Figma, animated and data-bound here. Live on air is Playout, not the Editor: its centre is the sequence of takes, redrawn below. Low fidelity: placement and workflow, not final styling.</p>
+    <div class="chips"><span class="chip em">the graphic's journey</span><span class="chip new">new idea</span><span class="chip dec">decision needed</span></div>
+    <nav class="toc" aria-label="Wireframes">
+      <a href="#map">The idea</a><a href="#menus">Menus</a><a href="#b1">B1 Start</a><a href="#b2">B2 Make</a><a href="#b3">B3 Moments</a><a href="#b4">B4 Data</a><a href="#b5">B5 Style</a><a href="#flows">Workflows</a><a href="#prism">Prism idea</a><a href="#b6">B6 Publish</a><a href="#b9">B9 Formats</a><a href="#b10">B10 Library</a><a href="#b11">B11 Connections</a><a href="#b12">B12 Logic</a><a href="#b13">B13 Assets</a><a href="#f1">F1 Requests (planned)</a><a href="#b7">B7 Search</a><a href="#b8">B8 Ask</a><a href="#playout">Playout words</a><a href="#p1">P1 Sequence</a><a href="#p2">P2 Scenes</a><a href="#p3">P3 Scene data</a><a href="#p4">P4 Calling takes</a><a href="#p5">P5 Virtual output</a><a href="#p6">P6 Monitoring</a><a href="#p7">P7 Layers</a><a href="#p8">P8 Show rules</a><a href="#questions">Decisions</a>
+    </nav>
+  </header>
+
+  <section id="names" class="names">
+    <h2>Names: working titles, changeable in one place</h2>
+    <p>Some of these words sound like other products' words, so none of them is final. Type a new name in the right column and every wireframe below updates at once (kept in this browser only). In the real app the same idea applies: every visible name comes from one terms table, so renaming a term is one edit, not a search through screens. Plural and capital forms follow automatically.</p>
+    <div class="tablebox"><table id="termsTable">
+      <thead><tr><th>Idea</th><th>Working name</th><th>Your name</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="btns" style="display:flex;gap:8px"><button id="termsReset" type="button" class="resetbtn">Reset to working names</button><button id="termsProposed" type="button" class="resetbtn">Load latest names</button></div>
+  </section>
+
+  <section id="map">
+    <h2>The idea: one graphic, five steps</h2>
+    <p>The unit is a <b>graphic</b> (what operators call a template): a lower third, a scorebug, a full-screen. Everything on screen answers one of five questions. The words are the ones a producer or operator already uses.</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Step</th><th>Question</th><th>Word we use</th><th>Instead of</th></tr></thead>
+      <tbody>
+        <tr><td>1 Style</td><td>What does it look like?</td><td><b>Parts</b> (shapes, text, images) and <b>Effects</b> (glow, shadow, wipe edge)</td><td>Layers, effects, layer styles</td></tr>
+        <tr><td>2 Motion</td><td>How does it behave on air?</td><td><b>Moments</b>: Appears, Stays, Changes, Leaves, each with a chosen style</td><td>A keyframe timeline (still there under "Fine-tune")</td></tr>
+        <tr><td>3 Data</td><td>What changes per use?</td><td><b>Fields</b>, set on the part itself: fixed, or from a field</td><td>A separate bindings table</td></tr>
+        <tr><td>4 Test</td><td>Does it survive real content?</td><td><b>Test records</b>: sample records stepped through the graphic, with problems flagged</td><td>Preview by hand, find out on air</td></tr>
+        <tr><td>5 Publish</td><td>Where does it go, and is it ready for each place?</td><td><b>Formats</b> (16:9, 9:16, 1:1) and <b>Destinations</b> (Playout, other SKWAD apps, files, link), with a checklist per destination</td><td>A single publish button for one engine</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="notes">
+      <li>One screen, always the same three things: the parts on the left, the stage in the middle, and a single <b>card for the selected part</b> showing its Style, Motion and Data stacked. A designer works on all three at once, because that is the job; there are no workspaces to switch.</li>
+      <li>Below the stage, a <b>Moments strip</b> (what happens when it appears, stays, changes and leaves) The test records are not a strip here: they live in the Data step (B4), where every record is checked at once.</li>
+      <li>The graphic is not tied to one screen shape. It has <b>formats</b> that share the same parts, and it publishes a <b>package</b>: one numbered, unchangeable version that any destination can read. Playout takes the 16:9 format today; formats for Prism and social posts are planned.</li>
+      <li>A <b>journey rail</b> at the top shows the five steps as done, needs attention or blocked. "Fix next issue" jumps to the first problem. The operator's form is built from the same fields, so there is nothing to keep in sync.</li>
+      <li>Effects and presets become <b>Effects</b>: a short gallery of house effects first. The full engine catalogue is one click behind "All effects"; the engine says which ones it can render.</li>
+      <li>Everything else is found with <b>search</b> (Ctrl K): commands, parts, effects, fields and help in one box. That keeps the menus short.</li>
+    </ol>
+  </section>
+
+  <section id="flows">
+    <h2>Workflows: now and planned</h2>
+    <p>The Editor is the design studio and is never live. Today it has two readers of its designs: <b>Playout</b> (live on air) and <b>AI models through MCP</b> (Claude, ChatGPT and any other model that speaks MCP). Everything else below is planned, so the design must not block it, but nothing here is to be built yet.</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Workflow</th><th>Status</th><th>Who</th><th>Path</th></tr></thead>
+      <tbody>
+        <tr><td>1 Live on-air graphic</td><td><span class="chip em">now</span></td><td>Designer, then Playout operator</td><td>Design in the Editor (from a house graphic or a Figma frame), publish, take from the Playout sequence by Take ID</td></tr>
+        <tr><td>2 AI-assisted design and control</td><td><span class="chip em">now</span></td><td>Designer or operator with any AI model</td><td>The model connects over MCP: finds graphics, reads their fields, previews, proposes edits for the designer to accept, and can ask to publish. It can never take, preload or clear Program.</td></tr>
+        <tr><td>3 Highlight overlays for Prism</td><td><span class="chip dec">planned</span></td><td>Prism, a designer, an AI model</td><td>A request arrives, a Figma frame is made, GrapiX animates it and binds the data, the finished file goes to Prism, which packages it for the end customer. See the next section.</td></tr>
+        <tr><td>4 Social posts and vertical overlays</td><td><span class="chip dec">planned</span></td><td>Social designer</td><td>Same route as 3: Figma frame in 9:16, 1:1 or 4:5, animated and data-bound in GrapiX, delivered as a file or package.</td></tr>
+        <tr><td>5 Shared library</td><td><span class="chip dec">planned</span></td><td>Design team</td><td>Published versions that any designer or AI model can find and reuse.</td></tr>
+      </tbody>
+    </table></div>
+    <h3>What keeps this open for later</h3>
+    <ol class="notes">
+      <li><b>One package.</b> A publish produces an unchangeable, numbered package: parts, moments, the list of fields (name, type, rules), formats, assets and a fingerprint. Playout reads it today; Prism or any other reader could read it later without changing the design. Editing afterwards makes a new number (invariant 7).</li>
+      <li><b>MCP is the door for AI models.</b> Tools such as <code>graphics.list</code>, <code>graphics.get</code>, <code>graphics.fields</code> and <code>graphics.render_preview</code> read; <code>graphics.propose_edit</code> needs the designer to accept; <code>graphics.publish_request</code> needs approval. Program controls are not offered at all (invariants 4 and 5).</li>
+      <li><b>Destinations are a short list with stated abilities.</b> Playout today; Prism later. Each says which formats it takes and how it receives, and Publish checks the package against it.</li>
+      <li><b>Figma stays linked.</b> A Figma frame comes in as parts; a changed frame can be pulled again and only the differences are shown to accept.</li>
+    </ol>
+  </section>
+
+  <section id="prism">
+    <h2>Planned module (idea only, not to be built yet): overlays for Prism</h2>
+    <p>Prism makes highlights automatically. Each highlight needs an overlay design, which a designer currently makes by hand. The idea is to produce them from a design once and fill them with data automatically.</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Step</th><th>Where</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>1 Requirement</td><td>Prism, or a person</td><td>"We need a goal overlay for esports match highlights" (kind of highlight, sport or game, format, event style).</td></tr>
+        <tr><td>2 Design</td><td>Figma</td><td>A designer, or an AI model through MCP, makes the Figma frame once per overlay type and format (16:9, 9:16, 1:1).</td></tr>
+        <tr><td>3 Animate and bind</td><td>GrapiX Editor</td><td>The frame comes in as parts, gets its moments (appears, stays, leaves) and its fields (player, team, score, time), and is checked against real sample records.</td></tr>
+        <tr><td>4 Package</td><td>GrapiX</td><td>An animated, data-linked package is published: the style, the motion, the field list and a version number.</td></tr>
+        <tr><td>5 Fill automatically</td><td>Prism</td><td>For each highlight Prism supplies the data and gets the finished overlay; it packages the highlight for the end customer and shares it.</td></tr>
+        <tr><td>6 Social posts</td><td>Same route</td><td>Square, vertical or 4:5 posts use the same designs and data.</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="notes">
+      <li>Data binding, effects and motion are all done in GrapiX; Figma holds only the design.</li>
+      <li>The Editor would gain one screen, <b>Requests</b> (wireframe F1 below): what Prism asked for, which have a design, which need one, and which are published.</li>
+      <li>What Prism needs depends on questions only you can answer (see decisions 6 to 8): who produces the final video or image, and in what file format.</li>
+    </ol>
+  </section>
+
+  <section id="menus">
+    <h2>Menus: six, in the order of the job</h2>
+    <div class="tablebox"><table>
+      <thead><tr><th>Menu</th><th>Holds</th></tr></thead>
+      <tbody>
+        <tr><td>File</td><td>New graphic (from a type or blank), open, save, next version, bring in (Figma frame, PSD, SVG, another project), pack for sharing, close</td></tr>
+        <tr><td>Edit</td><td>Undo, redo, change history, cut, copy, paste, duplicate, delete, settings, shortcuts and triggers</td></tr>
+        <tr><td>Graphic</td><td>Add part (box, text, image, group), effects, moments, fields, sample records, formats (add 9:16, 1:1), figma link and pull changes</td></tr>
+        <tr><td>Publish</td><td>Check, publish to destinations, formats, library of packages, connections (Playout, SKWAD apps, MCP, API), history. The Editor has no take, preload or clear (invariant 4).</td></tr>
+        <tr><td>View</td><td>Zoom, fit, safe areas, guides, rulers, panels shown or hidden, layouts, reset</td></tr>
+        <tr><td>Help</td><td>Guide, shortcuts, about, diagnostic bundle (all modules, editor only)</td></tr>
+      </tbody>
+    </table></div>
+    <p>Every command also lives in Ctrl K search, and any menu item or button can carry a shortcut, a Stream Deck key or an MCP command, as the command registry already allows. Panels still dock, tab and float for people who want to rearrange; the default needs no rearranging.</p>
+  </section>
+
+  <section id="playout">
+    <h2>Playout in plain words</h2>
+    <p>Live on air happens only in Playout. Its heart is the <b>sequence</b>: the ordered list of things that will go on air during a show.</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Plain word</th><th>What it is</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr><td>Take</td><td>One entry in the sequence: a scene, ready to go on air</td><td>Has its own <b>Take ID</b>, a number that never changes when the list is reordered</td></tr>
+        <tr><td>Take ID</td><td>The address of a take, for example 1003. Exists only in Playout; the operator types it by hand</td><td>Any system (TCP, UDP, HTTP, a custom protocol) can call "take 1003". Must be unique in the show. Names can change; the ID keeps its meaning.</td></tr>
+        <tr><td>Scene ID</td><td>The ID of the scene itself, for example s-021. Set in the scene list and shown the same in the Editor and in Playout</td><td>The same scene can be used by several takes; its ID does not change when it is renamed</td></tr>
+        <tr><td>Layer</td><td>A stacking slot on the output, a whole number from -99,999 to +99,999. 0 is the default; plus is toward the front, minus toward the back</td><td>Backgrounds and foregrounds play together, each on its own layer, and each layer is cued, cued out and cleared on its own</td></tr>
+        <tr><td>Scene list</td><td>All scenes available to play out, with their versions</td><td>Scenes are dragged from here into the sequence; name and description are editable</td></tr>
+        <tr><td>Scene data</td><td>The fields a scene lets the operator change</td><td>Only fields the designer published appear; values are typed by hand or linked to a data source</td></tr>
+        <tr><td>Preview</td><td>A small player in the Playout layout (360 or 480 lines, lowers itself under load): play, pause, stop, loop</td><td>Totally separate from what is on air, on its own renderer, so nothing there can change Program</td></tr>
+        <tr><td>On air (Program)</td><td>What the viewers see</td><td>Only Take, Continue, Hold, Take out and Clear act on it</td></tr>
+        <tr><td>Virtual output</td><td>A pop-up window at the full output resolution (1080p or 4K) showing what you send to it</td><td>Check the true look of a take locally. Independent of the live output; costs GPU</td></tr>
+      </tbody>
+    </table></div>
+    <p>Rule that ties it together: "TAKE" sends the exact version and data that were checked in Preview or on the virtual output, and the engine refuses if they no longer match. What the operator watched is what goes out.</p>
+  </section>
+
+  <div id="wfs"></div>
+
+  <section id="figma"><h2>Figma screens, 24 Nov 2026</h2><p>These are renders of the screens in the Figma file, in the latest names (Cue, Stack, Style, Effects, Phase, Element, Airview). They are the visual reference; the wireframes above are the structure.</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px"><figure style="margin:0"><img src="figma/p1-playline.png" alt="P1 Playline" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>P1 Playline.</b> Playout main screen: Playline, Preview, on air, CUE, Stacks summary, Inputs. Live items have the strongest contrast.</figcaption></figure><figure style="margin:0"><img src="figma/p7-stacks.png" alt="P7 Stacks" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>P7 Stacks.</b> Playout, Stacks panel open: what is on each stack, controls per stack, Airview-only hide and solo.</figcaption></figure><figure style="margin:0"><img src="figma/p3-inputs.png" alt="P3 Inputs" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>P3 Inputs.</b> Playout, Inputs: published fields, source, per-field live update and rules, stale feed warning.</figcaption></figure><figure style="margin:0"><img src="figma/p5-airview.png" alt="P5 Airview" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>P5 Airview.</b> Playout, Airview: a local window at full output size, independent of live output.</figcaption></figure><figure style="margin:0"><img src="figma/p4-cue-control.png" alt="P4 Cue Control" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>P4 Cue Control.</b> Playout, Cue Control: interfaces, example commands, last calls with acknowledgement, Try it.</figcaption></figure><figure style="margin:0"><img src="figma/p8-play-rules.png" alt="P8 Play Rules" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>P8 Play Rules.</b> Playout, Play Rules: when-then rules and the rule editor.</figcaption></figure><figure style="margin:0"><img src="figma/pd-diagnostics.png" alt="PD Diagnostics" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>PD Diagnostics.</b> Playout, Diagnostics: application console and system health.</figcaption></figure><figure style="margin:0"><img src="figma/ps1-engine-lost.png" alt="PS1 Engine lost" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>PS1 Engine lost.</b> State: engine lost. Controls off, one banner.</figcaption></figure><figure style="margin:0"><img src="figma/ps2-empty-show.png" alt="PS2 Empty show" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>PS2 Empty show.</b> State: empty show, nothing on air.</figcaption></figure><figure style="margin:0"><img src="figma/b2-make.png" alt="B2 Make" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B2 Make.</b> Editor main screen: Elements, stage, Style, Motion, Data card, Phases strip. No Cast strip.</figcaption></figure><figure style="margin:0"><img src="figma/b4-data.png" alt="B4 Data" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B4 Data.</b> Editor, Data: sources, fields found, test records checked, operator form.</figcaption></figure><figure style="margin:0"><img src="figma/b12-logic.png" alt="B12 Logic" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B12 Logic.</b> Editor, Logic: JavaScript in a sandbox with its own console. Nodes later.</figcaption></figure><figure style="margin:0"><img src="figma/b13-library.png" alt="B13 Library" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B13 Library.</b> Editor, Library and assets: virtual folders, library tabs, Import folder.</figcaption></figure><figure style="margin:0"><img src="figma/b6-publish.png" alt="B6 Publish" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B6 Publish.</b> Editor, Publish: checks per destination, numbered immutable package.</figcaption></figure><figure style="margin:0"><img src="figma/b1-start.png" alt="B1 Start" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B1 Start.</b> Editor, Start: blank graphic or import. No preset layouts.</figcaption></figure><figure style="margin:0"><img src="figma/b5-style-effects.png" alt="B5 Style and Effects" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B5 Style and Effects.</b> Editor, Style and Effects as separate things.</figcaption></figure><figure style="margin:0"><img src="figma/b9-formats.png" alt="B9 Formats" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B9 Formats.</b> Editor, Formats: 16:9 now, 9:16 and 1:1 planned.</figcaption></figure><figure style="margin:0"><img src="figma/e1-search.png" alt="E1 Search" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>E1 Search.</b> Ctrl K search over commands, elements, effects, fields and help.</figcaption></figure><figure style="margin:0"><img src="figma/e2-layouts.png" alt="E2 Layouts" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>E2 Layouts.</b> Named, saved panel layouts. No layout locks a tool.</figcaption></figure><figure style="margin:0"><img src="figma/e3-ask.png" alt="E3 Ask" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>E3 Ask.</b> AI assistant proposes; you approve; nothing goes on air.</figcaption></figure><figure style="margin:0"><img src="figma/e4-settings.png" alt="E4 Settings" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>E4 Settings.</b> AI and MCP access by role, never by model name.</figcaption></figure><figure style="margin:0"><img src="figma/s1-empty-graphic.png" alt="S1 Empty graphic" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>S1 Empty graphic.</b> State: empty graphic.</figcaption></figure><figure style="margin:0"><img src="figma/s2-font-missing.png" alt="S2 Font missing" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>S2 Font missing.</b> State: font missing, publish blocked.</figcaption></figure><figure style="margin:0"><img src="figma/b3-timeline.png" alt="B3 Timeline" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B3 Timeline.</b> The one place for motion: keyframes on every property, parent, blend (all 38 EffectCraft modes) and matte per element. No template animations or phase bands.</figcaption></figure><figure style="margin:0"><img src="figma/b3c-graph.png" alt="B3c Graph" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B3c Graph.</b> Curves with handles, ease presets (Linear, Ease, Ease in, Ease out, Back, Bounce, Elastic, Hold), influence and speed numbers.</figcaption></figure><figure style="margin:0"><img src="figma/b3d-properties.png" alt="B3d Properties" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>B3d Properties.</b> Character, fill and stroke, paragraph, text animator and shape properties, each with a stopwatch.</figcaption></figure><figure style="margin:0"><img src="figma/c1-add-element.png" alt="C1 Add element" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>C1 Add element.</b> Add element menu: every chart and widget is a plugin (built in or installed). Bar chart and Ranking list ship first.</figcaption></figure><figure style="margin:0"><img src="figma/c2-chart-selected.png" alt="C2 Chart selected" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>C2 Chart selected.</b> A bar chart plugin on the stage; the Style card is generated from its Chart.js-named parameters, with keyframe diamonds.</figcaption></figure><figure style="margin:0"><img src="figma/c3-chart-data.png" alt="C3 Chart data" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>C3 Chart data.</b> Dataset mapping and a test records table for the chart edge cases.</figcaption></figure><figure style="margin:0"><img src="figma/c4-effects-shortcut.png" alt="C4 Effects shortcut" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>C4 Effects shortcut.</b> Effects panel with a Charts and widgets shortcut category.</figcaption></figure><figure style="margin:0"><img src="figma/c5-plugin-manager.png" alt="C5 Plugin manager" style="width:100%;border:1px solid var(--line)"><figcaption style="font-size:12px;margin-top:4px"><b>C5 Plugin manager.</b> Plugin list, manifest, parameter table (Chart.js option names) and actions. The Style card is generated from the parameter table.</figcaption></figure></div></section>
+
+  <section id="questions">
+    <h2>Decisions for you</h2>
+    <div class="qs">
+      <div class="q"><h3><span class="chip dec">1</span> Vocabulary</h3><p>These are working names only. Several echo other products, so every name is changeable in one place (see "Names" above): rename a term there and every screen on this page updates.</p></div>
+      <div class="q"><h3><span class="chip dec">2</span> Keyframe timeline (decided)</h3><p>The timeline is keyframe based and is the only motion screen. There are no template animations and no phase bands. See B3b in the Figma screens below.</p></div>
+      <div class="q"><h3><span class="chip dec">3</span> One selected-part card</h3><p>Style, Motion and Data stacked on one card, replacing separate Properties, Effect Controls, Bindings and Animation panels. Too dense, or just right?</p></div>
+      <div class="q"><h3><span class="chip dec">4</span> No preset layouts (decided)</h3><p>The Editor does not predefine scene layouts. The first screen offers a blank graphic or an import from Figma, PSD or SVG.</p></div>
+      <div class="q"><h3><span class="chip dec">5</span> Six menus plus Ctrl K</h3><p>File, Edit, Graphic, Publish, View, Help, with search for everything else.</p></div>
+      <div class="q"><h3><span class="chip dec">6</span> Prism: who makes the final file</h3><p>Does GrapiX render the finished overlay (video with alpha, or image), or does Prism play GrapiX's animated, data-linked package itself? This decides the file format and whether GrapiX needs a render service.</p></div>
+      <div class="q"><h3><span class="chip dec">7</span> Prism: where the data comes from</h3><p>For each highlight, what does Prism know (player, team, score, time, game, clip length)? That list becomes the fields every overlay design uses.</p></div>
+      <div class="q"><h3><span class="chip dec">8</span> Which AI models first, and how much they may do</h3><p>Claude and ChatGPT are named. Should every model get the same limits (read, propose, ask to publish), or different ones per model?</p></div>
+      <div class="q"><h3><span class="chip dec">9</span> Scene ID rules</h3><p>Settled: Scene ID is needed in the Editor and Playout; Take ID only in Playout, typed by the operator. Still to decide: is the Scene ID made automatically when a scene is created, can it be edited later, and what happens to takes if it changes?</p></div>
+      <div class="q"><h3><span class="chip dec">13</span> Transition setting</h3><p>Settled: layers -99,999 to +99,999, default 0, higher in front, a take on an occupied layer replaces it (out then in, overlap or cut, with an offset). Still to decide: is the transition set per layer, per take, or both?</p></div>
+      <div class="q"><h3><span class="chip dec">14</span> Scene logic first version</h3><p>JavaScript only first, or JavaScript plus the Nodes view from the start? I suggest JavaScript first, Nodes right after, on one shared set of actions and events.</p></div>
+      <div class="q"><h3><span class="chip dec">10</span> Which fields can Playout change</h3><p>The designer publishes fields in the Editor. In Playout I let the operator type values, link them, and hide ones they do not need. Should the operator also be able to publish extra fields, or only the designer?</p></div>
+      <div class="q"><h3><span class="chip dec">11</span> Linked values on air</h3><p>Safe default: a linked value changes on air only when the operator presses Update, unless auto-update is allowed per field. Agree?</p></div>
+      <div class="q"><h3><span class="chip dec">12</span> Commands and vendor protocols</h3><p>Which control systems must call takes first, and over which protocol? The command words in P4 are examples only.</p></div>
+      
+    </div>
+  </section>
+</div>
+
+<script>
+const T=(t)=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const MENU_EDITOR=['File','Edit','Scene','Layer','Effect','Motion','Data','View','Window','Help'];
+const ON={'Default':['Design'],'Animation':['Design','Animation'],'Effects':['Design','Effects'],'Data':['Design','Data'],'Text':['Design','Text'],'Publish':['Design','Publish'],'Diagnostics':['Design','Diagnostics'],'Design + Animation + Data':['Design','Animation','Data']};
+function bars(ws){
+  const tools=['on','','','','','','|','','','','|','',''].map(c=>c==='|'?'<span class="sep"></span>':`<span class="tool ${c}"></span>`).join('');
+  return `<div class="bar" style="grid-area:menu">${['File','Edit','Graphic','Publish','View','Help'].map(m=>`<span class="m">${m}</span>`).join('')}<span style="margin-left:auto" class="status">Final Four L3 · Scene ID s-021 · 1080p50 · 32 bit · sRGB</span></div>
+  <div class="bar" style="grid-area:tools"><span class="brand">GrapiX</span><span class="sep"></span>${tools}<span class="sep"></span><span style="color:var(--ink3);border:1px solid var(--line2);border-radius:2px;padding:1px 8px">Search everything  Ctrl K</span><span style="margin-left:auto" class="st ok">engine ready</span><b class="btns"><b class="pri">Publish…</b></b></div>`;
+}
+function status(txt){return `<div class="bar status" style="grid-area:status">${txt||'Toggle switches / modes · Frame render time 129 ms (engine) · 36 / 250 frames cached'}</div>`}
+function lines(items){return (items||[]).map(s=>{
+  const k=s[0], v=s.slice(1);
+  if(k==='#')return `<div class="lbl">${T(v)}</div>`;
+  if(k==='~')return `<div class="hint">${T(v)}</div>`;
+  if(k==='['){return `<div class="btns">${v.replace(/]$/,'').split('|').map(b=>{const c=b.startsWith('!')?'pri':b.startsWith('^')?'take':b.startsWith('?')?'cue':b.startsWith('x')&&b[1]===' '?'dz':'';return `<b class="${c}">${T(c?b.slice(c==='dz'?2:1):b)}</b>`}).join('')}</div>`}
+  if(k==='='){const [a,b]=v.split('::');const bound=b&&b.startsWith('@');return `<div class="fld"><span>${T(a)}</span><span class="${bound?'bound':''}">${T(bound?b.slice(1):b||'')}</span></div>`}
+  const [lab,meta]=v.split('::');
+  const st=meta&&meta.startsWith('$')?(()=>{const m=meta.slice(1);const i=m.indexOf(':');const cls=m.slice(0,i),txt=m.slice(i+1);return `<span class="st ${cls}" style="margin-left:auto">${T(txt)}</span>`})():meta?`<span class="meta">${T(meta)}</span>`:'';
+  return `<div class="row ${k==='*'?'sel':''}">${T(lab)}${st}</div>`;
+}).join('')}
+function viewer(o={}){
+  return `${o.rec?`<div class="rec">Sample record ◂ <b>3 of 48</b> ▸ player_id 1042 · Arjun Rao <span style="margin-left:auto" class="st warn">record 17 overflows</span></div>`:''}
+  <div class="viewer"><div class="comp"><div class="safe"></div><div class="l3"><i>ARJUN RAO</i><u>COMMENTATOR · HINDI</u></div>${o.sel!==false?'<div class="sel"></div>':''}${o.bind?'<div class="bind"></div>':''}${o.ghost?'<div class="ghost">proposed: score bug, top left</div>':''}${o.path?`<svg viewBox="0 0 160 90" preserveAspectRatio="none"><path d="M40 20 C60 8 100 8 118 26 S120 60 92 66 L48 60 Z" fill="none" stroke="#F58138" stroke-width=".6"/><g fill="#F2F0EB"><rect x="39" y="19" width="2" height="2"/><rect x="117" y="25" width="2" height="2"/><rect x="91" y="65" width="2" height="2"/><rect x="47" y="59" width="2" height="2"/></g><path d="M60 8 L100 8" stroke="#95908A" stroke-width=".4"/></svg>`:''}</div></div>
+  <div class="vbar">Fit (46%) <span class="tc">0:00:01:12</span> ${o.mode||'Engine frame + overlay'} <span style="margin-left:auto">safe areas · guides · 129 ms</span></div>`;
+}
+function timeline(o={}){
+  const layers=o.layers||[['Name text',1,'player.display_name'],['Role text',0,'player.role'],['Name plate',0,'auto-fit'],['Accent bar',0,'team.colour'],['Team logo',0,'team.logo_url'],['Background',0,'']];
+  const keys=[[6,22,70,88],[8,26],[4,18],[0,14],[10],[]];
+  let names=`<div class="hdr">#  Layer name <span style="margin-left:auto;display:flex;gap:10px">fx · Parent &amp; Link${o.data!==false?' · <span style="color:var(--info)">Data</span>':''}</span></div>`;
+  let tracks=`<div class="ruler">${[0,1,2,3,4,5].map(s=>`<span>0:00:0${s}:00</span>`).join('')}</div>`;
+  tracks+=`<div class="phase"><span style="width:14%;background:#15261D;color:var(--ok)">IN</span><span style="width:58%;background:var(--raised);color:var(--ink3)">HOLD · stop "hold" · continue ▸ OUT</span><span style="width:20%;background:#2A2212;color:var(--warn)">OUT</span></div>`;
+  layers.forEach((l,i)=>{
+    names+=`<div class="lr ${l[1]?'sel':''}"><span class="sw"></span>${i+1}  ${T(l[0])}<span class="col"><span>None</span>${o.data!==false?`<span class="d">${T(l[2]||'—')}</span>`:''}</span></div>`;
+    tracks+=`<div class="tr"><span class="b" style="left:0;right:${i*2}%"></span>${(keys[i]||[]).map((k,j)=>`<span class="k ${i===0&&j===1?'s':''}" style="left:${k}%"></span>`).join('')}</div>`;
+    if(o.props&&i===0){for(const p of ['Position','Opacity','Text · tracking']){names+=`<div class="lr prop">${p}<span class="col">${p==='Position'?'135, 470':'100 %'}</span></div>`;tracks+=`<div class="tr">${[6,22,70,88].map((k,j)=>`<span class="k ${j===1&&p==='Position'?'s':''}" style="left:${k}%"></span>`).join('')}</div>`}}
+  });
+  if(o.graph){tracks+=`<div class="graph"><svg viewBox="0 0 200 60" preserveAspectRatio="none"><g stroke="#34312A" stroke-width=".3">${[10,20,30,40,50].map(y=>`<line x1="0" x2="200" y1="${y}" y2="${y}"/>`).join('')}</g><path d="M6 52 C30 52 32 10 50 8 L150 8 C165 8 168 52 190 52" fill="none" stroke="#F58138" stroke-width=".9"/><path d="M6 52 L22 52 M50 8 L38 8" stroke="#95908A" stroke-width=".4"/></svg></div><div class="vbar">Value · Speed · Selected · Auto-zoom · Fit · Hold · Linear · Auto Bézier · <b style="color:var(--ember)">Easy Ease (F9)</b> · Ease in · Ease out</div>`}
+  return `<div class="tl" ${o.tlc?`style="--tlc:${o.tlc}"`:''}><div class="names">${names}</div><div class="tracks">${tracks}<span class="ph" style="left:24%"></span></div></div>`;
+}
+function panel(p){
+  const tabs=p.tabs?`<div class="tabs">${p.tabs.map((t,i)=>{const nw=t.endsWith('*');const name=nw?t.slice(0,-1):t;return `<span class="${i===(p.on||0)?'on':''} ${nw?'new':''}">${T(name)}</span>`}).join('')}</div>`:'';
+  let inner='';
+  if(p.kind==='viewer')inner=viewer(p.o);
+  else if(p.kind==='timeline')inner=timeline(p.o);
+  else if(p.html)inner=p.html;
+  else inner=`<div class="body">${lines(p.items)}</div>`;
+  const n=p.n?`<span class="n">${p.n.map(x=>`<i>${x}</i>`).join('')}</span>`:'';
+  return `<div class="p" style="grid-area:${p.a}">${tabs}${inner}${n}</div>`;
+}
+const PROJECT=['#Scenes','*Final Four L3::r3','-Scoreboard::r2','-Bumper in::r1','#Footage and images','-team_logos/::24','-bg_loop.mov::10 s','#Materials','-plate-fill::static','-team-colour::@team.colour','#Fonts','-Anybody Bold::embedded','~Filter: all · scenes · media · materials · fonts'];
+const PROPS=['#Layer transform','=Anchor point::0, 0','=Position::135, 470','=Scale::100 %','=Rotation::0x +0°','=Opacity::100 %','#Text','=Font::Anybody Bold','=Size::36 px','=Text::@player.display_name','#Material','=Slot::plate-fill','[+ Add animator|Masks…]'];
+const PREVIEW=['[◀◀|◀|▶|▶|▶▶]','=Loop::on','=Range::Work area','=Resolution::Auto','~Engine frames cached ▇▇▇▁▁▁ 36 / 250'];
+const FX=['~Search effects and presets','#Presets · entry','-Slide in from left::400 ms','-Chevron wipe (house)::600 ms','#Stylize','-Glow::$ok:engine','-Drop shadow::$ok:engine','-Glint::$warn:cpu only','#GrapiX broadcast','-Light sweep::$ok:engine','-Matte choker::$ok:engine','#Blur and sharpen · 6 / 14','#Colour correction · 9 / 31'];
+const CH=(t,c='')=>`<span class="st ${c}">${t}</span>`;
+const RAIL=(step)=>{const st=[['1 Style ✓','ok'],['2 Motion ✓','ok'],['3 Data · 2 to fix','warn'],['4 Test · record 17 overflows','bad'],['5 Publish · 1 destination','']];return `<div class="bar" style="height:100%;gap:6px;border:0"><span class="lbl" style="margin:0">Final Four L3</span>${st.map((x,i)=>`<span style="${step===i+1?'outline:1px solid var(--ember);outline-offset:2px;border-radius:2px':''}">${CH(x[0],x[1])}</span>`).join('<span>▸</span>')}<span style="margin-left:auto" class="btns"><b class="pri">Fix next issue</b></span></div>`;};
+const PARTS=['#Parts','-Name plate::box','*Name::text · field','-Role::text · field','-Accent bar::colour · team','-Team logo::image · field','-Background::box','[+ Box|+ Text|+ Image|+ Group]','~Drag to reorder. A part can be a group of parts.'];
+const CARD=['#Style','=Font::Anybody Bold · 36','=Colour::Ink · 100%','=Align::Left · Middle','=Box and fit::Fixed · shrink 420–1100 px','=Plate::Team colour · pad 16','[More…]','#Motion','=Appears::Slide in · 400 ms','=Changes::Fade · 200 ms','=Leaves::Slide out · 360 ms','#Data','=Value::@player.display_name','=If empty::hide this part','=Case::UPPERCASE','~Fixed text or from a field: one switch, here.'];
+function moments(sel){const cols=[['Appears','Slide in','400 ms','ok',[0,6,12,0]],['Stays','Soft glow','until Leaves','',[0,0,0,0]],['Changes','Fade swap','200 ms','',[0,4,0,0]],['Leaves','Slide out','360 ms','warn',[0,5,10,0]]];
+  return `<div class="mom">${cols.map(c=>`<div class="card" style="${c[0]===sel?'border-color:var(--ember)':''}"><h4>${c[0]} ${CH(c[1],c[3])}</h4><div class="status">${c[2]}</div>${c[4].map((o,i)=>`<div class="mb" style="margin-left:${o*3}%;width:${70-o*2}%"></div>`).join('')}</div>`).join('')}</div>`;}
+function cast(){const c=[['Arjun Rao','on'],['Priya S.',''],['Long name · Venkatasubramanian Iyer','bad'],['No role',''],['Two teams',''],['Non-Latin · अर्जुन','']];
+  return `<div class="castbar"><span class="lbl" style="margin:0">Cast · 48 records</span>${c.map(x=>`<span class="cc ${x[1]}">${x[0]}${x[1]==='bad'?' ⚠':''}</span>`).join('')}<span class="btns" style="margin-left:auto"><b>◂</b><b>▸</b><b class="pri">Play all</b></span></div>`;}
+const WF=[
+ {id:'b1',code:'B1',title:'Start: what are you making?',purpose:'The first screen asks for the kind of graphic, not for a project name, and opens a working house graphic to change.',
+  cols:'1fr 1fr',rows:'22px 26px 1fr 18px',areas:'"menu menu" "tools tools" "start recent" "status status"',
+  panels:[{a:'start',tabs:['Start a graphic'],html:`<div class="body"><div class="grid2" style="flex:none;height:230px">${['Blank graphic|you set the size and format, then design the layout yourself','From a Figma frame|bring in a frame and keep it linked','From a PSD|layers and layer styles come in','From an SVG|vector artwork'].map(t=>{const [a,b]=t.split('|');return `<div class="card"><h4>${a}</h4><span class="hint">${b}</span></div>`}).join('')}</div>${lines(['#Event style','=Event::BGIS 2026','=Format::1080p50 · 32 bit · sRGB','~GrapiX does not start you from a preset layout. Colours, fonts and logos come from the event style, and every graphic is laid out by you.','[!New blank graphic]'])}</div>`,n:[1]},
+   {a:'recent',tabs:['Recent graphics'],items:['~Filter…','*Final Four L3::$ok:ready to send','-Scoreboard · 2 teams::$warn:data stale','-Bumper in::$ok:sent v2','-Lower third · 3 casters::$bad:font missing','-PIC & PAC scorebug::$ok:sent v6','#Bring in','[Figma frame…|PSD…|SVG…]'],n:[2]}],
+  notes:['Nothing is preset. The designer starts from a blank graphic, or brings in a Figma frame, a PSD or an SVG, and lays it out. Layouts such as a lower third or a scorebug are things people make and keep, not things the Editor decides for them.','Format, depth and colour space are set from the event style, so nobody has to know them to start. They stay editable under Graphic.','Each recent graphic shows whether it can go to the operator: ready, data stale, font missing.']},
+ {id:'b2',code:'B2',title:'Make: one screen for the whole job',purpose:'Parts, stage and one card for the selected part. Moments are always visible underneath.',
+  cols:'230px 1fr 330px',rows:'22px 26px 34px 1fr 118px 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "parts view det" "mom mom det" "status status status"',
+  panels:[{a:'rail',html:RAIL(1),n:[1]},{a:'parts',tabs:['Parts','Effects'],items:PARTS,n:[2]},
+   {a:'view',tabs:['Stage'],kind:'viewer',o:{bind:true,mode:'Sample: Arjun Rao'}},
+   {a:'det',tabs:['Name'],items:CARD,n:[3]},
+   {a:'mom',tabs:['Moments'],html:moments(),n:[4]}],
+  notes:['The journey rail: five steps, each done, needing attention or blocked. "Fix next issue" opens the first problem.','Parts is the short list of things on the stage. A part can be a box, text, an image or a group. Effects (glow, shadow, wipe edge) are a second tab, not a catalogue of hundreds.','The stage shows the selected part with a sample record. Safe areas are on by default.','The card for the selected part holds Style, Motion and Data together. For a text part, Style always shows five rows (Font, Colour, Align, Box and fit, Plate); a data-bound number adds a sixth, Numbers (tabular digits). Everything else is under More: stroke, shadow, gradient, opacity, letter spacing, line height, case, fallback font, direction, number format. Rarer settings are found by search. The full inventory and reasons are in docs/design/research/look-properties-research.md. Changing a value in any section updates the stage, the moments and the checks.','Moments: what happens when it appears, stays, changes and leaves. Click one to edit its style and timing (B3).']},
+ {id:'b3',code:'B3',title:'Moments: motion without a timeline',purpose:'Choose how each part appears, changes and leaves. Keyframes exist, one level down.',
+  cols:'230px 1fr 330px',rows:'22px 26px 34px 1fr 240px 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "parts view det" "mom mom mom" "status status status"',
+  panels:[{a:'rail',html:RAIL(2)},{a:'parts',tabs:['Parts'],items:PARTS.slice(0,7)},{a:'view',tabs:['Stage'],kind:'viewer',o:{mode:'Playing: Appears'}},
+   {a:'det',tabs:['Appears'],items:['#Style','*Slide in::400 ms','-Wipe reveal::500 ms','-Scale pop::320 ms','-Type on::800 ms','-Chevron wipe · house::600 ms','#For this part','=Direction::from left','=Delay::0 ms','=Stagger::40 ms between parts','=Easing::Ease out','[!Preview|Apply to all parts]','~Fine-tune ▸ keyframes and curves'],n:[1]},
+   {a:'mom',tabs:['Appears','Stays','Changes','Leaves'],html:`<div class="body"><div class="lbl">Part · style · start · length</div>${['Background · Wipe reveal · 0 · 500 ms','Name plate · Slide in · 0 · 400 ms','Accent bar · Scale pop · 40 · 320 ms','Name · Type on · 120 · 400 ms','Role · Fade · 200 · 300 ms','Team logo · Pop · 280 · 320 ms'].map((r,i)=>`<div class="row ${i===1?'sel':''}"><span style="width:260px">${r.split(' · ')[0]}</span><span style="width:130px;color:var(--ink3)">${r.split(' · ')[1]}</span><span class="mb" style="margin-left:${parseInt(r.split(' · ')[2])*1.2}px;width:${parseInt(r.split(' · ')[3])*.6}px;height:6px;flex:none"></span><span class="meta">${r.split(' · ')[3]}</span></div>`).join('')}<div class="lbl">Stays: until the operator takes it out</div>${CH('Stop point "hold"','info')}</div>`,n:[2]},
+   ],
+  notes:['Each moment lists the parts and the style each uses, with start and length drawn as small bars. This is the animation view for people who think in "it slides in, then the name types on".','A style is a named, tested motion (house styles first). "Apply to all parts" and "Stagger" cover the common case in two clicks.','Stays is not animation: it is the hold, and its stop point is what the operator\'s Continue and Take out act on.','Fine-tune opens keyframes and the speed curve for the one value that needs it, in a panel that slides over the strip.']},
+ {id:'b4',code:'B4',title:'Data: fields set on the part',purpose:'Where the values come from, and proof they survive every record.',
+  cols:'250px 1fr 330px',rows:'22px 26px 34px 1fr 190px 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "src view det" "cast cast det" "status status status"',
+  panels:[{a:'rail',html:RAIL(3)},{a:'src',tabs:['Data'],items:['[!Add data…]','*Match feed · live::$ok:280 ms','-Players.csv::48 rows','-Casters · Sheet::$warn:2 min','#Fields found','-player.display_name::text','-player.role::text','-team.logo_url::image','-team.colour::colour','~Drag a field onto a part, or let GrapiX match by name.'],n:[1]},
+   {a:'view',tabs:['Stage'],kind:'viewer',o:{bind:true,rec:true,mode:'Record 17'}},
+   {a:'det',tabs:['Fields the operator fills'],items:['=Name::@player.display_name','=Role::@player.role','=Team::@team.name','=Logo::@team.logo_url','#Checks','-Record 17 overflows 64 px::$warn:fix','-Score feed stale 31 s::$bad:fix','[!Auto-fit name|Hide when empty]','#Operator form','=Name::ARJUN RAO','=Role::COMMENTATOR','=Team::Team Soul','~This is what Playout shows. It is built from the fields above.'],n:[2]},
+   {a:'cast',tabs:['Test records · all 48'],html:`<div class="body">${lines(['#Record · name · role · team · result','-1 · ARJUN RAO · COMMENTATOR · Team Soul::$ok:fits','-2 · PRIYA S. · ANALYST · TSM::$ok:fits','-17 · VENKATASUBRAMANIAN IYER · COMMENTATOR · Team Soul::$warn:overflow 64 px','-31 · (no role) · · TSM::$warn:empty role hidden','-44 · अर्जुन · COMMENTATOR · Soul::$ok:fits','[Check all records]'])}</div>`,n:[3]}],
+  notes:['No bindings table. A field is set on the part (B2 card). This screen shows the data side: sources, the fields found, and what the operator will fill.','The test records table checks every record at once against the real layout: overflow, empty values, long names, non-Latin text, stale data.','Fixes are one click: Auto-fit shrinks to a limit, Hide when empty removes a part.']},
+ {id:'b5',code:'B5',title:'Style: a few good choices first',purpose:'Colours, fonts and finishes from the event style; the full effect catalogue is behind one click.',
+  cols:'260px 1fr 340px',rows:'22px 26px 34px 1fr 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "kit view looks" "status status status"',
+  panels:[{a:'rail',html:RAIL(1)},{a:'kit',tabs:['Event style · BGIS 2026'],items:['#Colours','-Ink  #F3EDE4','-Ember  #F15A29','-Cocoa  #28110C','-Team colour::from data','#Fonts','-Display · Anybody Bold','-Text · Manrope','-Numbers · JetBrains Mono','#Logos','-Event · Team (from data)','[Import from Figma…]'],n:[1]},
+   {a:'view',tabs:['Stage'],kind:'viewer',o:{mode:'Effects preview'}},
+   {a:'looks',tabs:['Effects for Name plate'],html:`<div class="body"><div class="grid2" style="flex:none">${[['Soft glow','on'],['Card shadow',''],['Chevron edge',''],['Light sweep',''],['Matte choker',''],['Outline 2 px','']].map(l=>`<div class="card" style="${l[1]?'border-color:var(--ember)':''}"><h4>${l[0]} ${CH('engine','ok')}</h4><div class="status">preview thumbnail</div></div>`).join('')}</div>${lines(['=Strength::60 %','=Softness::24 px','[!All effects (322)…|Show engine-ready only]','~Every effect says if the engine can render it.'])}</div>`,n:[2]}],
+  notes:['The event style is the design system for this show: colours, fonts and logos picked once, used everywhere. Figma frames and PSDs come in here.','Effects are finishes you add to a part, shown as thumbnails of the real result. The long catalogue is "All effects", searchable, with engine support stated on each.']},
+ {id:'b6',code:'B6',title:'Publish: choose where it goes',purpose:'One package, checked for each destination. Today: Playout, and AI models over MCP. Prism is planned.',
+  cols:'1fr 360px',rows:'22px 26px 34px 1fr 18px',areas:'"menu menu" "tools tools" "rail rail" "view dest" "status status"',
+  panels:[{a:'rail',html:RAIL(5)},{a:'view',tabs:['What is in this package'],html:`<div class="body" style="flex-direction:row;gap:14px;align-items:flex-end;justify-content:center;background:var(--bg)">${[['16:9 · 1080p50','230px','130px','now: Playout',0],['9:16 · reel','80px','142px','planned',1],['1:1 · post','110px','110px','planned',1]].map(f=>`<div style="display:flex;flex-direction:column;gap:4px;align-items:center;opacity:${f[4]?.45:1}"><div style="width:${f[1]};height:${f[2]};background:#000;border:1px ${f[4]?'dashed':'solid'} var(--line2);position:relative"><div style="position:absolute;left:10%;bottom:14%;width:70%;height:12%;background:#F3EDE4;border-left:3px solid var(--take)"></div></div><span class="status">${f[0]}</span><span class="status" style="color:var(--ink4)">${f[3]}</span></div>`).join('')}</div>`,n:[1]},
+   {a:'dest',tabs:['Destinations'],items:['#Package · Final Four L3 · version 4 (draft)','*Playout · BGIS engine::$warn:2 to fix','-  16:9 · effects the engine can render · fields complete','-  record 17 overflows · feed stale','-AI models (MCP)::$ok:can read','-  Claude, ChatGPT and other models can find this graphic, read its fields and preview it','-Prism · highlight overlays::$info:planned','-  not available yet','#Checks for Playout','-Fonts embedded::$ok:ok','-Every record fits::$warn:1 overflow','-Data fresh::$bad:stale','[!Publish to Playout|Publish and make readable over MCP]','~Publishing makes a numbered version. It never puts anything on air; only Playout can, with an operator.'],n:[2]}],
+  notes:['The package already holds room for other formats (dashed), so planned destinations such as Prism need no redesign.','Each destination has its own checklist. AI access (MCP) is controlled separately: a model can read a published graphic, but asking to publish needs approval.','Replies come back per destination: delivered, refused (with the reason and a next step), or waiting for approval.']},
+ {id:'b7',code:'B7',title:'Search everything',purpose:'Ctrl K finds commands, parts, effects, fields and help. It is why six menus are enough.',
+  cols:'230px 1fr 330px',rows:'22px 26px 34px 1fr 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "parts view det" "status status status"',
+  panels:[{a:'rail',html:RAIL()},{a:'parts',tabs:['Parts'],items:PARTS.slice(0,7)},{a:'view',tabs:['Stage'],kind:'viewer'},{a:'det',tabs:['Name'],items:CARD}],
+  extra:`<div class="scrim"></div><div class="dialog" style="grid-template-columns:1fr;inset:12% 28%;display:flex;flex-direction:column"><div class="body" style="padding:8px">${lines(['=Search::chev','#Effects','*Chevron edge::add to Name plate','-Chevron wipe · house::apply as Appears','#Commands','-Publish…::Ctrl Shift P','-Check graphic::F7','#Parts and fields','-Accent bar::part','-team.chevron_colour::field','#Help','-How to use house motions','~↑↓ to choose · Enter to run · Esc to close'])}</div></div>`,
+  notes:['One box for everything, ranked by what you are working on. Any result can show its shortcut and be bound to a Stream Deck key.','Menus stay at six; nothing is only in a menu.']},
+ {id:'b8',code:'B8',title:'Ask: describe it, then accept or reject',purpose:'AI through MCP, kept inside the same journey. It proposes; you decide, part by part. It can never reach Program.',
+  cols:'230px 1fr 330px',rows:'22px 26px 34px 1fr 118px 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "parts view det" "mom mom det" "status status status"',
+  panels:[{a:'rail',html:RAIL()},{a:'parts',tabs:['Parts'],items:PARTS.slice(0,7)},{a:'view',tabs:['Stage'],kind:'viewer',o:{ghost:true,sel:false,mode:'Proposed change in blue'}},
+   {a:'det',tabs:['Ask'],items:['=Request::Add a two-team score bug, top left, from the Match feed','#Proposed · 4 changes','*+ Part Score bug (group)::$info:new','-+ Fields Home and away score::$info:new','-~ Accent bar width 9 → 12 px::$warn:edit','-+ Moment Appears: slide in::$info:new','[!Accept all|Accept selected|Reject]','#It may','-Change this graphic::$ok:yes','-Send to Playout::$warn:asks first','-Take, preload or clear on air::$bad:never','~Every agent change is logged with who asked.'],n:[1]},
+   {a:'mom',tabs:['Moments'],html:moments()}],
+  notes:['A request in plain words becomes a short list of changes, each with a blue ghost on the stage until accepted.','What an agent may do is shown as a short list; take, preload and clear are never offered, because the Editor has none of them.']},
+ {id:'b9',code:'B9',title:'Formats: one design, several shapes',purpose:'The same parts laid out for 16:9, 9:16 and 1:1. Edit the shared look once; adjust the layout per format.',
+  cols:'230px 1fr 320px',rows:'22px 26px 34px 1fr 118px 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "parts view det" "mom mom det" "status status status"',
+  panels:[{a:'rail',html:RAIL(1)},{a:'parts',tabs:['Parts'],items:['#Parts · shown in','*Name plate::16:9 · 9:16 · 1:1','-Name::16:9 · 9:16 · 1:1','-Role::16:9 · 9:16','-Accent bar::all','-Team logo::all','-Score bug::16:9 · 1:1','-Reel UI safe zone::9:16 guide','[+ Format…]'],n:[1]},
+   {a:'view',tabs:['16:9','9:16','1:1'],html:`<div class="body" style="flex-direction:row;gap:16px;align-items:center;justify-content:center;background:var(--bg)">${[['16:9 · 1920×1080','260px','146px',1],['9:16 · 1080×1920','82px','146px',0],['1:1 · 1080×1080','146px','146px',0]].map(f=>`<div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width:${f[1]};height:${f[2]};background:#000;border:1px solid ${f[3]?'var(--ember)':'var(--line2)'};position:relative"><div style="position:absolute;inset:6%;border:1px dashed var(--ink4)"></div><div style="position:absolute;left:12%;bottom:${f[1]==='82px'?'28%':'16%'};width:${f[1]==='82px'?'76%':'62%'};height:11%;background:#F3EDE4;border-left:3px solid var(--take)"></div>${f[1]==='82px'?'<div style="position:absolute;right:4%;bottom:10%;width:16%;height:46%;background:rgba(90,169,230,.15);border:1px dashed var(--info)"></div>':''}</div><span class="status">${f[0]}</span></div>`).join('')}</div>`},
+   {a:'det',tabs:['Name · 9:16'],items:['#Layout in this format','=Position::anchor bottom · 12 % up','=Width::fill 76 %','=Size::scale 1.3 for phone reading','=Lines::wrap to 2','=Avoid::reel buttons zone (blue)','=Shown::on','#Shared across formats','-Font · colour · effects · fields::$ok:linked','[Unlink layout|Copy from 16:9]','~Changing text style or an effect changes all formats. Position and size can differ per format.'],n:[2]},
+   {a:'mom',tabs:['Moments · 9:16'],html:moments()}],
+  notes:['Formats share the parts and the style. Layout (position, size, wrap, visibility) is per format, with sensible rules so most parts need no manual work.','Platform guides (reel buttons, title-safe, action-safe) are drawn per format, so a vertical overlay never hides behind the reel UI.','The test records check each format: a name that fits in 16:9 may wrap in 9:16.']},
+ {id:'b10',code:'B10',title:'Library: published packages and who reads them',purpose:'Every published version, what it contains, and which reader (Playout, AI models, later Prism) uses it.',
+  cols:'1fr 380px',rows:'22px 26px 1fr 18px',areas:'"menu menu" "tools tools" "list detail" "status status"',
+  panels:[{a:'list',tabs:['Packages'],items:['~Filter by name, format, event…','#Package · latest · formats · read by','*Final Four L3 · v4 · 16:9::$ok:Playout, AI','-Scorebug 2 teams · v11 · 16:9::$ok:Playout, AI','-Bumper in · v6 · 16:9::$ok:Playout','-Goal overlay · v1 · 16:9 9:16::$info:draft · for Prism later','-Lower third 3 casters · v9 · 16:9::$bad:font missing in v9'],n:[1]},
+   {a:'detail',tabs:['Final Four L3 · v4'],items:['#Contains','=Scene ID::s-021 · same in Playout','=Default layer::0 · Playout can override','=Formats::16:9 (others planned)','=Fields::name, role, team, logo','=Moments::appears, stays, changes, leaves','=Fingerprint::sha-256 7c1e…a90b','#Read by','-Playout · BGIS engine::$ok:v4 ready','-AI models over MCP::$ok:can read v4','#History','-v4 · 13:06 · you · Playout','-v3 · 12:10 · you · Playout','[!Open in Editor|Deprecate]','~Older versions stay readable; nothing changes under a reader until it moves.'],n:[2]}],
+  notes:['The library answers what exists, in which shape, and which reader uses which version.','Prism would appear here as another reader once it exists.']},
+ {id:'b11',code:'B11',title:'Connections: Playout and AI models',purpose:'The two doors that exist today, plus a marked place for Prism later.',
+  cols:'1fr 1fr 1fr',rows:'22px 26px 1fr 18px',areas:'"menu menu menu" "tools tools tools" "po mcp pr" "status status status"',
+  panels:[{a:'po',tabs:['Playout'],items:['*BGIS engine · 127.0.0.1:4401::$ok:connected','=Receives::numbered package','=Formats::16:9','=Can render::322 effects, 19 shown as engine-ready','=Can act on air::only Playout, with an operator','[Test connection|Edit]','~Playout is the only place that can put a graphic on air.'],n:[1]},
+   {a:'mcp',tabs:['AI models (MCP)'],items:['=Server::grapix (stdio and HTTP)','#Tools','-graphics.list · get · fields · render_preview::$ok:read','-graphics.propose_edit::$warn:designer accepts','-graphics.publish_request::$warn:needs approval','-program.take · preload · clear::$bad:not offered','#Clients','-Claude::$ok:read + propose','-ChatGPT::$ok:read only','-Other model::$info:ask first','#Audit','-13:06 Claude proposed 4 edits to Final Four L3::$ok:ok'],n:[2]},
+   {a:'pr',tabs:['Prism · planned'],items:['~Idea only; nothing here works yet.','=Receives::animated, data-linked package','=Formats::16:9 · 9:16 · 1:1 (to confirm)','=Who renders::to decide','=Data comes from::Prism, per highlight','[Not available]'],n:[3]}],
+  notes:['Playout and AI models are separate on purpose: an AI model can read and propose, but cueing a graphic on air is always a Playout operator.','Each connection shows exactly what it can do; the audit line records who asked for what.']},
+ {id:'b12',code:'B12',title:'Logic: a scene\'s own timelines, script and nodes',purpose:'Each scene has its own sandbox. Script and nodes use the same actions and events, so they are interchangeable.',
+  cols:'230px 1fr 360px',rows:'22px 26px 1fr 170px 18px',areas:'"menu menu menu" "tools tools tools" "parts view logic" "nodes nodes logic" "status status status"',
+  panels:[{a:'parts',tabs:['Parts'],items:PARTS.slice(0,7)},{a:'view',tabs:['Stage'],kind:'viewer',o:{mode:'Testing logic · record 3'}},
+   {a:'logic',tabs:['Timelines','Script','Nodes'],on:1,html:`<div class="body"><div class="lbl">Runs only while this scene is loaded or on air</div><div style="font:500 10px/1.5 var(--f-mono);background:var(--bg);border:1px solid var(--line);border-radius:2px;padding:6px;white-space:pre;overflow:hidden"><span style="color:var(--ink4)">// when the home score changes</span>\non(<span style="color:var(--info)">'field:Home score'</span>, (value) => {\n  play(<span style="color:var(--info)">'Score change'</span>);\n  set(<span style="color:var(--info)">'Accent bar'</span>, <span style="color:var(--info)">'colour'</span>, ember);\n});\n\n<span style="color:var(--ink4)">// every frame: pure calculation</span>\nbar.width = lerp(120, 480, home / total);</div>${lines(['#Actions','-set a property: colour, position, scale, pivot, opacity…','-play · stop · jump a timeline','-set a field','#Events','-field changed · take on air · Continue · command','#Sandbox','=Time budget::2 ms per frame','=On error::keep last good values, tell the operator','=Can reach::this scene only','[!Run test|Open in node view]'])}</div>`,n:[1]},
+   {a:'nodes',tabs:['Nodes · same logic as the script'],html:`<div class="body" style="flex-direction:row;align-items:center;gap:10px;justify-content:center">${['On field changed|Home score','Compare|value > previous','Play timeline|Score change','Set colour|Accent bar → ember'].map(x=>`<div class="card" style="min-width:150px"><h4>${x.split('|')[0]}</h4><span class="status">${x.split('|')[1]}</span></div>`).join('<span>→</span>')}</div>`,n:[2]}],
+  notes:['Timelines, Script and Nodes are three views of the same scene logic. The first version can ship Script, with Nodes right after on the same actions and events.','Per-frame logic must be a pure calculation of time and data with a cost limit. Anything with a side effect is event logic, which asks the engine to act and never sets time.','A scene cannot reach other scenes. Show-level rules live in Playout (P8).']},
+ {id:'b13',code:'B13',title:'Assets: virtual folders and import folder',purpose:'One import manager for the whole project. You create and name the folders; files stay where they are on disk. The open scene only filters the view.',
+  cols:'250px 1fr 320px',rows:'22px 26px 1fr 18px',areas:'"menu menu menu" "tools tools tools" "tree grid det" "status status status"',
+  panels:[{a:'tree',tabs:['Folders'],items:['[!Import files…|Import folder…|+ New folder]','#Project','*All assets::142','-BGIS 2026::96','-  Team logos::24','-  Casters::18','-  Backgrounds::12','-  Sounds::9','-Figma imports::31','-  Final Four frames::14','-Unfiled::15','~Folders are yours: nest, rename, drag to move. They only organise; they do not change publishing.'],n:[1]},
+   {a:'grid',tabs:['BGIS 2026 / Team logos'],html:`<div class="body"><div class="btns"><b class="pri">All</b><b>This scene · 6</b><b>Unused · 3</b><b>Missing · 1</b><span class="status" style="margin-left:auto;align-self:center">search names and types</span></div><div class="grid2" style="grid-template-columns:repeat(4,1fr);flex:none">${[['logo_soul.png','2 scenes','ok'],['logo_tsm.png','1 scene','ok'],['logo_gods.png','unused','warn'],['logo_ign.png','missing','bad'],['logo_rex.png','1 scene','ok'],['logo_nova.png','3 scenes','ok'],['logo_vit.png','unused','warn'],['event_mark.svg','5 scenes','ok']].map(a=>`<div class="card"><div style="height:46px;background:#000;border:1px solid var(--line)"></div><h4 style="font-size:9.5px">${a[0]}</h4>${CH(a[1],a[2])}</div>`).join('')}</div><div class="hint">Drop files on a folder to add them there. Drop them on the stage to add them to the project and place them in the open scene.</div></div>`,n:[2]},
+   {a:'det',tabs:['logo_soul.png'],items:['#File','=Path::D:\\Shows\\BGIS\\logos\\logo_soul.png','=Size::512 × 512 · PNG with alpha','=Status::linked · ok','=Fingerprint::7c1e…a90b','#Used by','-Final Four L3::scene s-021','-Scorebug 2 teams::scene s-030','[!Replace file|Relink|Reveal in folder]','~Replacing a file marks the scenes that use it as out of date and offers to republish them.'],n:[3]}],
+  extra:`<div style="position:absolute;left:260px;bottom:24px;width:360px;background:var(--panel);border:1px solid var(--line2);box-shadow:0 6px 24px rgba(0,0,0,.55);padding:8px;display:flex;flex-direction:column;gap:4px;border-radius:3px"><div class="lbl">Import folder… (dialog)</div>${lines(['=From::D:\\Shows\\BGIS\\logos','=Create::matching folders · 3 levels · 96 files','=Into::BGIS 2026','=Duplicates::reuse files already in the project (12 found)','[!Import|Cancel]'])}</div>`,
+  notes:['Virtual folders: the project\'s own organisation, as in After Effects. Moving a folder never moves a file on disk.','Import folder creates matching folders from a disk folder in one step, skips or reuses duplicates (matched by fingerprint) and shows what it will do before it does it.','"This scene", "Unused" and "Missing" are views over the folders, not folders. Nothing is filed by scene.','Pointer for later: the MCP connection gets read and write access to these folders (list, create, rename, move folders and assets) under the same scopes and audit log as other MCP tools.']},
+ {id:'f1',code:'F1 · planned',title:'Requests: overlays Prism asks for (idea, not built)',purpose:'Where a highlight overlay request meets a Figma design, GrapiX animation and data, and the finished file goes back to Prism.',
+  cols:'300px 1fr 340px',rows:'22px 26px 34px 1fr 18px',areas:'"menu menu menu" "tools tools tools" "rail rail rail" "req view pkg" "status status status"',
+  panels:[{a:'rail',html:`<div class="bar" style="height:100%;gap:6px;border:0"><span class="lbl" style="margin:0">Goal overlay · esports</span>${CH('1 Request ✓','ok')}<span>▸</span>${CH('2 Figma design ✓','ok')}<span>▸</span>${CH('3 Animate and bind ✓','ok')}<span>▸</span>${CH('4 Test with highlights','warn')}<span>▸</span>${CH('5 Deliver to Prism')}<span style="margin-left:auto" class="chip dec">PLANNED</span></div>`},
+   {a:'req',tabs:['Requests'],items:['~From Prism, or created by a person','#Overlay · format · state','*Goal · 16:9 9:16::$warn:testing','-Match point · 16:9::$info:needs design','-Kill streak · 9:16 1:1::$ok:delivered v2','-MVP card · 1:1 4:5::$ok:delivered v1','-Social post · quote · 4:5::$info:needs design','[+ New request|Pull from Figma]'],n:[1]},
+   {a:'view',tabs:['Goal overlay · 9:16'],kind:'viewer',o:{bind:true,rec:true,mode:'Highlight #212 · Team Soul'}},
+   {a:'pkg',tabs:['Package for Prism'],items:['=Figma frame::Goal overlay v3 (linked)','=Fields::player, team, score, time, game','=Moments::appears, stays, leaves','=Formats::16:9 · 9:16','#Test with real highlights','-Highlight #212 · long name::$warn:overflow','-Highlight #213::$ok:fits','-Highlight #214 · no photo::$ok:fits','[!Deliver to Prism|Preview as customer]','~What Prism gets: the animated, data-linked file and its version. Prism supplies the data and shares the finished highlight.'],n:[2]}],
+  notes:['Only a sketch of the idea: a list of what Prism asked for, the design pulled from Figma, the same test-with-real-data step as the rest of the Editor, and a hand-over. Format and who renders the final video are still open questions.','Every other screen in this document stays the same; this one is added only when the module is approved.']},
+];
+const PBAR=(tab)=>`<div class="bar" style="grid-area:pbar"><span class="brand">GrapiX Playout</span><span class="sep"></span><span>Operator <b style="color:var(--ink)">Vamsi</b></span><span class="st ok">engine connected</span><span class="status">show: Final day · sequence of 6 takes</span><div class="ws" style="margin-left:auto;display:flex;gap:10px">${['Sequence','Scene data','Calling takes','Output'].map(t=>`<span class="${t===tab?'mt on':'mt'}">${t}</span>`).join('')}</div><span class="st warn">free run</span></div><div class="band warn" style="grid-area:band">WARNING · FREE RUN, no external reference · stays until a reference locks</div>`;
+const SEQ=(drop)=>{const LAY={'1001':'-50','1002':'0','1003':'0','1004':'+60','1005':'-50','1006':'0'};const rows=[['1001','Opening bumper','Bumper in · v6','played','Played',''],['1002','L3 · Arjun Rao','Lower third · v4','air','ON AIR','Hindi feed'],['1003','L3 · Priya S.','Lower third · v4','info','PRELOADED · in preview','Analyst'],['1004','Scorebug · TSM v SOUL','Scorebug · v11','','NEXT','Live score'],['1005','Stats full-screen','Full-screen · v3','','',''],['1006','L3 · three casters','Lower third 3 · v2','warn','2 fields empty','Needs names']];
+ return `<div class="body" style="padding:0;gap:0"><div class="row" style="background:var(--raised);font:600 8px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);padding:3px 6px"><span style="width:52px">Take ID</span><span style="width:150px">Name</span><span style="width:100px">Scene</span><span style="width:72px">Layer</span><span style="width:100px">State</span><span>Description</span></div>${rows.map((r,i)=>`<div class="row" style="padding:3px 6px;border-bottom:1px solid #1f1d1a;${r[3]==='air'?'background:#2A150C;box-shadow:inset 5px 0 0 var(--take)':i===2?'background:var(--raised);box-shadow:inset 2px 0 0 var(--ink3)':''}"><span style="width:52px;font:700 10px var(--f-mono);color:var(--ember)">${r[0]}${r[3]==='air'?' locked':' ✎'}</span><span style="width:150px;color:var(--ink)">${r[1]}${r[3]==='air'?'':' ✎'}</span><span style="width:100px;color:var(--ink3)">${r[2]}</span><span style="width:72px;font-family:var(--f-mono);color:var(--ink2)">L${LAY[r[0]]} ▴▾</span><span style="width:100px">${r[3]==='air'?CH(r[4],'air'):r[3]==='info'?CH(r[4],'info'):r[3]==='warn'?CH(r[4],'warn'):r[3]==='played'?CH(r[4],'ok'):r[4]?CH(r[4]):''}</span><span style="color:var(--ink3)">${r[5]}</span></div>`).join('')}${drop?`<div class="row" style="border:1px dashed var(--ember);color:var(--ember);justify-content:center;margin:4px 6px;padding:5px">Drop scene here: Take ID 1007 suggested, type your own</div>`:`<div class="hint" style="padding:4px 6px">Drag a scene from the list to add a take. Drag takes to reorder. Type your own Take ID (unique in this show); it never changes when you reorder.</div>`}</div>`;};
+const MONS=()=>`<div class="mon" style="flex-direction:row;gap:8px"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div class="cap">${CH('PREVIEW · 360p · local only','info')}<span class="status">not connected to air</span></div><div class="scr cue" style="min-height:70px"><div class="mini"></div></div><div class="btns"><b>▶ Play</b><b>❚❚ Pause</b><b>■ Stop</b><b>↺ Loop</b><b class="cue">Check on virtual output</b></div><div class="hint" style="font-size:9px">Plays take 1003 with the data as edited at right, in the layout at reduced resolution (360, or 480; lowers itself under load). Its own renderer.</div></div><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div class="cap">${CH('ON AIR · live','air')}<span class="status">take 1002 · v4 · fingerprint 7c1e…a90b</span></div><div class="scr air" style="min-height:70px"><div class="mini"></div></div><div class="btns"><b class="cue">CONTINUE</b><b>HOLD</b></div><div class="btns" style="margin-top:4px;border-top:1px solid var(--line);padding-top:4px"><b class="dz">TAKE OUT · hold 1 s</b><b class="dz">CLEAR · arm first</b></div><div class="hint" style="font-size:9px">Read-only picture of Program. Only TAKE and these controls act on air. Name and Take ID of an on-air take are locked.</div></div></div>`;
+const TX=()=>`<div class="body" style="flex-direction:row;align-items:center;gap:10px;justify-content:center"><div class="btns"><b class="cue">PRELOAD 1003</b><b class="take">TAKE</b><b>TAKE NEXT 1004</b><b>UPDATE on air</b></div><span class="hint" style="margin:0">TAKE sends the exact version and data checked in Preview or on the virtual output.</span></div>`;
+const PL=[
+ {id:'p1',code:'P1',title:'Sequence: the heart of Playout',purpose:'A list of takes. Each take is a scene with its own ID, name and description. Scenes are dragged in from the scene list. Preview is separate from what is on air.',
+  cols:'250px 1fr 320px',rows:'30px 22px 1fr 1.05fr 52px 80px',areas:'"pbar pbar pbar" "band band band" "scn seq data" "scn mon data" "scn tx data" "log log data"',
+  html:PBAR('Sequence'),
+  panels:[{a:'scn',tabs:['Scenes'],items:['~Search scenes…','#Event · BGIS 2026','-Bumper in::s-014','-Lower third::s-021','-Lower third · 3 casters::s-022','-Scorebug · 2 teams::s-030','-Full-screen stats::s-041','-Ticker::s-052','~Drag a scene into the sequence. Name and description editable.'],n:[1]},
+   {a:'seq',tabs:['Sequence · Final day'],html:SEQ(true),n:[2]},
+   {a:'mon',html:MONS(),n:[3]},{a:'tx',html:TX(),n:[4]},
+   {a:'data',tabs:['Scene data · take 1003'],items:['#Fields the designer published','-Name · PRIYA S.::$ok:typed','-Role · ANALYST::$ok:typed','-Team · Team Soul::$info:linked','-Logo · logo_soul.png::$info:linked','-Show logo · on::$ok:typed','#Not shown here (hidden by you)','-Background tint::hidden','[!Apply to preview|Revert|Link…]','~Typed = edited by hand. Linked = follows a data source. Changes show in Preview first.'],n:[5]},
+   {a:'log',tabs:['Activity'],items:['-13:06:02 take 1002 on air · r4::$ok:ok','-13:05:40 take 1003 preloaded in preview::$ok:ok','-13:04:11 refused: wrong version v3 vs r4::$bad:refused']}],
+  notes:['Take ID: a number the operator types by hand for that take, shown in orange (pencil = editable). It must be unique in the show. Another system calls it ("take 1003"), so reordering never changes what a number means. Scene ID (s-021) belongs to the scene, is set in the scene list and is the same in the Editor and Playout.','Dragging a scene from the Scenes list into the sequence creates a take with the next free Take ID. Name and description of both the scene and the take can be edited in place (pencil).','Scene data: only the fields the designer chose to publish appear. Each can be typed by hand or linked to a data source. Edits go to Preview first.','Preview is its own player on its own renderer, with Play, Pause, Stop and Loop. It has no connection to what is on air, so nothing the operator does there can change Program.','"TAKE" sends exactly the version and data that were previewed, and the engine checks they match. Only the controls under the on-air monitor can act on air.']},
+ {id:'p2',code:'P2',title:'Scenes and take details',purpose:'The scene list as a library: what each scene is, its ID, who uses it, and the commands that call it.',
+  cols:'1fr 1fr 1fr',rows:'30px 22px 1fr 18px',areas:'"pbar pbar pbar" "band band band" "scn det call" "log log log"',
+  html:PBAR('Sequence'),
+  panels:[{a:'scn',tabs:['Scenes'],items:['~Search · filter: published · has data · used in show','#Event · BGIS 2026','-Bumper in::s-014 · v6','*Lower third::s-021 · v4','-Lower third · 3 casters::s-022 · v2','-Scorebug · 2 teams::s-030 · v11','-Full-screen stats::s-041 · v3','#Drop a file or package to bring in a scene'],n:[1]},
+   {a:'det',tabs:['Lower third · s-021'],items:['=Name::Lower third · name and role','=Description::One caster, Hindi or English feed','=Scene ID::s-021 · same in Editor and Playout','=Version::r4 · published 13:02','=Effects::soft glow · chevron edge','#Used in this show','-Take 1002 · L3 · Arjun Rao::$air:on air','-Take 1003 · L3 · Priya S.::$info:preloaded','#Fields published','-Name · Role · Team · Logo · Show logo','[!Add to sequence|Save|Open in Editor]','~Name and description are saved with the show and can differ from the designer\'s.'],n:[2]},
+   {a:'call',tabs:['Call this take'],items:['=Take ID::1003 ✎ you choose · unique in this show','#By TCP, UDP or HTTP (example syntax)','-TAKE 1003::copy','-PRELOAD 1003::copy','-OUT 1003::copy','-UPDATE 1003 name="PRIYA S."::copy','#Last calls to this take','-13:05:40 PRELOAD 1003 from TCP 10.0.4.8::$ok:ok','~Any system that can send text can call a take by its ID.'],n:[3]}],
+  notes:['The scene list shows what is available to play out and which version each is at. Dragging from here into the sequence is the normal way to build a show.','The designer\'s name stays as the scene\'s original; the operator can give it a show-specific name and description.','"Call this take" shows the exact commands for the selected take, ready to copy into another system.']},
+ {id:'p3',code:'P3',title:'Scene data: every field in the show',purpose:'One list of all published fields across the sequence, to check or edit by hand, or to link to a data source.',
+  cols:'1fr 320px',rows:'30px 22px 1fr 18px',areas:'"pbar pbar" "band band" "tbl src" "log log"',
+  html:PBAR('Scene data'),
+  panels:[{a:'tbl',tabs:['Scene data · all takes','Only take 1003'],html:`<div class="body" style="padding:0;gap:0"><div class="row" style="background:var(--raised);font:600 8px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);padding:3px 6px"><span style="width:44px">Take</span><span style="width:110px">Field</span><span style="width:180px">Value</span><span style="width:90px">Source</span><span>Published</span></div>${[['1002','Name','ARJUN RAO','typed','on'],['1002','Role','COMMENTATOR','typed','on'],['1003','Name','PRIYA S.','typed','on'],['1003','Team','Team Soul','Match feed','on'],['1003','Background tint','—','—','hidden'],['1004','Home score','2','Score feed','on'],['1004','Away score','1','Score feed','on'],['1006','Name 1','(empty)','—','on'],['1006','Name 2','(empty)','—','on']].map((r,i)=>`<div class="row ${i===2?'sel':''}" style="padding:3px 6px;border-bottom:1px solid #1f1d1a"><span style="width:44px;font:700 10px var(--f-mono);color:var(--ember)">${r[0]}</span><span style="width:110px">${r[1]}</span><span style="width:180px;font-family:var(--f-mono);color:${r[2]==='(empty)'?'var(--warn)':'var(--ink)'}">${r[2]} ✎</span><span style="width:90px;color:${r[3]==='Match feed'||r[3]==='Score feed'?'var(--info)':'var(--ink3)'}">${r[3]}</span><span>${r[4]==='on'?CH('shown','ok'):CH('hidden')}</span></div>`).join('')}<div class="hint" style="padding:4px 6px">Edit any value in place. Empty required fields are flagged before the take is allowed.</div></div>`,n:[1]},
+   {a:'src',tabs:['Link to data'],items:['*Match feed · live::$ok:280 ms','-Players.csv::48 rows','-Score feed · WebSocket::$ok:live','#Link field to source','=Take 1003 · Team::@team.name','=Update::manual, or follows source','=While on air::hold until I update','[!Link|Unlink|Refresh]','~Linked values update the preview. On air they only change when you press Update, unless you allow auto-update for that field.'],n:[2]}],
+  notes:['The designer decides which fields are published. Here the operator sees only those, can type values, link them to a source, and can hide ones they do not need for this show.','Whether a linked value may change on air by itself is a per-field choice; the safe default is that it waits for the operator.']},
+ {id:'p4',code:'P4',title:'Calling takes from other systems',purpose:'Any control system can drive the sequence by Take ID, over TCP, UDP, HTTP or a custom protocol.',
+  cols:'1fr 1fr',rows:'30px 22px 1fr 1fr 18px',areas:'"pbar pbar" "band band" "lis cmd" "lis test" "log log"',
+  html:PBAR('Calling takes'),
+  panels:[{a:'lis',tabs:['Ways in'],items:['[!Add…]','-TCP 7788::$ok:listening','-UDP 7789::$ok:listening','-HTTP 8080 · token::$ok:listening','-Custom protocol adapter::$info:optional','-Ross-style text adapter::$info:planned','#Who may call','=Allowed hosts::10.0.4.0/24','=Needs sign-in::token','=Can act on air::take, out, continue','~Every call names its sender in the activity log.'],n:[1]},
+   {a:'cmd',tabs:['Commands by Take ID'],items:['#Example syntax (final names to be confirmed)','-PRELOAD <take id>::load into preview','-TAKE <take id>::take live','-TAKE NEXT::the next take in order','-CONTINUE · HOLD · OUT <take id>','-UPDATE <take id> field="value"','-GET <take id>::state and fields','-LIST::all takes and IDs'],n:[2]},
+   {a:'test',tabs:['Try it'],items:['=Command::PRELOAD 1003','=Over::TCP · 127.0.0.1:7788','=Arm live send::off','[!Preload to preview|Check on virtual output|x Send live (arm first)]','~Live send stays disabled until you arm it.','#Reply','-OK take 1003 committed at frame 612::$ok:ok','-REFUSED 1099 unknown take::$bad:refused'],n:[3]}],
+  notes:['The Take ID is the address. Names can change, scenes can be swapped or versions updated, but "take 1003" keeps its meaning in every other system.','A refusal names its reason ("unknown take", "wrong version", "not allowed") so a control system can handle it.','Compatibility with specific vendor protocols is an adapter that can be added beside TCP, UDP and HTTP; the commands above are GrapiX\'s own and the syntax is not final.']},
+ {id:'p5',code:'P5',title:'Virtual output window',purpose:'A pop-up window at the real output resolution (1080p for a 1080p output, 4K for a 4K one) where you check how a take will look on air. It shows only what you send to it, and it never affects the live output.',
+  cols:'1fr 340px',rows:'30px 22px 1fr 18px',areas:'"pbar pbar" "band band" "win set" "log log"',
+  html:PBAR('Output'),
+  panels:[{a:'win',tabs:['Virtual output · local check'],html:`<div class="viewer" style="background:#0c0b0a"><div style="width:62%;border:1px solid var(--line2);background:var(--panel)"><div class="bar" style="height:20px;border-bottom:1px solid var(--line)"><span class="status">GrapiX virtual output · local check · 1920 × 1080 · 50 fps</span><span style="margin-left:auto">—  ☐  ×</span></div><div class="comp" style="height:auto;width:100%;max-width:100%"><div class="safe"></div><div class="l3"><i>PRIYA S.</i><u>ANALYST</u></div></div></div></div><div class="vbar">${CH('LOCAL CHECK · not on air','info')} <span>take 1003 · layer 0</span><span style="margin-left:auto">GPU +9 % · late 0 · missed 0</span></div>`,n:[1]},
+   {a:'set',tabs:['Window'],items:['=Shows::only what you send to it (never Program)','=Resolution::same as the live output · 1080p50','=Keep on top::on','=Background::checkerboard for alpha','=Safe areas::off','=Layers::all · hide or solo a layer locally','[!Check selected take|Take it out of the window|Second monitor]','#Outputs','-Virtual window::$info:local check','-Live: SDI 1 fill + key::$ok:live','-Live: NDI GRAPIX-PGM::$warn:free run','~It costs GPU: 4K is about four times the work of 1080p. The load governor slows Preview first, then this window, and never the live output.'],n:[2]}],
+  notes:['The virtual output is independent of the live output. Both can show different things at once, and using one never blocks or changes the other.','Its resolution always matches the live format, so a problem that only shows at full size is seen here before going live.','The in-layout Preview is separate: smaller (360 or 480 lines) and always inside the Playout window.']},
+ 
+ {id:'p6',code:'P6',title:'Monitoring',purpose:'Telemetry lives in Playout only. It says which GPU, adapter or output is in trouble, with late and missed frames counted separately.',
+  cols:'1fr 1fr 1fr',rows:'30px 22px 1fr 1fr 18px',areas:'"pbar pbar pbar" "band band band" "gpu cpu ref" "outs outs gov" "log log log"',
+  html:PBAR('Output'),
+  panels:[{a:'gpu',tabs:['GPU · RTX A5000 (dx12)'],html:`<div class="body"><div class="spark"><svg viewBox="0 0 100 30" preserveAspectRatio="none"><path d="M0 22 L10 20 L20 21 L30 18 L40 19 L50 12 L55 6 L60 18 L70 19 L80 17 L90 18 L100 17" fill="none" stroke="#F58138" stroke-width=".8"/><line x1="0" x2="100" y1="8" y2="8" stroke="#E06A5E" stroke-width=".3" stroke-dasharray="2 2"/></svg></div>${lines(['=Frame time::11.2 ms (budget 20 ms)','=Peak::18.9 ms at 13:05:51','=Load::62 % · 9.1 GB VRAM'])}</div>`,n:[1]},
+   {a:'cpu',tabs:['CPU · threads'],items:['=Engine main::14 %','=Asset plane::3 %','=Data feeds::2 %','=Preview renderer::9 %','=Load governor::preview throttled 1 step']},
+   {a:'ref',tabs:['Clock and reference'],items:['=Rate::50/1','=Source::free run','=Reference::not present','=Device tier::T0 · may go live','#Degradations','-Preview resolution halved::$warn:13:05:51']},
+   {a:'outs',tabs:['Outputs'],items:['#Output · adapter · late · missed','-SDI 1 fill + key · DeckLink ch 1::$ok:0 · 0','-SDI 2 clean · DeckLink ch 2::$warn:3 late · 0 missed','-NDI GRAPIX-PGM::$ok:0 · 0','-Virtual window::$ok:0 · 0','~Late and missed are separate counters and never merged.'],n:[2]},
+   {a:'gov',tabs:['Load governor'],items:['-Program::$ok:protected','-Preview renderer::$warn:throttled','-Virtual output (4K is about 4x)::$ok:running','-Thumbnails::paused','~A spike slows Preview first; Program never waits.']}],
+  notes:['Preview runs on its own renderer, and the governor slows it before Program is ever touched.','Every graph names its device, so a fault points at hardware.']},
+ {id:'p7',code:'P7',title:'Layers: foreground and background',purpose:'Every take plays on a layer number from -99,999 to +99,999 (default 0; plus is front, minus is back). Different layers play together; each layer is controlled on its own.',
+  cols:'1fr 340px',rows:'30px 22px 1fr 18px',areas:'"pbar pbar" "band band" "stack ctl" "log log"',
+  html:PBAR('Sequence'),
+  panels:[{a:'stack',tabs:['Layers · what is on each (front to back)'],html:`<div class="body" style="padding:0;gap:0"><div class="row" style="background:var(--raised);font:600 8px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);padding:3px 6px"><span style="width:96px">Layer</span><span style="width:200px">On this layer</span><span style="width:110px">State</span><span>Control this layer</span></div>${[['+60','Scorebug · take 1004','air','ON AIR'],['0','L3 · Arjun Rao · take 1002','air','ON AIR'],['-10','— empty —','',''],['-50','Stats full-screen · take 1005','info','PRELOADED'],['-99','Background loop · take 1000','air','ON AIR']].map((r,i)=>`<div class="row ${r[2]==='air'?'':''}" style="padding:4px 6px;border-bottom:1px solid #1f1d1a${r[2]==='air'?';box-shadow:inset 3px 0 0 var(--take)':''}"><span style="width:96px;font:700 11px var(--f-mono);color:var(--ink)"><span class="btns" style="display:inline-flex;gap:2px"><b>−</b></span> ${r[0]} <span class="btns" style="display:inline-flex;gap:2px"><b>+</b></span></span><span style="width:200px;color:${r[1][0]==='—'?'var(--ink4)':'var(--ink)'}">${r[1]}</span><span style="width:110px">${r[2]==='air'?CH(r[3],'air'):r[2]==='info'?CH(r[3],'info'):''}</span><span class="btns">${r[2]==='air'?'<b>Continue</b><b class="dz">Take out</b><b class="dz">Clear</b>':r[2]==='info'?'<b class="cue">Take to this layer</b>':'<b>Take a scene here…</b>'}</span></div>`).join('')}<div class="hint" style="padding:4px 6px">Layers between the ones shown are empty. Higher numbers sit in front. A layer holds one take at a time; cueing a scene onto an occupied layer replaces it using the transition set at right.</div></div>`,n:[1]},
+   {a:'ctl',tabs:['Layer controls'],items:['#Go to a layer','=Layer::0 ▴ ▾ (-99,999 to +99,999)','[Show layer|Find what is on it]','#When a take replaces this layer','=Transition::out then in · overlap · cut','=Offset::0 frames (negative starts the new one early)','=Applies to::this layer · or this take','~If the old scene has no exit motion it cuts. The engine works in whole frames and reports the frame it committed to.','#Clear','-Clear this layer::layer 0','-Clear a range::from -99 to -1','-Clear all layers::armed, asks twice','[Clear this layer|Clear range…|x Clear all]','#Check on the virtual output only','-Hide layer +60 locally::not on air','-Solo layer 0 locally::not on air','~Hide and solo change only what you see in the virtual output. They never change what is on air.','#Call by layer (example syntax)','-TAKE 1003 LAYER 0::copy','-OUT LAYER +60::copy','-CLEAR LAYER -99..-1::copy'],n:[2]}],
+  notes:['Every scene has a default layer set in the Editor (0 unless the designer chooses, for example +60 for a scorebug in front or -50 for a background behind) and Playout can override it per take with the plus and minus controls or by typing a number from -99,999 to +99,999.','Replacing is a transition: out then in (the old scene plays its exit, then the new one comes in), overlap (both at once, with an offset) or cut. Without an exit motion it cuts.','Different layers play at the same time, in order of number, so a background loop, a full-screen and a scorebug can all be on air together and each can be cued in, cued out or cleared without touching the others.','Clear works on one layer, a range or everything. "Clear all" is armed and asks twice. The virtual output can hide or solo layers for checking; that is local and never changes what is on air.','The Sequence list (P1) shows each take\'s layer next to its Take ID, so the stack is visible while building the show.']},
+ {id:'p8',code:'P8',title:'Show rules: logic across scenes and layers',purpose:'Small when-then rules for the whole show. Each scene stays isolated; only Playout can link scenes and layers.',
+  cols:'1fr 340px',rows:'30px 22px 1fr 18px',areas:'"pbar pbar" "band band" "rules side" "log log"',
+  html:PBAR('Sequence'),
+  panels:[{a:'rules',tabs:['Show rules · Final day'],items:['#When · then','*When a take goes on air on layer +60::then take out the take on layer 0','-When CLEAR LAYER -50 is pressed::then also clear layer +60','-When Continue is pressed on take 1002::then preload take 1003 to the virtual output','-When the match clock reaches 90:00::then take 1010 on layer +40','[!Add rule…|Test in virtual output|Disable all]'],n:[1]},
+   {a:'side',tabs:['Safety'],items:['~Rules run only in Playout and show who triggered them in Activity.','=Rules may take live::needs the operator','=Rules may clear or take out::yes, always logged','=Rules may change scene data::no','~A rule cannot put an unchecked scene on air unless you allow it.'],n:[2]}],
+  notes:['Scenes never talk to each other. When one graphic must affect another, a show rule does it, visible in one list the operator can read.','Rules use the same actions and events as scene logic and as the API, so they can later be edited as nodes or driven from outside.']},
+];
+function render(w,app){
+  const head=`<div class="wf-head"><span class="code">${w.code}</span><h2>${T(w.title)}</h2></div><p>${T(w.purpose)}</p>`;
+  const top=app==='editor'?bars(w.ws||'Default'):(w.html||'');
+  const st=app==='editor'?status():'';
+  const body=`<div class="wf" role="img" aria-label="${T(w.code+' '+w.title)} wireframe" style="grid-template-columns:${w.cols};grid-template-rows:${w.rows};grid-template-areas:${w.areas.replace(/"/g,"'")}">${top}${w.panels.map(panel).join('')}${st}${w.extra||''}</div>`;
+  return `<section id="${w.id}">${head}<div class="wfbox">${body}</div><ol class="notes">${w.notes.map(n=>`<li>${T(n)}</li>`).join('')}</ol></section>`;
+}
+document.getElementById('wfs').outerHTML=WF.map(w=>render(w,'editor')).join('')+PL.map(w=>render(w,'playout')).join('');
+</script>
+
+<script>
+/* Terms: the single table every visible name comes from. Edit a value and the whole page follows. */
+const TERMS=[
+ ['Scene ID','Scene ID','Identifier of a scene (Editor and Playout)'],
+ ['Show rules','Show rules','Small when-then rules in Playout'],
+ ['Calling takes','Calling takes','How other systems and rules call takes'],
+ ['Data Source Manager','Data Source Manager','The fourth application that holds external connections'],
+ ['Recorder and simulator','Recorder and simulator','Records a feed and replays it for testing'],
+ ['Layer','Layer','Stacking slot a take plays on (-99,999 to +99,999)'],
+ ['Take ID','Take ID','Playout only; typed by the operator; used by other systems to call a take'],
+ ['Take','Take','The operator action that puts a scene on air'],
+ ['Sequence','Sequence','The ordered list of takes in Playout'],
+ ['Scene list','Scene list','Where scenes are kept and dragged from'],
+ ['Scene data','Scene data','The published fields of a scene, editable in Playout'],
+ ['Virtual output','Virtual output','The window that shows Program on the PC'],
+ ['Part','Part','A shape, text or image in a graphic'],
+ ['Style','Style','How a part looks: font, colour, align, plate'],
+ ['Effects','Effects','Finishes such as glow, shadow and wipe edge'],
+ ['Moment','Moment','Appears, stays, changes, leaves'],
+ ['Field','Field','A value that changes per use'],
+];
+const PROPOSED={'Layer':'Stack','Sequence':'Playline','Scene list':'Scene Bank','Scene data':'Inputs','Virtual output':'Airview','Part':'Element','Moment':'Phase','Show rules':'Play Rules','Data Source Manager':'Data Hub','Recorder and simulator':'Replay Lab','Take ID':'Cue ID','Take':'Cue','Calling takes':'Cue Control'};
+// Latest names. Source text keeps the working names; these are applied on load. Style and Effects are separate and edited in the source.
+const STORE='grapix-wireframe-terms';
+let custom={};
+try{const raw=localStorage.getItem(STORE); custom=raw===null?Object.assign({},PROPOSED):JSON.parse(raw)}catch(e){custom=Object.assign({},PROPOSED)}
+const esc=(x)=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const orig=new WeakMap();
+function caseLike(match,name){ if(match===match.toUpperCase()&&match.length>1) return name.toUpperCase(); if(match[0]===match[0].toLowerCase()) return name[0].toLowerCase()+name.slice(1); return name; }
+function applyTerms(){
+  const active=TERMS.filter(t=>custom[t[0]]&&custom[t[0]].trim()&&custom[t[0]]!==t[1]);
+  const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:n=>{const p=n.parentElement; if(!p||p.closest('#names,script,style,title'))return NodeFilter.FILTER_REJECT; return NodeFilter.FILTER_ACCEPT;}});
+  let n; while(n=w.nextNode()){
+    if(!orig.has(n)) orig.set(n,n.nodeValue);
+    let v=orig.get(n);
+    for(const t of active){ const re=new RegExp('\\b'+esc(t[1])+'(s?)\\b','gi'); v=v.replace(re,(m,pl)=>caseLike(m.replace(/s$/i,pl?'':''),custom[t[0]].trim())+pl); }
+    if(n.nodeValue!==v) n.nodeValue=v;
+  }
+}
+function buildTerms(){
+  const tb=document.querySelector('#termsTable tbody');
+  tb.innerHTML=TERMS.map((t,i)=>`<tr><td>${t[2]}</td><td><code>${t[1]}</code></td><td><input id="term${i}" type="text" value="${(custom[t[0]]||'').replace(/"/g,'&quot;')}" placeholder="${t[1]}" aria-label="New name for ${t[1]}"></td></tr>`).join('');
+  TERMS.forEach((t,i)=>document.getElementById('term'+i).addEventListener('input',e=>{custom[t[0]]=e.target.value; try{localStorage.setItem(STORE,JSON.stringify(custom))}catch(x){} applyTerms();}));
+  document.getElementById('termsProposed').addEventListener('click',()=>{custom=Object.assign({},PROPOSED); try{localStorage.setItem(STORE,JSON.stringify(custom))}catch(x){} buildTerms(); applyTerms();});
+  document.getElementById('termsReset').addEventListener('click',()=>{custom={}; try{localStorage.setItem(STORE,'{}')}catch(x){} buildTerms(); applyTerms();});
+}
+buildTerms(); applyTerms();
+</script>

@@ -350,6 +350,7 @@ mod tests {
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "scene".into(),
             name: "Scene".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,
@@ -370,6 +371,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects,
         }
     }
@@ -471,6 +475,9 @@ mod tests {
                     vertices: vec![zero, Vec2 { x: 10.0, y: 0.0 }],
                     in_tangents: vec![zero; 2],
                     out_tangents: vec![zero; 2],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
                 },
                 compound_paths: None,
                 fill_enabled: false,
@@ -479,6 +486,7 @@ mod tests {
                 trim_start: start,
                 trim_end: end,
                 trim_offset: offset,
+                contour_ids: None,
             })
         };
         let support = crate::material::MaterialSupport::fixed_function();

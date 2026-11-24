@@ -32,6 +32,7 @@ pub(crate) fn prepare_masks(
             let mut builder = Path::builder();
             append_bezier(&mut builder, &mask.path, object, map)?;
             let fill = outline(&builder.build());
+            let variable = super::variable_feather::prepare(object, mask, map)?;
             let band = (mask.expansion != 0.0).then(|| {
                 vello_cpu::kurbo::stroke(
                     fill.iter(),
@@ -44,10 +45,13 @@ pub(crate) fn prepare_masks(
                 fill,
                 band,
                 grow: mask.expansion > 0.0,
-                weights: super::mask::feather_weights(mask.feather),
+                // A variable feather replaces the uniform one (11.108).
+                weights: if variable.is_some() { Vec::new() } else { super::mask::falloff_weights(mask.feather, mask.falloff.unwrap_or_default()) },
+                weights_y: if variable.is_some() { Vec::new() } else { super::mask::falloff_weights(mask.feather_across(), mask.falloff.unwrap_or_default()) },
                 inverted: mask.inverted,
                 opacity: mask.opacity as f32,
                 mode: mask.mode,
+                variable: variable.map(std::sync::Arc::new),
             })
         })
         .collect()

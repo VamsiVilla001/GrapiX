@@ -48,7 +48,12 @@ fn connected<P: EnginePeer + Send + 'static>(peer: P) -> Client {
     let server = Server::bind(loopback(), None, peer).expect("refusal wire binds");
     let address = server.local_addr().unwrap();
     server.serve_in_background();
-    Client::connect(address).expect("refusal wire capability exchange")
+    let mut client = Client::connect(address).expect("refusal wire capability exchange");
+    // 2.15: a Program command is sent for a signed-in operator.
+    client.set_operator(Some(
+        &gx_contracts::auth::OperatorName::parse("Conformance Operator").expect("a valid name"),
+    ));
+    client
 }
 
 fn publication<P: EnginePeer + AssetPublishPeer>(report: &mut Report, name: &str, peer: P) {

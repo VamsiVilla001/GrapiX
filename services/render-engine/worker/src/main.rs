@@ -33,6 +33,7 @@ fn main() {
     let mut recovery_path: Option<PathBuf> = None;
     let mut package_dir: Option<PathBuf> = None;
     let mut lan = false;
+    let mut discard_recovery = false;
     let mut rate = RationalRate::P50;
     let mut publish_specs: Vec<(TakeId, Revision, ContentHash)> = Vec::new();
 
@@ -59,6 +60,7 @@ fn main() {
                 None => return usage("--package-dir needs a path"),
             },
             "--lan" => lan = true,
+            "--discard-recovery" => discard_recovery = true,
             "--rate" => match args.next().as_deref().and_then(parse_rate) {
                 Some(r) => rate = r,
                 None => return usage("--rate needs 50, 29.97, 59.94, 25, 30 or 60"),
@@ -149,6 +151,29 @@ fn main() {
             format!("cannot open recovery journal: {error}"),
         ),
     };
+    if discard_recovery {
+        // The operator chose to start empty: the journal is moved aside, never deleted.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        match recovery.discard_aside(stamp) {
+            Ok(Some(kept)) => {
+                eprintln!(
+                    "recovery: --discard-recovery moved the journal aside to {}; starting empty",
+                    kept.display()
+                );
+                tracing::warn!(event = "recovery.discarded", kept = %kept.display());
+            }
+            Ok(None) => {
+                tracing::info!(event = "recovery.discard_nothing_to_move");
+            }
+            Err(error) => fatal(
+                &log,
+                "recovery.discard_failed",
+                format!("cannot move the recovery journal aside: {error}"),
+            ),
+        }
+    }
     match engine.attach_recovery_journal(recovery) {
         Ok(restored) => report_drops(&restored),
         Err(error) => fatal(
@@ -174,14 +199,20 @@ fn main() {
 
     // 2.21: the control plane listens where --bind says (loopback unless told),
     // and the bind policy decides whether it may: off loopback it needs a token.
-    // The asset plane stays on loopback whatever --bind says, until it verifies
-    // a credential of its own (2.24).
+    // The asset plane follows --bind only when there is a token to verify credentials
+    // against (2.24: the control plane's gx1 credential, on every connection's first frame);
+    // without one it stays on loopback whatever --bind says.
     let addr = SocketAddr::new(bind_ip, port);
     let asset_port = match asset_port.or_else(|| port.checked_add(1)) {
         Some(asset_port) => asset_port,
         None => return usage("--port leaves no asset-plane port"),
     };
-    let asset_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port);
+    let asset_ip = if token.is_some() {
+        bind_ip
+    } else {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    };
+    let asset_addr = SocketAddr::new(asset_ip, asset_port);
     let adapter = engine.gpu_description();
     // The epoch, clock source and reference this run starts with, from the
     // engine's own status answer, so the start record says which run it is.
@@ -200,8 +231,19 @@ fn main() {
             format!("cannot serve control plane: {error}"),
         ),
     };
+    // 12.11: every Program command this engine handles is one as-run record (ADR-0004 section 5).
+    let server = match open_as_run() {
+        Some(as_run) => server.with_as_run(as_run),
+        None => server,
+    };
     let shared_engine = server.engine();
-    let asset_server = match AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine)) {
+    let bound_asset_server = match token.as_deref() {
+        Some(secret) => {
+            AssetPublishServer::bind_authenticating(asset_addr, Arc::clone(&shared_engine), secret)
+        }
+        None => AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine)),
+    };
+    let asset_server = match bound_asset_server {
         Ok(server) => server,
         Err(error) => fatal(
             &log,
@@ -218,8 +260,12 @@ fn main() {
         ),
     };
     println!("  listening on {control}");
-    if !gx_contracts::endpoints::is_loopback(bind_ip) {
-        println!("  the asset plane stays on loopback: it verifies no credential yet");
+    if token.is_some() {
+        println!("  the asset plane verifies a credential on every connection");
+    } else if !gx_contracts::endpoints::is_loopback(bind_ip) {
+        println!(
+            "  the asset plane stays on loopback: it has no token to verify credentials against"
+        );
     }
     let assets = match asset_server.local_addr() {
         Ok(bound) => bound,
@@ -271,6 +317,26 @@ fn finish_log(log: &SharedLog) {
     let Ok(mut slot) = log.lock() else { return };
     if let Some(guard) = slot.take() {
         let _ = guard.finish();
+    }
+}
+
+/// The as-run log for the Program channel, under the same root as the engine's own log
+/// (`GX_LOG_DIR`, else the platform log root). If it cannot be opened that is on the log as an
+/// error and the engine runs without one: a logging fault never keeps a graphic off air.
+fn open_as_run() -> Option<gx_control_transport::AsRunLog> {
+    let root = std::env::var_os("GX_LOG_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| gx_contracts::platform::log_root().ok())?;
+    match gx_control_transport::AsRunLog::open(&root, "program") {
+        Ok(log) => Some(log),
+        Err(error) => {
+            tracing::error!(
+                event = "asrun.unavailable",
+                detail = error.to_string().as_str(),
+                reason = "Program commands are still accepted, and none is recorded as run",
+            );
+            None
+        }
     }
 }
 
@@ -526,10 +592,12 @@ fn usage(problem: &str) {
     }
     eprintln!(
         "gx-render-worker [--port N] [--bind IP] [--asset-port N] [--recovery-journal PATH] \
-         [--lan] [--package-dir DIR] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET]"
+         [--lan] [--package-dir DIR] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET] \n         [--discard-recovery]"
     );
     eprintln!("  --bind IP  the control plane's interface (default 127.0.0.1); off loopback a token is required");
     eprintln!("             the asset plane stays on 127.0.0.1 until it verifies a credential");
+    eprintln!("  --discard-recovery  move the recovery journal aside (a dated .bak, never deleted) and start empty;");
+    eprintln!("             without it, a journal that cannot be restored stops the engine and is left as it is");
     eprintln!("  --lan      declares that assets reach this engine over the network, not by path;");
     eprintln!("             it does not choose an interface: that is --bind");
     std::process::exit(if problem.is_empty() { 0 } else { 2 });

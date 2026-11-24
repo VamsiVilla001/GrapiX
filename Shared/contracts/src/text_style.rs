@@ -282,6 +282,7 @@ mod tests {
     fn scene() -> SceneDocument {
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "scene".into(),
             name: "Style test".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,
@@ -311,6 +312,9 @@ mod tests {
             materials: Vec::new(),
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: vec![SceneObject::Text(TextObject {
                 base: ObjectBase::new("title", "Title"),
                 text: "Score".into(),

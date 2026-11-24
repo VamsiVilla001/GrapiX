@@ -1,0 +1,1146 @@
+{
+  "note": "memory.md as it stood before build plan 0.12, split byte for byte. Check with `node tools/memory-log.mjs --check`.",
+  "originalBytes": 540634,
+  "originalSha256": "5d52499f76d2c720cd9ff5767b0ed34c95cbf06024575a8ef73f3abb3ee703a7",
+  "head": {
+    "file": "0000-memory-header-and-rules-before-0.12.md",
+    "bytes": 7489,
+    "sha256": "143a777b3df7ea9b05a77d6cee5a9d83935b37fd9293c76323e6042680ba8b52"
+  },
+  "entries": [
+    {
+      "n": 0,
+      "heading": "2026-11-19 — One GrapiX wordmark in both apps (Claude)",
+      "file": "2026-11-19.md",
+      "bytes": 1542,
+      "sha256": "0c0d7a21004118f00183bc57c7f296154b96f8a6a2f10d4adca0672b16830fc7"
+    },
+    {
+      "n": 1,
+      "heading": "2026-11-19 — Windows only: other-OS builds removed (Claude)",
+      "file": "2026-11-19.md",
+      "bytes": 2564,
+      "sha256": "b3701d048faa776f0ff511d7b6602a89c3542d63cd36aa24eab36462c581ceab"
+    },
+    {
+      "n": 2,
+      "heading": "2026-11-18 — Plan and progress.html split into backend and frontend modules (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1299,
+      "sha256": "56bcda4cddf0b2a035585a4a3dfb82b1c3ebd15834e393842c94eccadd083f95"
+    },
+    {
+      "n": 3,
+      "heading": "2026-11-18 — Build plan and progress.html rewritten around the EffectCraft core (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1651,
+      "sha256": "b66e6e7291467e532cb6b38a73ab1ea138ae4991c93d0a546f52ad6eef68628c"
+    },
+    {
+      "n": 4,
+      "heading": "2026-11-18 — Phase P and Phase 9 removed from the plan (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1723,
+      "sha256": "d3167d587382c81598c685289583201df76077233166151d50d098b4c64c63c8"
+    },
+    {
+      "n": 5,
+      "heading": "2026-11-18 — 11.79 Effects dropdowns and 11.80 resizable panels, first builds (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2016,
+      "sha256": "e59b0550f6e67234d7fe6f35c02bc28abc713566576542083c346ecc7fe2fb63"
+    },
+    {
+      "n": 6,
+      "heading": "2026-11-18 — 11.73 tab groups, first build (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1530,
+      "sha256": "d9d57a9e0a8fc2e8c379f89444295da6b1f51a618ebb70787f1198266a77e233"
+    },
+    {
+      "n": 7,
+      "heading": "2026-11-18 — XPression-informed layout: design 11.71 to 11.78, first build 11.72 (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2239,
+      "sha256": "8d98f91c030b5a393f13fef5ee2709d2cd3521e28b0373dba71a26596fba6264"
+    },
+    {
+      "n": 8,
+      "heading": "2026-11-18 — 3.25 batch 1: Invert, Posterize, Threshold, Vibrance (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1060,
+      "sha256": "4bae6612267edb743036913a99a7f2e84b2332fa619344ec70da32eb0853dd55"
+    },
+    {
+      "n": 9,
+      "heading": "2026-11-18 — 11.65 engine preview first build; telemetry sink test fixed (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2141,
+      "sha256": "a4a4af19b1a22d5026b84d42927564cca191717bb819115854dd4ce95420c89b"
+    },
+    {
+      "n": 10,
+      "heading": "2026-11-18 — Effects & Presets, Effect Controls; scripts and plug-ins planned (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2321,
+      "sha256": "78f48f0ba0a51660c38e07199e2194606951b5c0ea689d549d9adadff0142624"
+    },
+    {
+      "n": 11,
+      "heading": "2026-11-18 — 11.68 first build: After Effects keyframe editing (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1428,
+      "sha256": "e6313d23807a5283e6e84fbb9e453fb0dc943f095c2b16916097da3635073b43"
+    },
+    {
+      "n": 12,
+      "heading": "2026-11-18 — User decisions: Editor Help, no Editor telemetry, Figma through the MCP (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2324,
+      "sha256": "b582db1df45ee7c092556dd505f19be6b7880811a5a7b3e15b36eecfdba0ff84"
+    },
+    {
+      "n": 13,
+      "heading": "2026-11-18 — 11.68 audited; 18.11 blocked (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 949,
+      "sha256": "b5e572669d3225cc16b848183a8649273501d13ae80fa6c9e4f6f4341476e8b7"
+    },
+    {
+      "n": 14,
+      "heading": "2026-11-18 — 11.67 compact UI pass, first slice (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1462,
+      "sha256": "edd5a4efa391b2aadec6c34918646cc89d7974085411ff286aac64962dbfc7f8"
+    },
+    {
+      "n": 15,
+      "heading": "2026-11-18 — 3.24 load balancer: design and first slice (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2337,
+      "sha256": "7bd8e41950f88432047e40916917598a12999a8145006a214f0038eebc065256"
+    },
+    {
+      "n": 16,
+      "heading": "2026-11-18 — 2.27 live telemetry: engine assessment, Playout panel, shared panel (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 3021,
+      "sha256": "fbda230af59bc809db0d7a90730788aff454ee84479652ceafe0fe46b9e15cfd"
+    },
+    {
+      "n": 17,
+      "heading": "2026-11-18 — Editor nomenclature: each graphic is a scene, scenes live in a project (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1196,
+      "sha256": "577f7196573bfba4c4e8d949865051bb77fa1885387f0a08c29d45e714f8c314"
+    },
+    {
+      "n": 18,
+      "heading": "2026-11-18 — 2.25 done, Playout reconnects, SKWAD styling and fonts, new icons (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 1471,
+      "sha256": "100d3c977f13552de61487d5f2014a2a60bdf9a13b78e25a1a8a4ff7526c51eb"
+    },
+    {
+      "n": 19,
+      "heading": "2026-11-18 — 2.22 done: transport bounds on every listener (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 3055,
+      "sha256": "bcd5398f1a5ff17502f50b2b0aa6c108ae1bcec26dbaffd4aaa1be255576dcb6"
+    },
+    {
+      "n": 20,
+      "heading": "2026-11-18 — \"Engine not connected\" in Playout, the Editor and the asset loader: three causes found and two fixed (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 2624,
+      "sha256": "7fdc4361390dec1a66af4664a017f9fad6362ee780bc76452543cf813e1c0d3a"
+    },
+    {
+      "n": 21,
+      "heading": "2026-11-18 — 2.21 done: one bind policy for every listener; a sink race found (Claude)",
+      "file": "2026-11-18.md",
+      "bytes": 6345,
+      "sha256": "ef9a49cb12e8231b4e1335d8b24bf750bc70f455a5c20c44bee62da31ade96f7"
+    },
+    {
+      "n": 22,
+      "heading": "2026-11-17 — 2.20 done: the wire version enforced on connect; OSI audit rows 2.21 to 2.24 added (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 3098,
+      "sha256": "c32f7eb3cb34a37c98d3c4b8bbce808f2478cd8c24b3fefe9829ee0ed1cb86f3"
+    },
+    {
+      "n": 23,
+      "heading": "2026-11-17 — OSI layering audit done, report only (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 1022,
+      "sha256": "c7afc239ab15e8cf987b09b25034f08da3bcab63be0a498a2d33ae03b1f89be2"
+    },
+    {
+      "n": 24,
+      "heading": "2026-11-17 — 2.14 done: the diagnostic bundle, module by module (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 3371,
+      "sha256": "7b898e0af0fe6c1175fc94fe2d01d1af3a99730b04f9a9cdbc8741812b7edd3f"
+    },
+    {
+      "n": 25,
+      "heading": "2026-11-17 — 2.17 done: a publish names the ids of the edits it carries (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 3208,
+      "sha256": "d14dc79ff43e1daf68bfd3a5bcfb6c91ed0f061d3c4dad47133dbfc4218198bb"
+    },
+    {
+      "n": 26,
+      "heading": "2026-11-17 — 2.19 done: a stop request on the control plane, protocol version 7 (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 2573,
+      "sha256": "8919e045b4e0adf4620119d9ed1d65dc03f6957d3c92a951ad90aeb12e97fc1a"
+    },
+    {
+      "n": 27,
+      "heading": "2026-11-17 — 2.18 done: a console window close ends the engine in order; user decisions of 17 Nov (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 2648,
+      "sha256": "79bc716efc5a26cf2ebdc50a797ae45e697b84e8221fa9df788a3abf5b70334e"
+    },
+    {
+      "n": 28,
+      "heading": "2026-11-17 — 2.16 done: `engine.stop` on Ctrl+C, and every kill named once by the next start (Claude)",
+      "file": "2026-11-17.md",
+      "bytes": 3383,
+      "sha256": "a30e606a4942b6cfccccfa885eac0f50fc128d43554efaa5b08a7a62898424a3"
+    },
+    {
+      "n": 29,
+      "heading": "2026-11-16 — 2.13 done: correlation ids end to end, and front-end capture through `cmd_log` (Claude)",
+      "file": "2026-11-16.md",
+      "bytes": 3840,
+      "sha256": "956268f1a06d5abba81cd52bb3aa12ad75787eeebfa581781a2845ff459b4731"
+    },
+    {
+      "n": 30,
+      "heading": "2026-11-16 — 2.12 done: every process logs through the sink, and a conformance run reads each file (Claude)",
+      "file": "2026-11-16.md",
+      "bytes": 2845,
+      "sha256": "36b080213b09aedbce079ab3e47a1082253136ed09795e4b72846111e9f4f583"
+    },
+    {
+      "n": 31,
+      "heading": "2026-11-16 — 2.12: host, Playout, Editor and MCP log through the sink; 2.12 still active (Claude)",
+      "file": "2026-11-16.md",
+      "bytes": 961,
+      "sha256": "c2bbdb38439a7893643b7a1682f1ec5218a030658284968c4c723d840d0a8311"
+    },
+    {
+      "n": 32,
+      "heading": "2026-11-16 — 2.12 active: the render engine worker logs through the sink (Claude)",
+      "file": "2026-11-16.md",
+      "bytes": 1296,
+      "sha256": "820642c16e957e3438488b8813f1c19fd3f989a7eca5ef9cdf6e687019b77418"
+    },
+    {
+      "n": 33,
+      "heading": "2026-11-16 — 2.11 done: the JSON Lines log sink; ADR-0004 accepted (Claude, on the user's decisions)",
+      "file": "2026-11-16.md",
+      "bytes": 1282,
+      "sha256": "94131e915514c7dbc312fc24964bc79df6b5a611b6cec7094384bf9f9c1a3726"
+    },
+    {
+      "n": 34,
+      "heading": "2026-11-16 — The debugging model and broadcast logging: ADR-0004 proposed, not built (Claude, on the user's instruction)",
+      "file": "2026-11-16.md",
+      "bytes": 1512,
+      "sha256": "9c8aed8b1a44aa3f4e5cd1cd1957cbb34a16fece471ca3105c182bf38995eabd"
+    },
+    {
+      "n": 35,
+      "heading": "2026-11-16 — The MCP edit gaps filled: size, draw order, blend, anchor, effects, compound paths (Claude, on the user's instruction)",
+      "file": "2026-11-16.md",
+      "bytes": 1398,
+      "sha256": "6b687936969804e11768bf44cd38b73159dbcc78d93e3bff27a0565960e465c1"
+    },
+    {
+      "n": 36,
+      "heading": "2026-11-16 — 3.21: the 1080p stats page's frame cut to 6.5 ms p50; p99 met in 3 of 6 runs on a shared GPU (Claude)",
+      "file": "2026-11-16.md",
+      "bytes": 1358,
+      "sha256": "f082c38aa163d32e289543a7f54badbdfe3e8677a5959f978d8011e5788e88a8"
+    },
+    {
+      "n": 37,
+      "heading": "2026-11-16 — 3.21: 2160p to V2 (3.23); a DX12 regression from 3.17 found and removed (Claude)",
+      "file": "2026-11-16.md",
+      "bytes": 1881,
+      "sha256": "f883638e832646a05d46e5c59a0c7d51045829c082a2f4f4e72554465ee7fc7b"
+    },
+    {
+      "n": 38,
+      "heading": "2026-11-16 — 8.12 done: ifRevision and idempotency keys on the Editor MCP writes (Claude, on the user's decision)",
+      "file": "2026-11-16.md",
+      "bytes": 4648,
+      "sha256": "8a724873f7d7532cd692299281b54f879917f74a443f9f21ad35cf500a962927"
+    },
+    {
+      "n": 39,
+      "heading": "2026-11-16 — 8.1 done: every MCP tool lists its generated schema (Claude, on the user's MCP direction)",
+      "file": "2026-11-16.md",
+      "bytes": 2163,
+      "sha256": "7622a7e332bc1f160c149bfce9e099ec15e1ed29776f7f66bfee01c697ece4b5"
+    },
+    {
+      "n": 40,
+      "heading": "2026-11-16 — The render features through the Editor MCP (Claude, on the user's instruction)",
+      "file": "2026-11-16.md",
+      "bytes": 3463,
+      "sha256": "c1093c30e53454fc8588b3cc0c842662b23728b0e92d9d983b3b582939735ce2"
+    },
+    {
+      "n": 41,
+      "heading": "2026-11-15 — 3.19 done: masks, clip groups, track mattes and trim on the GPU (Claude, on the user's instruction)",
+      "file": "2026-11-15.md",
+      "bytes": 1332,
+      "sha256": "c8c1d648f5b336872231deb9f49c8f9094e464b2810e9a6d6a16c03d7d346b9c"
+    },
+    {
+      "n": 42,
+      "heading": "2026-11-15 — 3.19 increment 3: track mattes (Claude, on the user's instruction)",
+      "file": "2026-11-15.md",
+      "bytes": 1422,
+      "sha256": "4fd2ef91d5375a3a7b444794223ed118eb68fd2de860d8085d9115feeea67ab1"
+    },
+    {
+      "n": 43,
+      "heading": "2026-11-15 — 3.19 increment 2: clip groups as per-frame mattes (Claude, on the user's instruction)",
+      "file": "2026-11-15.md",
+      "bytes": 2132,
+      "sha256": "2d8458a8bb419d1eebd45392534ef52b8b3f5416744fcb3c40a11828bc4d5b09"
+    },
+    {
+      "n": 44,
+      "heading": "2026-11-15 — 3.19 increment 1: layer masks on the GPU and the CPU (Claude, on the user's instruction)",
+      "file": "2026-11-15.md",
+      "bytes": 1628,
+      "sha256": "c0639ff57e43ceeb0eaea099d65029ef07b5a2cbb1801acbccef4174eaae511e"
+    },
+    {
+      "n": 45,
+      "heading": "2026-11-15 — 3.18 done: GPU text through the Vello path (Claude, on the user's instruction)",
+      "file": "2026-11-15.md",
+      "bytes": 1004,
+      "sha256": "57e7215f201e24349643cb208915207ba960e1f90754e8fa5711fbe79c400e67"
+    },
+    {
+      "n": 46,
+      "heading": "2026-11-15 — 3.17 done: GPU 2D drawing (Claude, on the user's instruction)",
+      "file": "2026-11-15.md",
+      "bytes": 890,
+      "sha256": "ad9268ca9ca0b072d8b31f0417ab477d69fc841ccd97212551d5e5e126cc56b0"
+    },
+    {
+      "n": 47,
+      "heading": "2026-11-15 — 3.17 increment 3: tagged image quads in all eight fit modes (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 865,
+      "sha256": "5edc43b71d7ef1c4dc97a991c57ad2b4356f9054d16f67ce7f45b6137831ac83"
+    },
+    {
+      "n": 48,
+      "heading": "2026-11-15 — 3.17 increment 2: linear and radial gradients on paths (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 1002,
+      "sha256": "034b9e21bdff1ec77a264bf71a18766e4628520d6c67b43440feedb03016cc82"
+    },
+    {
+      "n": 49,
+      "heading": "2026-11-15 — 3.17 increment 1: Vello on GPU and CPU; stroke join, cap and dash (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 1191,
+      "sha256": "f8528a96d23e1304c1d89fa4bd188b2163bbffcd525ec4a56ebd1c1e2b8d30de"
+    },
+    {
+      "n": 50,
+      "heading": "2026-11-15 — 3.21: layers dispatched over their footprint; 1080p better, row still active (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 1433,
+      "sha256": "451ea1e5436a445da978ba8d65177a65e21c0ff70345ecd18ee0636b0be03541"
+    },
+    {
+      "n": 51,
+      "heading": "2026-11-15 — Jev and Laya run on 5.12 and 5.10 (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 1927,
+      "sha256": "04e779cda0da6068559e6b41c7f9ae6b51bc0856198bb5c58fae3b397e5336fe"
+    },
+    {
+      "n": 52,
+      "heading": "2026-11-15 — 5.10 done: the Editor publishes by the engine's declared route (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 2095,
+      "sha256": "53b393dcec05a08402193198e390003006420d709dde6cff2356ef5cb8ea5763"
+    },
+    {
+      "n": 53,
+      "heading": "2026-11-15 — 5.12 done: publishing is additive on air (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 2056,
+      "sha256": "fc1f10f7bf2dcf046c4c0e426117a3a6ad6631c438f4aa15accf1782e98f3ba6"
+    },
+    {
+      "n": 54,
+      "heading": "2026-11-15 — 5.11 review fixed (Claude)",
+      "file": "2026-11-15.md",
+      "bytes": 2133,
+      "sha256": "a0c2434510f856a04c4c53db5b87954b0e9718039dd6b40d4a579d313f7d87c8"
+    },
+    {
+      "n": 55,
+      "heading": "2026-11-08 — 5.11 done: restart after asset-bearing publishes (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 2691,
+      "sha256": "f35f43d7944609d544b894acc9eb719b068ceb4f0e9e380619d4a663c19401f6"
+    },
+    {
+      "n": 56,
+      "heading": "2026-11-08 — 5.8 review fixed; 5.11 added; 5.10 reworded (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 2674,
+      "sha256": "09027b6748dc786e2c721a3eb46bb62ad04105bb6cdb19bf9b2302729f5409fe"
+    },
+    {
+      "n": 57,
+      "heading": "2026-11-08 — 5.8 done: L0 asset handoff by local path (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 1978,
+      "sha256": "23e17f8f1cb8d5d7964e4b7618ad65885f0bf3fe1938d21eb1ce2c3721f393fe"
+    },
+    {
+      "n": 58,
+      "heading": "2026-11-08 — 0.4 done: SBOM uploaded by a run with the always() config (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 948,
+      "sha256": "c626c583740aca41dfe1154251c4b80fc14a9df2110617c5ca362714ea7b5f6e"
+    },
+    {
+      "n": 59,
+      "heading": "2026-11-08 — 0.4: SBOM on every build, failing ones included (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 626,
+      "sha256": "b854f326405761722e9e6e68728a9ddc135bf82775666cb69869030534bdbcf5"
+    },
+    {
+      "n": 60,
+      "heading": "2026-11-08 — 5.9 done: published assets reach the engine; first green CI run (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 2229,
+      "sha256": "4d489572df1bc0753f4b0e0e5e0787b0feb2d7cb8bd001114ad07896bb08163a"
+    },
+    {
+      "n": 61,
+      "heading": "2026-11-08 — 5.7 done: the control port enforces token scopes; third CI run fixes (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 2255,
+      "sha256": "e9ea793a7a3f6ed821c4c907ec9799eee18030b5ed88b9c9979c2a8a4518cedf"
+    },
+    {
+      "n": 62,
+      "heading": "2026-11-08 — 5.5 done; Windows only (macOS removed from the todo); second CI run fixes (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 2730,
+      "sha256": "993f32de71717b2ecde2bf32b7fb0057102deb219ed96cb7be90f10e5af8ac16"
+    },
+    {
+      "n": 63,
+      "heading": "2026-11-08 — First CI run on agent/shared: Rust pinned to 1.89.0 (0.2 breach fixed) (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 1293,
+      "sha256": "cf3a44d1d267c27c12b9fcf75b5a6fc7508e0e16689ec16f5405788541ca5707"
+    },
+    {
+      "n": 64,
+      "heading": "2026-11-08 — Whole-workspace `cargo fmt --all`, no logic change (Claude)",
+      "file": "2026-11-08.md",
+      "bytes": 980,
+      "sha256": "20b260b7f600c7b17e21b365f3afa251f330621b87fa8429d4e11f0309d76afe"
+    },
+    {
+      "n": 65,
+      "heading": "2026-11-08 — Done-row re-review with Jev and Laya; 0.10 and 4.2 active until CI is green; 0.9 breach fixed (Claude, #104)",
+      "file": "2026-11-08.md",
+      "bytes": 5856,
+      "sha256": "a5d62f7d503cd1bb4bbef38708cbdd35386b38b4564d6569f2772211b8ec4cbe"
+    },
+    {
+      "n": 66,
+      "heading": "2026-11-08 — 3.22 done: typed effect registry and the broadcast effect set on the GPU (Claude, #103)",
+      "file": "2026-11-08.md",
+      "bytes": 5752,
+      "sha256": "87321dbe00a6a21df903142db7b5159116a0871b30c5b5d606f405a0ae2c9092"
+    },
+    {
+      "n": 67,
+      "heading": "2026-11-08 — 3.20 done: the full blend-mode set on the GPU (Claude, #103)",
+      "file": "2026-11-08.md",
+      "bytes": 4216,
+      "sha256": "2ca5c4ad3841d42d420fd01fe1aa544f774bd4e9779336df92ad57f8949637dd"
+    },
+    {
+      "n": 68,
+      "heading": "2026-11-07 — 3.16 verified done: GPU Program/Preview engine wiring (Codex, #103)",
+      "file": "2026-11-07.md",
+      "bytes": 6256,
+      "sha256": "a3a675efd86af30137f236167ef389099f8f712bf6aacbd4fe6a3bbb5e18d5d8"
+    },
+    {
+      "n": 69,
+      "heading": "2026-11-07 — 3.16 started: prepared tiled GPU layer compositor (Codex, Panchayati #103)",
+      "file": "2026-11-07.md",
+      "bytes": 4547,
+      "sha256": "73ac8181989a7d75ebd74495da4f9be73f017ca81519721e2589f15bd79e0d71"
+    },
+    {
+      "n": 70,
+      "heading": "2026-11-07 — 3.21 started: GPU output encode with one quantisation and the asynchronous readback ring (Claude)",
+      "file": "2026-11-07.md",
+      "bytes": 4918,
+      "sha256": "7bbfa5042485f840d66df7725c0c8cb8ae7c38dbe2b7039c916a12ab1448b541"
+    },
+    {
+      "n": 71,
+      "heading": "2026-11-07 — Tracker reconciled with memory.md (Claude, tracker notes only)",
+      "file": "2026-11-07.md",
+      "bytes": 1126,
+      "sha256": "3abf521434900461a8b94e06161c3b42db30bce8883f4dfc057392fcdc4dd3bb"
+    },
+    {
+      "n": 72,
+      "heading": "2026-11-07 — 8.14 started: the MCP wire ported onto rmcp 3.9; 2026-07-28 with fallback to 2025-06-18; stateless HTTP on 127.0.0.1 (Claude, rmcp port session)",
+      "file": "2026-11-07.md",
+      "bytes": 6331,
+      "sha256": "934bfc0252c09e0fe259207f749eb79e0fa4bb688fdcc6f9cbeb81ee02f3a054"
+    },
+    {
+      "n": 73,
+      "heading": "2026-11-07 — Vello Hybrid spike for 3.17 / 16.9 (Claude, side session)",
+      "file": "2026-11-07.md",
+      "bytes": 4570,
+      "sha256": "ad5799dc975ec2dd114d5660133323007f95ce5d8dde0e41ca4bc0911d713427"
+    },
+    {
+      "n": 74,
+      "heading": "2026-11-07 — 0.2: wgpu 26 → 30.0.1 in the render worker (Claude, wgpu side session)",
+      "file": "2026-11-07.md",
+      "bytes": 3455,
+      "sha256": "974e4a4b50f396763863cec5601a394a6f3d08b8e1450b2b6abe60c8de94c923"
+    },
+    {
+      "n": 75,
+      "heading": "2026-11-07 — 7.2 and 11.17 done: SVG import reachable end to end; broadcast frame rates; playhead handle (Claude, mission 1)",
+      "file": "2026-11-07.md",
+      "bytes": 5853,
+      "sha256": "e995da40b258719c220ee725e9b61443c5638a9f9d8b543094321b161ec56e76"
+    },
+    {
+      "n": 76,
+      "heading": "2026-11-07 — 11.24 done on Windows: spacebar preview and integrated parity (Claude, mission 1)",
+      "file": "2026-11-07.md",
+      "bytes": 3307,
+      "sha256": "1e6a1c3db148b2d807cd0485d7c82e56f55258deca5d6a63e5fc045f60c0e8c5"
+    },
+    {
+      "n": 77,
+      "heading": "2026-11-07 — 11.19 done: the data binding panel, run live with save and reopen (Claude, mission 1)",
+      "file": "2026-11-07.md",
+      "bytes": 2210,
+      "sha256": "f8b825a552c078cdf2bf19f7267ad9e594dd6eec6e3cbfc23d8badf34d962082"
+    },
+    {
+      "n": 78,
+      "heading": "2026-11-07 — 8.6 done: bindings discoverable through the shipped Editor MCP (Claude, on the user's instruction)",
+      "file": "2026-11-07.md",
+      "bytes": 3262,
+      "sha256": "fabfe8f934b3cce9bd7dafe0e6893a6e20f622bc9f75bea9776e2b94ca85d169"
+    },
+    {
+      "n": 79,
+      "heading": "2026-10-19 — 11.29 done; closing an unsaved graphic no longer discards it silently (Claude, mission 1)",
+      "file": "2026-10-19.md",
+      "bytes": 2786,
+      "sha256": "3c344be79729d552cfcf637674f77deab61c3aac6d0a41ccf4d9d159310cb6cd"
+    },
+    {
+      "n": 80,
+      "heading": "2026-10-19 — 11.18 done: Editor panels reachable and working, run live (Claude, mission 1)",
+      "file": "2026-10-19.md",
+      "bytes": 3671,
+      "sha256": "70835ccbc2b3a2ff34090eeaa0cab1bb4f8456b7efb6e65f8e9b65a79491f53d"
+    },
+    {
+      "n": 81,
+      "heading": "2026-10-19 — 2.8 and 11.13 done (Claude, on the user's instruction)",
+      "file": "2026-10-19.md",
+      "bytes": 1158,
+      "sha256": "66d43395e062bd91b89be2ec15d6c21f9abf524c587a39fccd3e8ad0a3e308bd"
+    },
+    {
+      "n": 82,
+      "heading": "2026-10-19 — Adobe Fonts kits resolve on Windows; nameless faces no longer substitute in the engine (Claude, user-assigned 2.8 fix)",
+      "file": "2026-10-19.md",
+      "bytes": 3528,
+      "sha256": "2b7011657193fb43d80350312daebf356e0b85286e0041f74fc2c4f88f48634d"
+    },
+    {
+      "n": 83,
+      "heading": "2026-10-19 — 11.13 font manager ported from 1.x; updateFont and replaceFont (Claude, mission 1)",
+      "file": "2026-10-19.md",
+      "bytes": 6299,
+      "sha256": "277519301d4d66dcd198d85ec34b2715ea95e4636b0751681233e372b4879164"
+    },
+    {
+      "n": 84,
+      "heading": "2026-10-19 — Partial MCP input schemas and shipped author stdio server (Codex, mission 10 #89)",
+      "file": "2026-10-19.md",
+      "bytes": 2989,
+      "sha256": "3785a27b5a71a7476de05a58763009120d1c7e5a301305272e19fff72944286c"
+    },
+    {
+      "n": 85,
+      "heading": "2026-10-18 — Project asset library: stale replies and lost error paths fixed (Claude, mission 1)",
+      "file": "2026-10-18.md",
+      "bytes": 2430,
+      "sha256": "bb13b9cc157c781a17992fe40e2b0194553abf6bb8aee1914c891e2eb628aa7d"
+    },
+    {
+      "n": 86,
+      "heading": "2026-10-17 — Editor review follow-up verified (Codex, Panchayati #85)",
+      "file": "2026-10-17.md",
+      "bytes": 2464,
+      "sha256": "ce33e713a829f26a1b8f89f41aa4df75e691a1b5636e6cf6aa0a3f20972c57b3"
+    },
+    {
+      "n": 87,
+      "heading": "2026-10-17 — Local DirectUrl font resolution verified; 2.8 stays active (Codex, mission 1)",
+      "file": "2026-10-17.md",
+      "bytes": 3843,
+      "sha256": "37363508cb259342104884162f0bdbd00b460fdbf0d4d02ded05973a4b0840c1"
+    },
+    {
+      "n": 88,
+      "heading": "2026-10-16 — 3.7 real mesh geometry verified; local colour baseline corrected (Codex, mission 1)",
+      "file": "2026-10-16.md",
+      "bytes": 4121,
+      "sha256": "c8a93eeed5a5be588f504a2870a69dc3f25db8b160f0ed5b2aca1aa61be083e4"
+    },
+    {
+      "n": 89,
+      "heading": "2026-10-18 — Project-owned assets and asset previews (Claude)",
+      "file": "2026-10-18.md",
+      "bytes": 2851,
+      "sha256": "68a52c6e2996e7f472f6313991b5efab09d66d85dfb916d054ef54772c923707"
+    },
+    {
+      "n": 90,
+      "heading": "2026-10-17 — UX review fixes (Claude + Codex review): object list, toolbar, preset dialog, targets",
+      "file": "2026-10-17.md",
+      "bytes": 1833,
+      "sha256": "95eb765fb6212f41834ff407891ea3766768bcdc08856ac2cb4109e252cb38a7"
+    },
+    {
+      "n": 91,
+      "heading": "2026-10-17 — Editor font link box now uses the asset plane classifier (Claude)",
+      "file": "2026-10-17.md",
+      "bytes": 731,
+      "sha256": "bda58647484b14e8ccb93edfb887f6f1ab49739215db5da64c40073383b29531"
+    },
+    {
+      "n": 92,
+      "heading": "2026-10-16 — 11.8 done (Claude, Panchayati mission 1); Step 0 re-verified",
+      "file": "2026-10-16.md",
+      "bytes": 3393,
+      "sha256": "8950cd1a6dd157ea2d5a61fe5f0f5950b183c26c3fd179063e571156d3c435ba"
+    },
+    {
+      "n": 93,
+      "heading": "2026-10-16 — progress.html stopped showing new commits in a browser that had saved",
+      "file": "2026-10-16.md",
+      "bytes": 1419,
+      "sha256": "2885087bf118c2cd835570ef791a651d5b89d43db77f8639ff305e75fad7c963"
+    },
+    {
+      "n": 94,
+      "heading": "2026-10-16 — 8.9 and 11.41 done: render.preview draws the requested frame through the headless entry point; resume here",
+      "file": "2026-10-16.md",
+      "bytes": 4403,
+      "sha256": "9ad168f00bcfeedcd2ef7eb389ff8d3fab604c4d4770ef8b9c5b3186fc6f0db0"
+    },
+    {
+      "n": 95,
+      "heading": "2026-10-16 — Editor UX / direction review, Playout workflow review, and the user's eight decisions applied to the plan",
+      "file": "2026-10-16.md",
+      "bytes": 4255,
+      "sha256": "59ff6648b24a076dcace54bfdf06849e8e1acc63dbdf6973614fa8c7776f607a"
+    },
+    {
+      "n": 96,
+      "heading": "2026-10-16 — 3.13 refusal inventory closed: lights and container paints; resume here",
+      "file": "2026-10-16.md",
+      "bytes": 12359,
+      "sha256": "c4494306c3a276ed3294e438807fdc9dbd11457b5573b31230710778abb2821a"
+    },
+    {
+      "n": 97,
+      "heading": "2026-10-16 — Shared refusal validation, honest capabilities and wire audit",
+      "file": "2026-10-16.md",
+      "bytes": 6138,
+      "sha256": "d9a186bea2e61a8bb8376bd34f5dfddcf18564a5ed0b30d4252725d8173f7703"
+    },
+    {
+      "n": 98,
+      "heading": "2026-10-15 — Inline property animation, graphic previews and bounded animation validation",
+      "file": "2026-10-15.md",
+      "bytes": 5845,
+      "sha256": "7a8323cac0ac7f9ccd384deccd0d7b2b070310bfee085b72e417449415ef4fdb"
+    },
+    {
+      "n": 99,
+      "heading": "2026-10-15 — EffectCraft/AE workspace, independent-graphic Scene Manager, and 3.13 continuation",
+      "file": "2026-10-15.md",
+      "bytes": 5984,
+      "sha256": "9bccecac5643d44edc078c429e2be303338786d07b0267f5f261afc07bb12ac7"
+    },
+    {
+      "n": 100,
+      "heading": "2026-10-13 — 3.13 re-close, batch A: vector opacity, Trim Paths, glTF model refusal; full silent-ignore inventory; resume here",
+      "file": "2026-10-13.md",
+      "bytes": 5708,
+      "sha256": "9a8c71d3ffc1b524cf6eb07da6e87bcef6e1f80a6711d8cf12c165d262110714"
+    },
+    {
+      "n": 101,
+      "heading": "2026-10-13 — 3.15 done: compositing follows the project's working colour space",
+      "file": "2026-10-13.md",
+      "bytes": 6902,
+      "sha256": "fc845711cc344ac2433c6353249f06a540599892a0cf14f9de381809aae26b76"
+    },
+    {
+      "n": 102,
+      "heading": "2026-10-13 — Five done steps reopened by execution: 3.7, 3.13, 8.1, 8.9, 8.12",
+      "file": "2026-10-13.md",
+      "bytes": 2731,
+      "sha256": "c1badecdefb0d874d4704c555c8038ab419a7bc3bb2b98c072f7642e21de76d2"
+    },
+    {
+      "n": 103,
+      "heading": "2026-10-12 — Render core decided: GPU-first, GrapiX-owned; colour follows the project",
+      "file": "2026-10-12.md",
+      "bytes": 8572,
+      "sha256": "8001dd36ade01931a82315187a8aca941ba3d98c32523ad3c833d2090befcaeb"
+    },
+    {
+      "n": 104,
+      "heading": "2026-10-04 — 11.39 done: asset provenance, scene schema 2",
+      "file": "2026-10-04.md",
+      "bytes": 3185,
+      "sha256": "d84646cd261ae715e85736dd4efc0816fc36a04cb492a497f900ec2302789912"
+    },
+    {
+      "n": 105,
+      "heading": "2026-10-03 — 11.38 done: content-hashed revisions, pinned takes",
+      "file": "2026-10-03.md",
+      "bytes": 3417,
+      "sha256": "ad5263191cbd9cfea8e9638393002a304b2a6325cdf86de2107099bd0a78c638"
+    },
+    {
+      "n": 106,
+      "heading": "2026-10-03 — 11.37 done: undo/redo on the command log",
+      "file": "2026-10-03.md",
+      "bytes": 1834,
+      "sha256": "54db172c146960b313030a6e10cf8e73cc57c14643cdb8929ad954db3dcffbdd"
+    },
+    {
+      "n": 107,
+      "heading": "2026-10-03 — Font ingest integrated (11.13 evidenced, 2.8 reopened)",
+      "file": "2026-10-03.md",
+      "bytes": 3820,
+      "sha256": "92cadfafd205788afe1618ea789a7f1c3be86424947cf14b8c6c3b5b08792d57"
+    },
+    {
+      "n": 108,
+      "heading": "2026-10-03 — 11.36 done: one command type",
+      "file": "2026-10-03.md",
+      "bytes": 4279,
+      "sha256": "235a10da9e24bab862cb085f88b75ef6e46e4d5332d1177eb2b8f764ca039168"
+    },
+    {
+      "n": 109,
+      "heading": "2026-10-03 — Font links download into the project, Adobe included",
+      "file": "2026-10-03.md",
+      "bytes": 1526,
+      "sha256": "cb447eaaef576bbbf2819f92c1891a597d0e7c2b430cc9615bc548ad63fe1881"
+    },
+    {
+      "n": 110,
+      "heading": "2026-10-02 — Editor core and AI readiness proposal merged into the plan",
+      "file": "2026-10-02.md",
+      "bytes": 3544,
+      "sha256": "7437898a370b71888d291afe70fa12f2fc058f642b0db292403642ca610cad6d"
+    },
+    {
+      "n": 111,
+      "heading": "2026-09-24 — 11.13's done-when rewritten to a strict font ingest/remove case",
+      "file": "2026-09-24.md",
+      "bytes": 1940,
+      "sha256": "404a2829a28bcd90cce03cc81bf06ad1652a237369433c108ae96d44487f50cc"
+    },
+    {
+      "n": 112,
+      "heading": "2026-09-25 — Resume here: the next batch, stopped before it started",
+      "file": "2026-09-25.md",
+      "bytes": 2894,
+      "sha256": "730ca258998d6386a3d21c889fbbfe12d8711d50a25a703f5f5d577498d20623"
+    },
+    {
+      "n": 113,
+      "heading": "2026-09-25 — Phase 18 (Figma at full fidelity) and Phase 19 (Data Server) planned",
+      "file": "2026-09-25.md",
+      "bytes": 1931,
+      "sha256": "3f5913d6ade8fba201f90cc6b280337590b1f6b934684f0ae2dfbc633e2cb8be"
+    },
+    {
+      "n": 114,
+      "heading": "2026-09-25 — Phase 11 re-verification, and seven fixes merged",
+      "file": "2026-09-25.md",
+      "bytes": 3398,
+      "sha256": "7ceca04733d5aa9a9318b87c6e2f3d06b33c8c738751f53f865186be8d42b116"
+    },
+    {
+      "n": 115,
+      "heading": "2026-09-25 — application workflow rows 11.31–11.35 planned; 8.6 reopened",
+      "file": "2026-09-25.md",
+      "bytes": 2067,
+      "sha256": "5e241b5a0aa7ccaa599f15096da273e13f0836f8f4c212af6fe3cbe08cba0eb2"
+    },
+    {
+      "n": 116,
+      "heading": "2026-09-24 — save model decided (new row 11.30); 11.15 reopened",
+      "file": "2026-09-24.md",
+      "bytes": 1590,
+      "sha256": "c393f7afb0212c716d91c9fb00a6648eb7392d6bd593191a77dff7d38b9308cb"
+    },
+    {
+      "n": 117,
+      "heading": "2026-09-14 — the dockable layout decided, and Program learned to play",
+      "file": "2026-09-14.md",
+      "bytes": 7843,
+      "sha256": "9100e30955bd76f719131119af22dd04483138ffd75cafdbef6df94a4999e8ae"
+    },
+    {
+      "n": 118,
+      "heading": "2026-09-13 — the blocked Phase 11 steps, and a viewport I broke and fixed",
+      "file": "2026-09-13.md",
+      "bytes": 6077,
+      "sha256": "31c95fa377ff636c3ce743290ab29865ef2e661d3371affabaef88d639b0ba46"
+    },
+    {
+      "n": 119,
+      "heading": "2026-09-13 — 11.26, 11.27 and 11.28 closed out",
+      "file": "2026-09-13.md",
+      "bytes": 2814,
+      "sha256": "2fb09a16368bfd0c25fd81e2b0f66a665ce7317e0da6e9b3aa7b7c21e4528d48"
+    },
+    {
+      "n": 120,
+      "heading": "2026-09-13 — the phase UI, and 11.25–11.28 driven live",
+      "file": "2026-09-13.md",
+      "bytes": 3618,
+      "sha256": "31cf090242933d597d387d494bae1541d886e8d535c9c34669c3c13b4a58a14d"
+    },
+    {
+      "n": 121,
+      "heading": "2026-09-13 — broadcast parity steps 11.25–11.28 begun",
+      "file": "2026-09-13.md",
+      "bytes": 4560,
+      "sha256": "47c2a45193339656d7eff0f7ab84d3df1984e5001fc627b5056f399feea94ecb"
+    },
+    {
+      "n": 122,
+      "heading": "2026-09-13 — scenes became entities (11.29)",
+      "file": "2026-09-13.md",
+      "bytes": 3751,
+      "sha256": "cb2f8c1b452758cb7b2ef22d67dbb0b540993953352a278d44eeef6abdb45475"
+    },
+    {
+      "n": 123,
+      "heading": "2026-09-13 — project scene CRUD, local preview, and a gate that was never running",
+      "file": "2026-09-13.md",
+      "bytes": 6361,
+      "sha256": "b02110a605bf7df74c2d5143a91c085d57425d7c646032ed6f1a00b7c27863d5"
+    },
+    {
+      "n": 124,
+      "heading": "2026-09-13 — the Editor can author a document (11.18, partial)",
+      "file": "2026-09-13.md",
+      "bytes": 3509,
+      "sha256": "cb04482ac2feb255194b1705bbf2553404d8772cded8696d16509233f6a81300"
+    },
+    {
+      "n": 125,
+      "heading": "2026-09-13 — easing curves, the starter motion library, and a third gate hole (11.23)",
+      "file": "2026-09-13.md",
+      "bytes": 3226,
+      "sha256": "6aa07e88424275ef5cdc84dfbcb4167cb1f99c2a5aef668aaaf959a4dfed2b75"
+    },
+    {
+      "n": 126,
+      "heading": "2026-09-13 — selection-driven timeline and keyframe editing (11.22)",
+      "file": "2026-09-13.md",
+      "bytes": 2936,
+      "sha256": "9293182d91a145d563ca391d6633a670ac2304c2e9f2fa0951ef6e011bef8787"
+    },
+    {
+      "n": 127,
+      "heading": "2026-09-13 — speed graph, the channel evaluator, and a hole in the codegen gate (11.11)",
+      "file": "2026-09-13.md",
+      "bytes": 3672,
+      "sha256": "3c7542661814b7fb56bf790ea2cb4e18abc4f5959da2574fb31124512d86e5aa"
+    },
+    {
+      "n": 128,
+      "heading": "2026-09-13 — the blocked sweep was wrong, and the virtualised timeline (11.10)",
+      "file": "2026-09-13.md",
+      "bytes": 4564,
+      "sha256": "4315fd406d5e459162e495019a3758079de59533c2596a19aae48a07a9c27d23"
+    },
+    {
+      "n": 129,
+      "heading": "2026-09-13 — the scene checks 1.12 names, green against all three mocks",
+      "file": "2026-09-13.md",
+      "bytes": 3387,
+      "sha256": "c5cf8f8eb6304e509d44502050eebc271718dd7b5658f49dccadec58e80d197a"
+    },
+    {
+      "n": 130,
+      "heading": "2026-09-13 — inspector keyframes, Auto-Key, multi-select, undo/redo (11.21)",
+      "file": "2026-09-13.md",
+      "bytes": 2978,
+      "sha256": "3619c60bb2c9753a6bdd1431d4db26feef28b9897db8a9005a6e0af8612d3db3"
+    },
+    {
+      "n": 131,
+      "heading": "2026-09-13 — editable animation contract and Editor service (11.20)",
+      "file": "2026-09-13.md",
+      "bytes": 4189,
+      "sha256": "f2ec2fbe1558d61d8b19885d2627f95acde1199a4de0f62b351c437d49f854c7"
+    },
+    {
+      "n": 132,
+      "heading": "2026-09-11 — Phase 3 begins: scene parse to prepared scene (3.4)",
+      "file": "2026-09-11.md",
+      "bytes": 4259,
+      "sha256": "85e50857f83d27fb31acbbd6887f13301663d7977f70e09010f1c1f9bca6f205"
+    },
+    {
+      "n": 133,
+      "heading": "2026-09-11 — colour and material contracts (1.4, 1.3), atomic write and case policy (2.1, 2.3)",
+      "file": "2026-09-11.md",
+      "bytes": 11745,
+      "sha256": "6f533678db0f837539c49cdf092d23d0e1c610317891f6834b58d67510e8a396"
+    },
+    {
+      "n": 134,
+      "heading": "2026-09-11 — the rest of Phase 1 and 2, through a rate-limited runtime",
+      "file": "2026-09-11.md",
+      "bytes": 6502,
+      "sha256": "718e630f0656ec9555e68a0774c07a52da2034b93e00efa6a9f4ca5ec23c7f7c"
+    },
+    {
+      "n": 135,
+      "heading": "2026-09-11 — the 1.x working tree removed from disk",
+      "file": "2026-09-11.md",
+      "bytes": 2763,
+      "sha256": "bc1966a8a3ec418d6de2b0420123ba8fec8da6ad9b9ffc84b4dd13dee5201cd1"
+    },
+    {
+      "n": 136,
+      "heading": "2026-09-11 — fonts ported, platform primitives, DeckLink probe, P.2 positions",
+      "file": "2026-09-11.md",
+      "bytes": 4438,
+      "sha256": "bd49ba5aa94d431c0ca93e40357f8ecd9aa1515937041ac1b6d58b13fa859aca"
+    },
+    {
+      "n": 137,
+      "heading": "2026-09-11 — scene document schema and asset addressing (1.1, 1.7)",
+      "file": "2026-09-11.md",
+      "bytes": 2936,
+      "sha256": "cb26a7cf141847cd78062b7d657ad8bb5adeb20559db4a05126fd0482ac21612"
+    },
+    {
+      "n": 138,
+      "heading": "2026-09-11 — Three.js viewport foundation (11.6, ahead of the shell)",
+      "file": "2026-09-11.md",
+      "bytes": 3297,
+      "sha256": "ec83323b9146d469b9d72f5b13789db81c0230f9a633664146f3de999028f27e"
+    },
+    {
+      "n": 139,
+      "heading": "2026-09-11 — Phase 0 CI, licence policy, and the revision steps recorded",
+      "file": "2026-09-11.md",
+      "bytes": 2589,
+      "sha256": "711933d6d06b1a863c4aa1563e686dee81a61637fd458ee508d84f7c7ebb75dd"
+    },
+    {
+      "n": 140,
+      "heading": "2026-09-11 — structured refusal envelope reaches TypeScript (0.5, 0.6)",
+      "file": "2026-09-11.md",
+      "bytes": 3878,
+      "sha256": "eb6020f948f21602956709cb4d18231fd84806aa9029ac71dec7b14b99ec43c3"
+    },
+    {
+      "n": 141,
+      "heading": "2026-09-10 — render engine, host supervisor, and the design-system schema",
+      "file": "2026-09-10.md",
+      "bytes": 6067,
+      "sha256": "cafe2aa161d8536f2a7614537501dfd3fc979f8341a31d15d216bab452bbd752"
+    },
+    {
+      "n": 142,
+      "heading": "2026-09-10 — ADR-0002 accepted as the final drafted handoff",
+      "file": "2026-09-10.md",
+      "bytes": 5110,
+      "sha256": "8175a7cc8a24f7bcd4ad74aad254043c75e029a19bfcdebba70e663b48a37499"
+    },
+    {
+      "n": 143,
+      "heading": "2026-09-10 — credential enforcement and reconnect reconciliation",
+      "file": "2026-09-10.md",
+      "bytes": 4274,
+      "sha256": "fee8f73d25fa5c9f1db630125b8e179d331e3f5cc0086473ce5fe05e3f09b634"
+    },
+    {
+      "n": 144,
+      "heading": "2026-09-10 — the L0 control transport",
+      "file": "2026-09-10.md",
+      "bytes": 4246,
+      "sha256": "1f100efcfc3d19e246beb6441eef41393ab05aa8b2e09f859466be7ac8956574"
+    },
+    {
+      "n": 145,
+      "heading": "2026-09-10 — ADR-001 and ADR-002 implemented",
+      "file": "2026-09-10.md",
+      "bytes": 6385,
+      "sha256": "4e4cb55670deea7e48a17a88415f51c8116b0421fe05fcce7260864348caf67a"
+    },
+    {
+      "n": 146,
+      "heading": "2026-09-10 — M1 skeleton and basic setup on a clean branch",
+      "file": "2026-09-10.md",
+      "bytes": 4749,
+      "sha256": "bf9cdd926d2eab10adeea0a25fd1fd797610b1d6cd41ca267e3c23adc9426ec5"
+    },
+    {
+      "n": 147,
+      "heading": "2026-09-12 — Phase 3 render engine core (3.3–3.13)",
+      "file": "2026-09-12.md",
+      "bytes": 3409,
+      "sha256": "9890caa51204b081f4e9016b9566bd544820bd6a481e85916dfd91ec4454cd88"
+    },
+    {
+      "n": 148,
+      "heading": "2026-09-12 — Performance endpoint and clock catch-up",
+      "file": "2026-09-12.md",
+      "bytes": 1161,
+      "sha256": "fdc725ed60c6917e98e71b9adf9121e927507186ca8b76fd006ce6ed1a3f2714"
+    },
+    {
+      "n": 149,
+      "heading": "2026-09-12 — the Tauri 2 shells (11.1), both products",
+      "file": "2026-09-12.md",
+      "bytes": 4277,
+      "sha256": "53b7906407f95bfff23fb5d07e41e3105b78d26d28c30225040e2fe62fa0a725"
+    },
+    {
+      "n": 150,
+      "heading": "2026-09-12 — phases 4, 5 and 6, five slices in parallel",
+      "file": "2026-09-12.md",
+      "bytes": 5585,
+      "sha256": "3380da2063620c809820f1cd500a6afdfbdcc1e6491dde595ae201fba8f0ccea"
+    },
+    {
+      "n": 151,
+      "heading": "2026-09-12 — Phase 7, the Editor service",
+      "file": "2026-09-12.md",
+      "bytes": 5066,
+      "sha256": "642ba61bed1c1d2ea0ff6d1dcdb9f1bd19118db7f23e5b545da13d7211cd15af"
+    },
+    {
+      "n": 152,
+      "heading": "2026-09-12 — Phase 8 foundation: the MCP surface, generated",
+      "file": "2026-09-12.md",
+      "bytes": 4478,
+      "sha256": "f511593a32ed171f53ce950ba22da0c79571644efc4c3e139c37fc96302090b7"
+    },
+    {
+      "n": 153,
+      "heading": "2026-09-12 — Phase 8, the remaining steps",
+      "file": "2026-09-12.md",
+      "bytes": 3321,
+      "sha256": "42b988ecb6440e808fda31fea6507a9512ca34dfb7c9db8e0a0e80596e4c4346"
+    },
+    {
+      "n": 154,
+      "heading": "2026-09-12 - Phase 8's three Partial steps completed",
+      "file": "2026-09-12.md",
+      "bytes": 4447,
+      "sha256": "871177c92d5da1b43cf70ea74c94f5b85b2941c5e91c18166ca1e6eeff70b0a1"
+    },
+    {
+      "n": 155,
+      "heading": "2026-09-12 — Phase 10, a review council, and the Editor's design modules",
+      "file": "2026-09-12.md",
+      "bytes": 6000,
+      "sha256": "b40e75751e4181dc1dd9096ec8da0c367c80ad397999d6d5d40a49c5c6b429a7"
+    },
+    {
+      "n": 156,
+      "heading": "2026-09-12 — Browser colour reaches paint; 2D renders between 3D (11.6)",
+      "file": "2026-09-12.md",
+      "bytes": 2438,
+      "sha256": "c7f4803c089decfa12aee9d66e0b8902c1f80d6e88c1222309ff7f38f95f7d4b"
+    },
+    {
+      "n": 157,
+      "heading": "2026-09-12 — Structured Editor viewport overlays (11.7)",
+      "file": "2026-09-12.md",
+      "bytes": 1755,
+      "sha256": "94108785394fc3471955932900159d86ba7db3630b2b5edab29aface1dbd5352"
+    },
+    {
+      "n": 158,
+      "heading": "2026-09-12 — Data binding property panel built; 11.19 remains active",
+      "file": "2026-09-12.md",
+      "bytes": 2704,
+      "sha256": "ddbd3ffd0be025374994c8b7bcffda2710f7690d1cbad93f0625ded56470812c"
+    },
+    {
+      "n": 159,
+      "heading": "2026-10-11 — EffectCraft architecture review and initial compatibility spike (3.14)",
+      "file": "2026-10-11.md",
+      "bytes": 8773,
+      "sha256": "f9ed0f35b3993225bbe9837201b70266da96b26e553221480759052f0751ceda"
+    },
+    {
+      "n": 160,
+      "heading": "OMP session import (tools/omp-import)",
+      "file": "undated-omp-session-import.md",
+      "bytes": 2670,
+      "sha256": "aac238e32512ae611eabdb0e8014475cb3e1314295f1ac58976c8ff0e285bb9c"
+    },
+    {
+      "n": 161,
+      "heading": "Shared agent worktree consolidation — 11 October 2026",
+      "file": "2026-10-11.md",
+      "bytes": 5079,
+      "sha256": "5fc461118820002934b0ca140020adbd73210ce4e81524432660b24544c2deca"
+    }
+  ]
+}

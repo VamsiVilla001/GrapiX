@@ -9,7 +9,7 @@
 
 mod support;
 
-use gx_contracts::color::WorkingColorSpace;
+use gx_contracts::color::{ColorDepth, WorkingColorSpace};
 use gx_contracts::project::ProjectSettings;
 use gx_contracts::ContentHash;
 use gx_editor::Projects;
@@ -17,7 +17,7 @@ use gx_editor::Projects;
 const EVERY_TIER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg">
     <rect id="background" x="0" y="0" width="1920" height="1080"/>
     <g id="lower-third"/>
-    <path id="swoosh" d="M0 0 L10 10 Z" width="100" height="20"/>
+    <path id="swoosh" d="M0 0 L10" width="100" height="20"/>
     <image id="logo" href="data:image/png;base64,AAAA"/>
 </svg>"#;
 
@@ -160,6 +160,7 @@ fn an_import_never_overwrites_and_never_half_lands() {
             "linear",
             ProjectSettings {
                 working_color_space: WorkingColorSpace::LinearSrgb,
+                color_depth: ColorDepth::BEFORE_DEPTH,
             },
         )
         .expect("a linear project exists");

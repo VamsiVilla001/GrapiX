@@ -24,3 +24,5 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 jsonschema = { version = "0.30", default-features = false }
+# 2.23: the HTTP tests make the gx1 credentials the server is started to verify.
+gx-credential = { workspace = true }

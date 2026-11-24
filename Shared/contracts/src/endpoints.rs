@@ -71,11 +71,24 @@ impl Plane {
         }
     }
 
-    /// Whether the plane verifies a credential on the connections it accepts.
-    /// Only the control plane does today; this is the one line that changes
-    /// when the asset plane (2.24) or the MCP HTTP transport (2.23) learns to.
+    /// Whether the plane verifies a credential on the connections it accepts, with the token
+    /// this policy is given: the control plane, and the asset plane since 2.24 (it verifies the
+    /// control plane's gx1 credential on every connection's first frame). The MCP HTTP transport verifies a credential
+    /// on every request (2.23) with a secret of its own, but it is a local agent endpoint: it is
+    /// never offered a network interface, so the policy treats it as a plane that cannot leave
+    /// loopback.
     pub const fn authenticates(self) -> bool {
-        matches!(self, Self::Control)
+        matches!(self, Self::Control | Self::Asset)
+    }
+
+    /// Why a plane that is not given a token may listen on loopback only.
+    pub const fn loopback_only_because(self) -> &'static str {
+        match self {
+            Self::Control | Self::Asset => "takes a token and may listen off loopback",
+            Self::McpHttp => {
+                "is a local agent endpoint: it verifies each request's credential, but it listens on loopback only and is never offered a network interface"
+            }
+        }
     }
 }
 
@@ -107,8 +120,9 @@ impl fmt::Display for ListenRefusal {
             ),
             Self::PlaneCannotAuthenticate { plane, addr } => write!(
                 f,
-                "refusing to bind {addr}: the {} verifies no credential, so it listens on loopback only (a token cannot protect a plane that never checks it)",
-                plane.name()
+                "refusing to bind {addr}: the {} {}",
+                plane.name(),
+                plane.loopback_only_because()
             ),
         }
     }
@@ -218,6 +232,15 @@ mod tests {
         for ip in ["192.168.1.50", "10.0.0.4", "0.0.0.0", "::"] {
             let a = addr(ip, 4400);
             assert_eq!(check_listen(Plane::Control, a, Some(GOOD)), Ok(()), "{ip}");
+            assert_eq!(check_listen(Plane::Asset, a, Some(GOOD)), Ok(()), "{ip}");
+            assert_eq!(
+                check_listen(Plane::Asset, a, None),
+                Err(ListenRefusal::NonLoopbackWithoutToken {
+                    plane: Plane::Asset,
+                    addr: a
+                }),
+                "{ip}"
+            );
             assert_eq!(
                 check_listen(Plane::Control, a, None),
                 Err(ListenRefusal::NonLoopbackWithoutToken {
@@ -230,8 +253,8 @@ mod tests {
     }
 
     #[test]
-    fn a_plane_that_verifies_none_may_not_leave_loopback_token_or_not() {
-        for plane in [Plane::Asset, Plane::McpHttp] {
+    fn a_plane_that_is_not_offered_the_network_may_not_leave_loopback_token_or_not() {
+        for plane in [Plane::McpHttp] {
             for ip in ["192.168.1.50", "0.0.0.0", "::"] {
                 let a = addr(ip, 4401);
                 for token in [None, Some(GOOD)] {
@@ -243,11 +266,11 @@ mod tests {
                 }
             }
         }
-        let said = check_listen(Plane::Asset, addr("10.0.0.4", 4401), Some(GOOD))
+        let said = check_listen(Plane::McpHttp, addr("10.0.0.4", 4401), Some(GOOD))
             .unwrap_err()
             .to_string();
         assert!(
-            said.contains("asset plane") && said.contains("verifies no credential"),
+            said.contains("MCP HTTP transport") && said.contains("listens on loopback only"),
             "{said}"
         );
     }
@@ -303,9 +326,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_control_plane_verifies_a_credential_today() {
+    fn the_control_and_asset_planes_take_a_token_and_the_mcp_transport_is_local_only() {
         assert!(Plane::Control.authenticates());
-        assert!(!Plane::Asset.authenticates());
+        assert!(Plane::Asset.authenticates());
         assert!(!Plane::McpHttp.authenticates());
     }
 }

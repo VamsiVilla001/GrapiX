@@ -7,6 +7,14 @@
     "BezierPath": {
       "description": "A cubic bezier path, structured like Lottie/Bodymovin's \"sh\" shape so it\nround-trips with the web's proven vector-animation format. Segment k→k+1 is\na cubic bezier; tangents are relative to their vertex. All three arrays\nmust be the same length — the constraint that also makes a path animatable.",
       "properties": {
+        "autoTension": {
+          "description": "Tension of the `auto` handles, 0 to 1 (default 0.5: centripetal\nCatmull-Rom). Absent means the default.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "closed": {
           "type": "boolean"
         },
@@ -21,6 +29,28 @@
             "$ref": "#/$defs/Vec2"
           },
           "type": "array"
+        },
+        "vertexIds": {
+          "description": "A stable id per vertex (11.112), parallel to `vertices`; absent on old\nscenes (the vertex index then stands for it). Ids survive inserts,\ndeletes, reversal and undo, so two keys of an animated path correspond\nby id, never by index.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "vertexKinds": {
+          "description": "The kind of each vertex (11.113), parallel to `vertices`; absent means\n\"inferred from the handles\" as before. An `auto` vertex's stored handles\nare ignored: [`BezierPath::effective`] derives them.",
+          "items": {
+            "$ref": "#/$defs/VertexKind"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "vertices": {
           "items": {
@@ -61,6 +91,31 @@
         "y"
       ],
       "type": "object"
+    },
+    "VertexKind": {
+      "description": "How a path vertex's handles behave (11.113, pen spec v2 section 4).",
+      "oneOf": [
+        {
+          "const": "corner",
+          "description": "Handles move independently (or are absent).",
+          "type": "string"
+        },
+        {
+          "const": "smooth",
+          "description": "Handles stay collinear and opposite; each keeps its own length.",
+          "type": "string"
+        },
+        {
+          "const": "symmetric",
+          "description": "Handles stay collinear, opposite and of equal length.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Handles are derived from the neighbours; stored ones are ignored.",
+          "type": "string"
+        }
+      ]
     }
   },
   "additionalProperties": false,

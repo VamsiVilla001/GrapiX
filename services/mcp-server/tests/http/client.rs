@@ -10,6 +10,30 @@ use std::time::Duration;
 /// The path the MCP endpoint is served on.
 pub const MCP_PATH: &str = "/mcp";
 
+/// 2.23: the secret the HTTP servers under test are started with.
+pub const TEST_SECRET: &str = "mcp-http-test-secret-0123456789abcd";
+
+/// A gx1 credential made with [`TEST_SECRET`] for `subject`, holding `scopes`.
+pub fn credential_for(
+    subject: &str,
+    role: gx_contracts::auth::Role,
+    scopes: Vec<gx_contracts::auth::Scope>,
+) -> String {
+    gx_credential::Token::mint(subject, role, scopes, TEST_SECRET)
+        .expect("a credential mints")
+        .as_str()
+        .to_owned()
+}
+
+/// The credential [`post`] sends unless a test sends its own header: an Editor's, with the Author scope.
+pub fn author_credential() -> String {
+    credential_for(
+        "http-test",
+        gx_contracts::auth::Role::Editor,
+        vec![gx_contracts::auth::Scope::Author],
+    )
+}
+
 const REPLY_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
@@ -34,8 +58,27 @@ impl HttpReply {
 }
 
 /// POST one JSON-RPC message to `/mcp` with `Connection: close`. `host` is
-/// sent as the `Host` header, so a test can present a foreign one.
+/// sent as the `Host` header, so a test can present a foreign one. A request that does not set its
+/// own `Authorization` carries [`author_credential`] (2.23); [`post_anonymous`] carries none.
 pub fn post(
+    addr: SocketAddr,
+    host: &str,
+    headers: &[(&str, &str)],
+    body: &serde_json::Value,
+) -> HttpReply {
+    let credential = format!("Bearer {}", author_credential());
+    let mut with_credential = headers.to_vec();
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+    {
+        with_credential.push(("Authorization", credential.as_str()));
+    }
+    post_anonymous(addr, host, &with_credential, body)
+}
+
+/// [`post`] with exactly the headers given: no credential is added.
+pub fn post_anonymous(
     addr: SocketAddr,
     host: &str,
     headers: &[(&str, &str)],

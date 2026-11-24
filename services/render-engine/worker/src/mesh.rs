@@ -996,6 +996,7 @@ mod tests {
     fn document(objects: Vec<SceneObject>, materials: Vec<MaterialDefinition>) -> SceneDocument {
         SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
             id: "scene".to_string(),
             name: "mesh".to_string(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -1016,6 +1017,9 @@ mod tests {
             materials,
             controls: Vec::new(),
             text_styles: Vec::new(),
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects,
         }
     }

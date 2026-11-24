@@ -95,6 +95,70 @@ const cases = [
   ["a TypeScript consumer comparing locality is refused", "Editor/src/preview.ts",
     "export const remote = (cap: { locality: string }) => cap.locality === \"Lan\";",
     /branches on the engine's locality \(R9, 5\.5\)/],
+  // ---- 2.26: Playout is held to what the Editor is held to.
+  ["a Playout shell command outside its surface is refused", "Playout/shell/src/lib.rs",
+    "#[tauri::command]\nfn cmd_edit_scene(state: State<'_, Connection>) {}\n\ntauri::generate_handler![cmd_edit_scene];",
+    /Tauri command cmd_edit_scene is not in PLAYOUT_SHELL_SURFACE \(R1\)/],
+  ["an Editor command is not a Playout command", "Playout/shell/src/lib.rs",
+    "#[tauri::command]\nfn cmd_execute(command: serde_json::Value) {}\n\ntauri::generate_handler![cmd_execute];",
+    /Tauri command cmd_execute is not in PLAYOUT_SHELL_SURFACE \(R1\)/],
+  ["a Playout command cannot take an authoring document", "Playout/shell/src/lib.rs",
+    "#[tauri::command]\nfn cmd_take(state: State<'_, Connection>, scene: SceneDocument) {}\n\ntauri::generate_handler![cmd_take];",
+    /read command cmd_take accepts an authoring document\/command parameter \(R1\)/],
+  ["a Playout command missing from its handler list is refused", "Playout/shell/src/lib.rs",
+    "#[tauri::command]\nfn cmd_status() {}\n#[tauri::command]\nfn cmd_take() {}\n\ntauri::generate_handler![cmd_status];",
+    /Playout\/shell\/src: #\[tauri::command\] fn cmd_take is missing from generate_handler! \(R1\)/],
+  ["a Playout handler that is not a command is refused", "Playout/shell/src/lib.rs",
+    "#[tauri::command]\nfn cmd_status() {}\n\ntauri::generate_handler![cmd_status, cmd_cue];",
+    /Playout\/shell\/src: generate_handler! lists cmd_cue, which is not a parsed #\[tauri::command\] fn \(R1\)/],
+  ["a Playout page invoking a command it does not have is refused", "Playout/web/main.js",
+    "await invoke(\"cmd_object_hide\", { objectId });",
+    /invoke command cmd_object_hide is not in PLAYOUT_SHELL_SURFACE \(R4\)/],
+  ["a Playout page cannot invoke an Editor command", "Playout/web/main.js",
+    "await invoke(\"cmd_execute\", { command });",
+    /invoke command cmd_execute is not in PLAYOUT_SHELL_SURFACE \(R4\)/],
+  ["a Playout page invoking by a non-literal name is refused", "Playout/web/main.js",
+    "async function send(command) { return invoke(command, {}); }",
+    /invoke first argument must be a literal command name, got `command` \(R4\)/],
+  ["a Playout page carrying a document is refused", "Playout/web/main.js",
+    "await invoke(\"cmd_take\", { scene });",
+    /invoke arguments may not carry scene\/document data \(R4\)/],
+  ["the wrapper's exemption does not reach a call outside its body", "Playout/web/main.js",
+    "function invoke(command, args) { return bridge.invoke(command, args); }\nasync function other(command) { return bridge.invoke(command, {}); }",
+    /invoke first argument must be a literal command name, got `command` \(R4\)/],
+  ["only the listed file may declare the wrapper", "Playout/web/other.js",
+    "function invoke(command, args) { return bridge.invoke(command, args); }",
+    /invoke first argument must be a literal command name, got `command` \(R4\)/],
+  ["a front end in JavaScript writing the engine's endpoint out is refused", "Playout/web/connect.js",
+    "export const ENGINE = \"127.0.0.1:4400\";",
+    /the engine's host:port 127\.0\.0\.1:4400 is written out.*\(R11, 2\.21\)/],
+  ["a module script in tools writing the engine's endpoint out is refused", "tools/launch-extra.mjs",
+    "const ENGINE = 'localhost:4401';",
+    /the engine's host:port localhost:4401 is written out.*\(R11, 2\.21\)/],
+  ["a JavaScript consumer comparing locality is refused", "Playout/web/route.js",
+    "export const remote = (cap) => cap.locality === \"Lan\";",
+    /branches on the engine's locality \(R9, 5\.5\)/],
+  ["a TcpSocket listener outside the bind sites is refused", "services/playout/src/net.rs",
+    "fn listen() { let socket = tokio::net::TcpSocket::new_v4().unwrap(); socket.bind(a).unwrap(); let l = socket.listen(8).unwrap(); }",
+    /a socket is bound outside the listed bind sites.*\(R10, 2\.21\)/],
+  ["a socket crate outside the bind sites is refused", "services/playout/src/net.rs",
+    "fn listen() { let s = socket2::Socket::new(Domain::IPV4, Type::STREAM, None).unwrap(); }",
+    /a socket is bound outside the listed bind sites.*\(R10, 2\.21\)/],
+  ["a Unix listener outside the bind sites is refused", "services/playout/src/net.rs",
+    "fn listen(p: &Path) { let l = std::os::unix::net::UnixListener::bind(p).unwrap(); }",
+    /a socket is bound outside the listed bind sites.*\(R10, 2\.21\)/],
+  ["a named-pipe server outside the bind sites is refused", "services/playout/src/net.rs",
+    "fn listen(name: &str) { let server = ServerOptions::new().first_pipe_instance(true).create(name).unwrap(); }",
+    /a socket is bound outside the listed bind sites.*\(R10, 2\.21\)/],
+  ["a raw Windows named pipe outside the bind sites is refused", "Playout/shell/src/pipe.rs",
+    "fn listen() { let h = unsafe { CreateNamedPipeW(name, mode, 0, 255, 0, 0, 0, null()) }; }",
+    /a socket is bound outside the listed bind sites.*\(R10, 2\.21\)/],
+  ["a listed bind site that opens a Unix listener without the policy is refused", "Shared/control-plane/src/bind.rs",
+    "fn bind_local(p: &Path) -> io::Result<UnixListener> { UnixListener::bind(p) }",
+    /a listed bind site binds a socket without asking gx_contracts::endpoints::check_listen \(R10, 2\.21\)/],
+  ["a listed bind site that opens a Unix listener after asking the policy is allowed", "Shared/control-plane/src/bind.rs",
+    "fn bind_local(p: &Path) -> io::Result<UnixListener> { check_local_listen(p)?; UnixListener::bind(p) }",
+    /^$/],
 ];
 
 for (const [name, path, text, expected] of cases) {
@@ -151,6 +215,35 @@ test("the log command and the one bridge file are allowed", () => {
     violations("Editor/web/main.ts", "await shell().invoke<void>(\"cmd_log\", { entry });"),
     [],
   );
+});
+
+test("2.26: Playout's allowed surface, the wrapper, comments and test paths trigger no rule", () => {
+  const shell = [
+    "#[tauri::command]",
+    "fn cmd_sign_in(state: tauri::State<'_, Connection>, name: String) -> Result<OperatorSession, PlayoutError> { sign_in(&state, &name) }",
+    "#[tauri::command]",
+    "fn cmd_take(state: tauri::State<'_, Connection>, take_id: String, revision: u64, content_hash: Option<String>, frame: Option<u64>) {}",
+    "tauri::generate_handler![cmd_sign_in, cmd_take]",
+  ].join("\n");
+  assert.deepEqual(violations("Playout/shell/src/lib.rs", shell), []);
+  const page = [
+    "function invoke(command, args) { return bridge.invoke(command, args); }",
+    "async function doTake() { await invoke(\"cmd_take\", { takeId }); }",
+    "// invoke(name, { scene }); the engine is at 127.0.0.1:4400",
+  ].join("\n");
+  assert.deepEqual(violations("Playout/web/main.js", page), []);
+  assert.deepEqual(violations("Playout/web/shell-bridge.js", "export function call(core, command) { return core.invoke(command, {}); }"), []);
+  assert.deepEqual(violations("tools/tests/launch.test.mjs", "const ENGINE = '127.0.0.1:4400';"), []);
+  assert.deepEqual(violations("services/playout/src/net.rs", "// TcpSocket::new_v4()\nfn f() { let s = \"UnixListener\"; }"), []);
+  assert.deepEqual(violations("conformance/src/scene_plane.rs", "fn scratch() { let s = tokio::net::TcpSocket::new_v4(); }"), []);
+});
+
+test("2.26: the walk reads the scripts the rules now cover", () => {
+  const paths = repositoryFiles().map((file) => file.path);
+  for (const expected of ["Playout/web/main.js", "Playout/web/shell-bridge.js", "tools/engine-ports.mjs", "Playout/shell/src/lib.rs"]) {
+    assert.ok(paths.includes(expected), `${expected} is not read`);
+  }
+  assert.ok(!paths.some((path) => path.startsWith("agent/") || path.includes("node_modules/")));
 });
 
 test("the real tree has zero boundary violations", () => {

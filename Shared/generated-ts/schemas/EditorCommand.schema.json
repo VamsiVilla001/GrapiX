@@ -41,6 +41,23 @@
       ],
       "type": "object"
     },
+    "AddGuide": {
+      "description": "Put a guide on the canvas (11.44): a line along `axis` at `position` pixels. The lowest free id is given to it.",
+      "properties": {
+        "axis": {
+          "$ref": "#/$defs/GuideAxis"
+        },
+        "position": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "axis",
+        "position"
+      ],
+      "type": "object"
+    },
     "ApplyPreset": {
       "description": "Instantiate one phase of a starter motion preset at `atFrame`.",
       "properties": {
@@ -90,6 +107,72 @@
       ],
       "type": "object"
     },
+    "Arithmetic": {
+      "description": "Arithmetic: combines each colour channel with a value of your choice, on the colour as it was\nbefore its alpha. Alpha is left alone.",
+      "properties": {
+        "blueValue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "clip": {
+          "default": true,
+          "description": "Keep every result between 0 and 1. Off, results may go above 1 but never below 0.",
+          "type": "boolean"
+        },
+        "greenValue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "operator": {
+          "$ref": "#/$defs/ArithmeticOperator",
+          "default": "add"
+        },
+        "redValue": {
+          "default": 0.0,
+          "description": "0-255 on each channel.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ArithmeticOperator": {
+      "description": "What Arithmetic does to each colour channel with the value set for that channel.\n\nAnd, Or and Xor work on the 8-bit values of the channel and the setting (0 to 255), as After\nEffects does; the rest work on the values themselves, so a pixel above 1 stays above 1.",
+      "oneOf": [
+        {
+          "enum": [
+            "and",
+            "or",
+            "xor",
+            "add",
+            "subtract",
+            "difference",
+            "min",
+            "max",
+            "multiply",
+            "screen"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "block-above",
+          "description": "A channel above the value goes to 0; one at or below it stays.",
+          "type": "string"
+        },
+        {
+          "const": "block-below",
+          "description": "A channel below the value goes to 0; one at or above it stays.",
+          "type": "string"
+        },
+        {
+          "const": "slice",
+          "description": "1 where the channel reaches the value, 0 where it does not.",
+          "type": "string"
+        }
+      ]
+    },
     "AssetApproval": {
       "description": "A named person's approval of an asset for use.",
       "properties": {
@@ -124,6 +207,7 @@
       "enum": [
         "image",
         "video",
+        "audio",
         "svg",
         "font",
         "model",
@@ -320,6 +404,14 @@
     "BezierPath": {
       "description": "A cubic bezier path, structured like Lottie/Bodymovin's \"sh\" shape so it\nround-trips with the web's proven vector-animation format. Segment k→k+1 is\na cubic bezier; tangents are relative to their vertex. All three arrays\nmust be the same length — the constraint that also makes a path animatable.",
       "properties": {
+        "autoTension": {
+          "description": "Tension of the `auto` handles, 0 to 1 (default 0.5: centripetal\nCatmull-Rom). Absent means the default.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "closed": {
           "type": "boolean"
         },
@@ -335,6 +427,28 @@
           },
           "type": "array"
         },
+        "vertexIds": {
+          "description": "A stable id per vertex (11.112), parallel to `vertices`; absent on old\nscenes (the vertex index then stands for it). Ids survive inserts,\ndeletes, reversal and undo, so two keys of an animated path correspond\nby id, never by index.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "vertexKinds": {
+          "description": "The kind of each vertex (11.113), parallel to `vertices`; absent means\n\"inferred from the handles\" as before. An `auto` vertex's stored handles\nare ignored: [`BezierPath::effective`] derives them.",
+          "items": {
+            "$ref": "#/$defs/VertexKind"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "vertices": {
           "items": {
             "$ref": "#/$defs/Vec2"
@@ -348,6 +462,58 @@
         "inTangents",
         "outTangents"
       ],
+      "type": "object"
+    },
+    "BlackWhite": {
+      "description": "Black & White: a greyscale whose brightness per hue is set by six weights (red, yellow,\ngreen, cyan, blue, magenta, interpolated round the wheel), optionally tinted.",
+      "properties": {
+        "blues": {
+          "default": 0.2,
+          "format": "double",
+          "type": "number"
+        },
+        "cyans": {
+          "default": 0.6,
+          "format": "double",
+          "type": "number"
+        },
+        "greens": {
+          "default": 0.4,
+          "format": "double",
+          "type": "number"
+        },
+        "magentas": {
+          "default": 0.8,
+          "format": "double",
+          "type": "number"
+        },
+        "reds": {
+          "default": 0.4,
+          "description": "-2-3 each; 0.5 leaves the luminance alone, more brightens that hue, less darkens it.",
+          "format": "double",
+          "type": "number"
+        },
+        "tint": {
+          "default": false,
+          "description": "Colour the greyscale with the hue and saturation of `tint_color`.",
+          "type": "boolean"
+        },
+        "tintColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.6,
+            "g": 0.76,
+            "r": 0.88,
+            "space": "srgb"
+          }
+        },
+        "yellows": {
+          "default": 0.6,
+          "format": "double",
+          "type": "number"
+        }
+      },
       "type": "object"
     },
     "BlendMode": {
@@ -515,6 +681,466 @@
       },
       "type": "object"
     },
+    "BroadcastAction": {
+      "description": "What Broadcast Colors does to a colour whose signal is too high.",
+      "oneOf": [
+        {
+          "const": "reduce-luminance",
+          "description": "Scale the whole colour down.",
+          "type": "string"
+        },
+        {
+          "const": "reduce-saturation",
+          "description": "Pull the colour towards grey until it fits.",
+          "type": "string"
+        },
+        {
+          "const": "key-out-unsafe",
+          "description": "Make the unsafe pixels transparent.",
+          "type": "string"
+        },
+        {
+          "const": "key-out-safe",
+          "description": "Make the safe pixels transparent.",
+          "type": "string"
+        }
+      ]
+    },
+    "BroadcastColors": {
+      "description": "Broadcast Colors: finds colours whose luma plus chroma goes over the maximum signal\namplitude of the chosen standard, and reduces or keys them.",
+      "properties": {
+        "howToMakeSafe": {
+          "$ref": "#/$defs/BroadcastAction",
+          "default": "reduce-luminance"
+        },
+        "locale": {
+          "$ref": "#/$defs/BroadcastLocale",
+          "default": "ntsc"
+        },
+        "maxSignal": {
+          "default": 110.0,
+          "description": "IRE, 90-120.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "BroadcastLocale": {
+      "description": "The broadcast standard Broadcast Colors measures against.",
+      "oneOf": [
+        {
+          "const": "ntsc",
+          "description": "NTSC: 7.5 IRE setup, chroma as I and Q.",
+          "type": "string"
+        },
+        {
+          "const": "pal",
+          "description": "PAL: no setup, chroma as U and V.",
+          "type": "string"
+        }
+      ]
+    },
+    "CcColorNeutralizer": {
+      "description": "CC Color Neutralizer: moves the shadows, midtones and highlights each by the difference between\na balance colour and an unbalance colour (the cast to take out and the colour it should be).",
+      "properties": {
+        "blendWithOriginal": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "brights": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "contrast": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "darks": {
+          "default": 0.0,
+          "description": "-1 to 1.",
+          "format": "double",
+          "type": "number"
+        },
+        "highlightsBalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "highlightsUnbalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "midtonesBalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.5,
+            "g": 0.5,
+            "r": 0.5,
+            "space": "srgb"
+          }
+        },
+        "midtonesUnbalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.5,
+            "g": 0.5,
+            "r": 0.5,
+            "space": "srgb"
+          }
+        },
+        "pinning": {
+          "default": 0.0,
+          "description": "0-1: keeps pure black and pure white where they are.",
+          "format": "double",
+          "type": "number"
+        },
+        "shadowsBalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "shadowsUnbalance": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        }
+      },
+      "type": "object"
+    },
+    "CcColorOffset": {
+      "description": "CC Color Offset: adds a phase to each channel (a full turn is the whole range), so a colour\ncycles through the range.",
+      "properties": {
+        "bluePhase": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "greenPhase": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "overflow": {
+          "$ref": "#/$defs/ColorOverflow",
+          "default": "wrap"
+        },
+        "redPhase": {
+          "default": 0.0,
+          "description": "Degrees: 360 is a whole turn of the range.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcThreshold": {
+      "description": "CC Threshold: black and white by whether the chosen channel reaches the level.",
+      "properties": {
+        "blend": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "channel": {
+          "$ref": "#/$defs/ThresholdChannel",
+          "default": "luminance"
+        },
+        "invert": {
+          "default": false,
+          "type": "boolean"
+        },
+        "threshold": {
+          "default": 127.0,
+          "description": "0-255, as the level is set on an 8-bit picture.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcThresholdRgb": {
+      "description": "CC Threshold RGB: each of red, green and blue made 0 or 1 at its own level.",
+      "properties": {
+        "blend": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "blueThreshold": {
+          "default": 127.0,
+          "format": "double",
+          "type": "number"
+        },
+        "greenThreshold": {
+          "default": 127.0,
+          "format": "double",
+          "type": "number"
+        },
+        "invertBlue": {
+          "default": false,
+          "type": "boolean"
+        },
+        "invertGreen": {
+          "default": false,
+          "type": "boolean"
+        },
+        "invertRed": {
+          "default": false,
+          "type": "boolean"
+        },
+        "redThreshold": {
+          "default": 127.0,
+          "description": "0-255 each.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcToner": {
+      "description": "CC Toner: maps the luminance of each pixel onto two, three or five colours, `blend` of the way\nback to the original.",
+      "properties": {
+        "blend": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back.",
+          "format": "double",
+          "type": "number"
+        },
+        "brights": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.64,
+            "g": 0.78,
+            "r": 0.86,
+            "space": "srgb"
+          }
+        },
+        "darktones": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.1,
+            "g": 0.18,
+            "r": 0.26,
+            "space": "srgb"
+          }
+        },
+        "highlights": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "midtones": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.28,
+            "g": 0.43,
+            "r": 0.55,
+            "space": "srgb"
+          }
+        },
+        "shadows": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "tones": {
+          "$ref": "#/$defs/TonerTones",
+          "default": "tritone"
+        }
+      },
+      "type": "object"
+    },
+    "ChangeColor": {
+      "description": "Change Color: shifts the hue, lightness and saturation of the pixels that match one colour,\nsoftly at the edge of the match.",
+      "properties": {
+        "colorToChange": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.2,
+            "g": 0.2,
+            "r": 0.8,
+            "space": "srgb"
+          }
+        },
+        "hueTransform": {
+          "default": 0.0,
+          "description": "Degrees; hue wraps.",
+          "format": "double",
+          "type": "number"
+        },
+        "invertMask": {
+          "default": false,
+          "description": "Change everything but the match.",
+          "type": "boolean"
+        },
+        "lightnessTransform": {
+          "default": 0.0,
+          "description": "-1-1: a share of the way to white (or to black).",
+          "format": "double",
+          "type": "number"
+        },
+        "matchColors": {
+          "$ref": "#/$defs/ChangeMatch",
+          "default": "hue"
+        },
+        "matchingSoftness": {
+          "default": 0.0,
+          "description": "0-1: the fade from a full match to none, past the tolerance.",
+          "format": "double",
+          "type": "number"
+        },
+        "matchingTolerance": {
+          "default": 0.15,
+          "description": "0-1: how far from the colour a pixel may be and still match fully.",
+          "format": "double",
+          "type": "number"
+        },
+        "saturationTransform": {
+          "default": 0.0,
+          "description": "-1-1: a share of the way to full (or no) saturation.",
+          "format": "double",
+          "type": "number"
+        },
+        "view": {
+          "$ref": "#/$defs/ChangeColorView",
+          "default": "corrected-layer"
+        }
+      },
+      "type": "object"
+    },
+    "ChangeColorView": {
+      "description": "What Change Color shows.",
+      "oneOf": [
+        {
+          "const": "corrected-layer",
+          "description": "The picture with the change applied.",
+          "type": "string"
+        },
+        {
+          "const": "color-correction-mask",
+          "description": "The matte of what matches, white on black.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeMatch": {
+      "description": "How Change Color decides a pixel is the colour to change.",
+      "oneOf": [
+        {
+          "const": "rgb",
+          "description": "Distance in RGB.",
+          "type": "string"
+        },
+        {
+          "const": "hue",
+          "description": "Distance in hue only (greys match no hue).",
+          "type": "string"
+        },
+        {
+          "const": "chroma",
+          "description": "Distance in chromaticity, whatever the brightness.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChannelMixer": {
+      "description": "Channel Mixer: each output channel is a weighted sum of the input channels. With\n`monochrome` the red row drives all three.",
+      "properties": {
+        "blue": {
+          "$ref": "#/$defs/MixerRow",
+          "default": {
+            "blue": 1.0,
+            "constant": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        },
+        "green": {
+          "$ref": "#/$defs/MixerRow",
+          "default": {
+            "blue": 0.0,
+            "constant": 0.0,
+            "green": 1.0,
+            "red": 0.0
+          }
+        },
+        "monochrome": {
+          "default": false,
+          "type": "boolean"
+        },
+        "red": {
+          "$ref": "#/$defs/MixerRow",
+          "default": {
+            "blue": 0.0,
+            "constant": 0.0,
+            "green": 0.0,
+            "red": 1.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "ChannelSource": {
+      "description": "Where Shift Channels takes a channel's value from.",
+      "enum": [
+        "alpha",
+        "red",
+        "green",
+        "blue",
+        "luminance",
+        "hue",
+        "lightness",
+        "saturation",
+        "full-on",
+        "half-on",
+        "full-off"
+      ],
+      "type": "string"
+    },
     "CloseScene": {
       "description": "Close a session; a dirty session refuses unless `force`.",
       "properties": {
@@ -529,6 +1155,241 @@
         "session",
         "force"
       ],
+      "type": "object"
+    },
+    "ColorBalance": {
+      "description": "Color Balance: shifts the shadows, midtones and highlights (by luminance) toward a colour.",
+      "properties": {
+        "highlights": {
+          "$ref": "#/$defs/ColorShift",
+          "default": {
+            "blue": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        },
+        "midtones": {
+          "$ref": "#/$defs/ColorShift",
+          "default": {
+            "blue": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        },
+        "preserveLuminosity": {
+          "default": true,
+          "description": "Keep each pixel's luminance and change only its colour.",
+          "type": "boolean"
+        },
+        "shadows": {
+          "$ref": "#/$defs/ColorShift",
+          "default": {
+            "blue": 0.0,
+            "green": 0.0,
+            "red": 0.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "ColorBalanceHls": {
+      "description": "Color Balance (HLS): shifts hue, lightness and saturation of every pixel. Lightness and\nsaturation move a share of the way to the extreme (or to zero); hue wraps.",
+      "properties": {
+        "hue": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "lightness": {
+          "default": 0.0,
+          "description": "-1-1.",
+          "format": "double",
+          "type": "number"
+        },
+        "saturation": {
+          "default": 0.0,
+          "description": "-1-1.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ColorDiffView": {
+      "description": "Which stage of Color Difference Key Color Difference Key shows. (EffectCraft also has a\nfour-up view; it needs each pixel's position, so it comes with the coordinate pass.)",
+      "oneOf": [
+        {
+          "enum": [
+            "uncorrected-matte-a",
+            "corrected-matte-a",
+            "uncorrected-matte-b",
+            "corrected-matte-b",
+            "uncorrected-matte",
+            "corrected-matte"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "source",
+          "description": "The picture as it came in.",
+          "type": "string"
+        },
+        {
+          "const": "final-output",
+          "description": "The picture with the key applied.",
+          "type": "string"
+        }
+      ]
+    },
+    "ColorDifferenceKey": {
+      "description": "Color Difference Key: the difference between the key colour's strongest channel and each of\nthe other two is a partial matte (A against the first other channel, B against the second);\nthe larger of the two, after their own levels, is the matte, which has levels of its own.",
+      "properties": {
+        "colorMatchingAccuracy": {
+          "$ref": "#/$defs/MatchAccuracy",
+          "default": "faster"
+        },
+        "keyColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "matteBlack": {
+          "default": 0.0,
+          "description": "The matte's own levels (its output stays 0 to 255): input black and white, and gamma.",
+          "format": "double",
+          "type": "number"
+        },
+        "matteGamma": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "matteWhite": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "partialA": {
+          "$ref": "#/$defs/MatteLevels",
+          "default": {
+            "gamma": 1.0,
+            "inBlack": 0.0,
+            "inWhite": 255.0,
+            "outBlack": 0.0,
+            "outWhite": 255.0
+          }
+        },
+        "partialB": {
+          "$ref": "#/$defs/MatteLevels",
+          "default": {
+            "gamma": 1.0,
+            "inBlack": 0.0,
+            "inWhite": 255.0,
+            "outBlack": 0.0,
+            "outWhite": 255.0
+          }
+        },
+        "view": {
+          "$ref": "#/$defs/ColorDiffView",
+          "default": "final-output"
+        }
+      },
+      "type": "object"
+    },
+    "ColorOverflow": {
+      "description": "What CC Color Offset does with a channel pushed past white.",
+      "oneOf": [
+        {
+          "const": "wrap",
+          "description": "Start again from black.",
+          "type": "string"
+        },
+        {
+          "const": "solarize",
+          "description": "Fold back down from white.",
+          "type": "string"
+        },
+        {
+          "const": "polarize",
+          "description": "Snap to black or white.",
+          "type": "string"
+        }
+      ]
+    },
+    "ColorRange": {
+      "description": "Color Range: keys out every pixel inside a box in a colour space, fading over the fuzziness\npast the box. All bounds are on the 0 to 255 scale of the space chosen, whose three axes are\nnamed L, a, b for Lab; Y, U, V for YUV; and R, G, B for RGB.",
+      "properties": {
+        "colorSpace": {
+          "$ref": "#/$defs/RangeSpace",
+          "default": "lab"
+        },
+        "fuzziness": {
+          "default": 0.0,
+          "description": "0-255: the fade past the box, in the same units. 0 is a hard edge.",
+          "format": "double",
+          "type": "number"
+        },
+        "maxA": {
+          "default": 100.0,
+          "format": "double",
+          "type": "number"
+        },
+        "maxB": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "maxL": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "minA": {
+          "default": 0.0,
+          "description": "On the second axis (a, U or G).",
+          "format": "double",
+          "type": "number"
+        },
+        "minB": {
+          "default": 128.0,
+          "description": "On the third axis (b, V or B).",
+          "format": "double",
+          "type": "number"
+        },
+        "minL": {
+          "default": 0.0,
+          "description": "The box's lower and upper bound on the first axis (L, Y or R).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ColorShift": {
+      "description": "A colour shift for one tonal range, -1-1 per channel.",
+      "properties": {
+        "blue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "green": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "red": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
       "type": "object"
     },
     "ColorValue": {
@@ -1329,6 +2190,44 @@
       ],
       "type": "object"
     },
+    "EditPath": {
+      "description": "One semantic operation on one path (11.107, the Pen spec's path\ncommands): insert, delete or convert vertices, set a handle, move\nvertices, reshape a segment, reverse, restart or close. `target`\nnames a shape's subpath or a mask; the result is checked as\n`setShapePath` or `setObjectMasks` checks it.",
+      "properties": {
+        "baseRevision": {
+          "description": "For a path that is linked (11.112): the revision the edit was made on. The edit is refused when the\nshared path has been edited since.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "frame": {
+          "description": "The frame an edit of an animated path is made at (11.112): a\nmove, handle or kind edit sets the key there; an edit of which\nvertices there are (insert, delete, reverse, first vertex,\nclose) lands in every key at once. Left out, the path is static.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "#/$defs/PathOp"
+        },
+        "target": {
+          "$ref": "#/$defs/PathTarget"
+        }
+      },
+      "required": [
+        "objectId",
+        "target",
+        "op"
+      ],
+      "type": "object"
+    },
     "EditProperty": {
       "description": "A property value edit; with `autoKey` it also upserts a key at `frame`.",
       "properties": {
@@ -1680,6 +2579,344 @@
             "effect"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Tritone",
+          "properties": {
+            "effect": {
+              "const": "tritone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ChannelMixer",
+          "properties": {
+            "effect": {
+              "const": "channel-mixer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorBalance",
+          "properties": {
+            "effect": {
+              "const": "color-balance",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/GammaPedestalGain",
+          "properties": {
+            "effect": {
+              "const": "gamma-pedestal-gain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorBalanceHls",
+          "properties": {
+            "effect": {
+              "const": "color-balance-hls",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BlackWhite",
+          "properties": {
+            "effect": {
+              "const": "black-white",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PhotoFilter",
+          "properties": {
+            "effect": {
+              "const": "photo-filter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LeaveColor",
+          "properties": {
+            "effect": {
+              "const": "leave-color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/VideoLimiter",
+          "properties": {
+            "effect": {
+              "const": "video-limiter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BroadcastColors",
+          "properties": {
+            "effect": {
+              "const": "broadcast-colors",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcToner",
+          "properties": {
+            "effect": {
+              "const": "cc-toner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcColorOffset",
+          "properties": {
+            "effect": {
+              "const": "cc-color-offset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcThreshold",
+          "properties": {
+            "effect": {
+              "const": "cc-threshold",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcThresholdRgb",
+          "properties": {
+            "effect": {
+              "const": "cc-threshold-rgb",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ChangeColor",
+          "properties": {
+            "effect": {
+              "const": "change-color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ShiftChannels",
+          "properties": {
+            "effect": {
+              "const": "shift-channels",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LinearColorKey",
+          "properties": {
+            "effect": {
+              "const": "linear-color-key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RemoveColorMatting",
+          "properties": {
+            "effect": {
+              "const": "remove-color-matting",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Extract",
+          "properties": {
+            "effect": {
+              "const": "extract",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CcColorNeutralizer",
+          "properties": {
+            "effect": {
+              "const": "cc-color-neutralizer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Unmult",
+          "properties": {
+            "effect": {
+              "const": "unmult",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SpillSuppressor",
+          "properties": {
+            "effect": {
+              "const": "spill-suppressor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorRange",
+          "properties": {
+            "effect": {
+              "const": "color-range",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Arithmetic",
+          "properties": {
+            "effect": {
+              "const": "arithmetic",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ColorDifferenceKey",
+          "properties": {
+            "effect": {
+              "const": "color-difference-key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SelectiveColor",
+          "properties": {
+            "effect": {
+              "const": "selective-color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -1691,6 +2928,16 @@
           "default": true,
           "description": "A disabled effect is skipped entirely. Keyframable with hold keys.",
           "type": "boolean"
+        },
+        "maskIds": {
+          "description": "Mask Reference (3.28): the ids of masks of the same object that limit\nthis effect. The effect shows only where they cover, the rest of the\nlayer keeps what it was before this effect. Absent or empty: the whole\nlayer. A referenced mask counts even in mode `none`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1758,6 +3005,578 @@
           "type": "number"
         }
       },
+      "type": "object"
+    },
+    "Extract": {
+      "description": "Extract: keeps the pixels whose chosen channel lies between the black and white points (0 to\n255) and fades the rest over the softness.",
+      "properties": {
+        "blackPoint": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "blackSoftness": {
+          "default": 0.0,
+          "description": "0-255: the fade below the black point.",
+          "format": "double",
+          "type": "number"
+        },
+        "channel": {
+          "$ref": "#/$defs/ExtractChannel",
+          "default": "luminance"
+        },
+        "invert": {
+          "default": false,
+          "type": "boolean"
+        },
+        "whitePoint": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "whiteSoftness": {
+          "default": 0.0,
+          "description": "0-255: the fade above the white point.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ExtractChannel": {
+      "description": "What Extract measures.",
+      "enum": [
+        "luminance",
+        "red",
+        "green",
+        "blue",
+        "alpha"
+      ],
+      "type": "string"
+    },
+    "FeatherPoint": {
+      "description": "A point of a mask's variable feather (11.108, Masking spec v2 4.6): where on the mask's path it sits (segment `segment`, parameter `t`),\nhow far the edge softens there and how smoothly that blends into the next point.",
+      "properties": {
+        "radius": {
+          "description": "Signed, in pixels of the layer: positive softens the edge outward, negative inward; the transition spans `|radius|` on that\nside only. Zero is a hard edge there.",
+          "format": "double",
+          "type": "number"
+        },
+        "segment": {
+          "description": "The segment of the mask's path the point is on.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "t": {
+          "description": "Where on that segment, 0 to 1.",
+          "format": "double",
+          "type": "number"
+        },
+        "tension": {
+          "default": 0.0,
+          "description": "0 to 1: how the radius changes toward the next point: 0 in a straight line, 1 smoothly (smoothstep).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "segment",
+        "t",
+        "radius"
+      ],
+      "type": "object"
+    },
+    "FigmaColor": {
+      "description": "A colour as Figma's plugin API reports it: `0..1` per channel, sRGB.",
+      "properties": {
+        "a": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "b": {
+          "format": "double",
+          "type": "number"
+        },
+        "g": {
+          "format": "double",
+          "type": "number"
+        },
+        "r": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "r",
+        "g",
+        "b"
+      ],
+      "type": "object"
+    },
+    "FigmaEffect": {
+      "description": "A layer effect.",
+      "oneOf": [
+        {
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/FigmaColor"
+            },
+            "offsetX": {
+              "format": "double",
+              "type": "number"
+            },
+            "offsetY": {
+              "format": "double",
+              "type": "number"
+            },
+            "radius": {
+              "format": "double",
+              "type": "number"
+            },
+            "spread": {
+              "default": 0.0,
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "drop-shadow",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "color",
+            "offsetX",
+            "offsetY",
+            "radius"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/FigmaColor"
+            },
+            "offsetX": {
+              "format": "double",
+              "type": "number"
+            },
+            "offsetY": {
+              "format": "double",
+              "type": "number"
+            },
+            "radius": {
+              "format": "double",
+              "type": "number"
+            },
+            "spread": {
+              "default": 0.0,
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "inner-shadow",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "color",
+            "offsetX",
+            "offsetY",
+            "radius"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "radius": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "layer-blur",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "radius"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "radius": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "background-blur",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "radius"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FigmaNode": {
+      "description": "One node of the frame, in Figma's own vocabulary.",
+      "properties": {
+        "blendMode": {
+          "default": "",
+          "description": "Figma's blend mode name: `PASS_THROUGH`, `NORMAL`, `MULTIPLY`, `SCREEN`, `OVERLAY`...",
+          "type": "string"
+        },
+        "children": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FigmaNode"
+          },
+          "type": "array"
+        },
+        "clipsContent": {
+          "default": false,
+          "type": "boolean"
+        },
+        "cornerRadii": {
+          "default": null,
+          "description": "Top-left, top-right, bottom-right, bottom-left, when the corners differ.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "cornerRadius": {
+          "default": 0.0,
+          "description": "One radius for all four corners.",
+          "format": "double",
+          "type": "number"
+        },
+        "effects": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FigmaEffect"
+          },
+          "type": "array"
+        },
+        "fills": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FigmaPaint"
+          },
+          "type": "array"
+        },
+        "height": {
+          "format": "double",
+          "type": "number"
+        },
+        "id": {
+          "description": "Figma's node id, such as `3300:2528`. It is the scene object's id, so a re-import lines up.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`frame`, `group`, `section`, `component`, `instance`, `rectangle`, `rounded-rectangle`,\n`ellipse`, `text`, `vector`, `line`, `star`, `polygon` or `boolean-operation`.",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "opacity": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "rotation": {
+          "default": 0.0,
+          "description": "Figma's rotation in degrees (counter-clockwise positive), about the node's top-left.",
+          "format": "double",
+          "type": "number"
+        },
+        "strokeAlign": {
+          "default": "",
+          "description": "`center`, `inside` or `outside`.",
+          "type": "string"
+        },
+        "strokeWeight": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "strokes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FigmaPaint"
+          },
+          "type": "array"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FigmaText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Present on a text node."
+        },
+        "visible": {
+          "default": true,
+          "type": "boolean"
+        },
+        "width": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "default": 0.0,
+          "description": "Relative to the root frame's top-left.",
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "FigmaPaint": {
+      "description": "One paint of a fill or a stroke.",
+      "oneOf": [
+        {
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/FigmaColor"
+            },
+            "opacity": {
+              "default": 1.0,
+              "description": "The paint's own opacity, on top of the colour's alpha.",
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "solid",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "color"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A linear gradient across the node's box at `angle` degrees, clockwise from the\npositive X axis (0 runs left to right, 90 top to bottom).",
+          "properties": {
+            "angle": {
+              "format": "double",
+              "type": "number"
+            },
+            "opacity": {
+              "default": 1.0,
+              "format": "double",
+              "type": "number"
+            },
+            "stops": {
+              "items": {
+                "$ref": "#/$defs/FigmaStop"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "linear-gradient",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "angle",
+            "stops"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A radial gradient centred in the node's box, reaching its edges.",
+          "properties": {
+            "opacity": {
+              "default": 1.0,
+              "format": "double",
+              "type": "number"
+            },
+            "stops": {
+              "items": {
+                "$ref": "#/$defs/FigmaStop"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "radial-gradient",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "stops"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A picture fill. `image` names a PNG or WebP in the project's `Images/<frame>/` folder\n(the file name without its extension, as exported from Figma); the ingest finds it\nthere and draws it. A picture that is not there is named on the report with the path\nto file it at.",
+          "properties": {
+            "image": {
+              "description": "Figma's `imageHash`, or the file name the agent exported the picture to.",
+              "type": "string"
+            },
+            "scaleMode": {
+              "default": "",
+              "description": "Figma's scale mode: `fill` (the default), `fit`, `crop` or `tile`.",
+              "type": "string"
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            },
+            "visible": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "image"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FigmaStop": {
+      "description": "One stop of a gradient.",
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/FigmaColor"
+        },
+        "position": {
+          "description": "`0..1` along the gradient.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "position",
+        "color"
+      ],
+      "type": "object"
+    },
+    "FigmaText": {
+      "description": "A text node's content and style.",
+      "properties": {
+        "align": {
+          "default": "",
+          "description": "`left`, `center`, `right` or `justified`.",
+          "type": "string"
+        },
+        "characters": {
+          "type": "string"
+        },
+        "decoration": {
+          "default": "",
+          "description": "`underline`, `strikethrough` or empty.",
+          "type": "string"
+        },
+        "fontFamily": {
+          "type": "string"
+        },
+        "fontSize": {
+          "format": "double",
+          "type": "number"
+        },
+        "fontStyle": {
+          "default": "",
+          "description": "Figma's style name: `Regular`, `Bold`, `Bold Italic`, `SemiBold`, `Light`...",
+          "type": "string"
+        },
+        "letterSpacingPx": {
+          "default": 0.0,
+          "description": "Letter spacing in pixels.",
+          "format": "double",
+          "type": "number"
+        },
+        "lineHeightPx": {
+          "default": null,
+          "description": "Line height in pixels; absent means the font's own.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "textCase": {
+          "default": "",
+          "description": "`upper`, `lower`, `title` or empty for as typed.",
+          "type": "string"
+        },
+        "verticalAlign": {
+          "default": "",
+          "description": "`top`, `center` or `bottom`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "characters",
+        "fontFamily",
+        "fontSize"
+      ],
       "type": "object"
     },
     "Fill": {
@@ -2064,6 +3883,66 @@
       ],
       "type": "string"
     },
+    "GammaChannel": {
+      "description": "One channel of Gamma/Pedestal/Gain: `pedestal + (gain - pedestal) * v^gamma`.",
+      "properties": {
+        "gain": {
+          "default": 1.0,
+          "description": "0-10, the value white maps to.",
+          "format": "double",
+          "type": "number"
+        },
+        "gamma": {
+          "default": 1.0,
+          "description": "0.01-10; 1 is linear.",
+          "format": "double",
+          "type": "number"
+        },
+        "pedestal": {
+          "default": 0.0,
+          "description": "-1-1, the value black maps to.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "GammaPedestalGain": {
+      "description": "Gamma/Pedestal/Gain, per colour channel, with a Black Stretch that lifts low values.",
+      "properties": {
+        "blackStretch": {
+          "default": 0.0,
+          "description": "0-10: lifts the dark end of every channel; 0 is off.",
+          "format": "double",
+          "type": "number"
+        },
+        "blue": {
+          "$ref": "#/$defs/GammaChannel",
+          "default": {
+            "gain": 1.0,
+            "gamma": 1.0,
+            "pedestal": 0.0
+          }
+        },
+        "green": {
+          "$ref": "#/$defs/GammaChannel",
+          "default": {
+            "gain": 1.0,
+            "gamma": 1.0,
+            "pedestal": 0.0
+          }
+        },
+        "red": {
+          "$ref": "#/$defs/GammaChannel",
+          "default": {
+            "gain": 1.0,
+            "gamma": 1.0,
+            "pedestal": 0.0
+          }
+        }
+      },
+      "type": "object"
+    },
     "GaussianBlur": {
       "properties": {
         "blurriness": {
@@ -2108,6 +3987,27 @@
           "type": "number"
         }
       },
+      "type": "object"
+    },
+    "GoToHistoryStep": {
+      "description": "Take a session to the state just after one step of its change history (11.82),\nor to before every listed step when `step` is left out. It is what the right\nnumber of undos or redos gives, done in one replay: every step up to and\nincluding the named one is applied (one a module-scoped undo had skipped too),\nand every later step is undone and can be redone in its order. The jump is not\nitself a step, and going to where the session already is changes nothing. A\nreplay that refuses changes nothing (`historyConflict`); a step the history no\nlonger lists refuses `historyStepUnknown`.",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionKey"
+        },
+        "step": {
+          "description": "The step's `id` from [`HistoryView`]; left out for the scene as opened.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session"
+      ],
       "type": "object"
     },
     "GradientCoordinateMode": {
@@ -2194,6 +4094,38 @@
       ],
       "type": "object"
     },
+    "GuideAxis": {
+      "description": "Which way a guide runs.",
+      "oneOf": [
+        {
+          "const": "x",
+          "description": "A vertical line at an x position.",
+          "type": "string"
+        },
+        {
+          "const": "y",
+          "description": "A horizontal line at a y position.",
+          "type": "string"
+        }
+      ]
+    },
+    "HandleCoupling": {
+      "description": "How the far handle follows (see [`Coupling`]), on the wire.",
+      "enum": [
+        "none",
+        "smooth",
+        "mirror"
+      ],
+      "type": "string"
+    },
+    "HandleSide": {
+      "description": "Which handle of a vertex.",
+      "enum": [
+        "in",
+        "out"
+      ],
+      "type": "string"
+    },
     "HueSaturation": {
       "description": "Hue/Saturation, master controls and Colorize.",
       "properties": {
@@ -2240,6 +4172,95 @@
       },
       "type": "object"
     },
+    "ImportAsset": {
+      "description": "File one file into a project (11.43), from a file on this machine: a picture\n(png, webp, jpg, jpeg, svg) into `Assets/Images`, a video (mp4, mov, avi, webm) into\n`Assets/Videos`, audio (wav, mp3) into `Assets/Audio`, a 3D model (gltf, glb, obj, fbx,\nstl, ply, dae, usd, usdz) into `Assets/Models`, or a font (otf, ttf, woff, woff2)\ninto `Fonts`. The bytes decide which, not the name. The same bytes filed again are a\nno-op, and different bytes under an existing name refuse. The outcome's imported\neffect names the filed path and its content hash.",
+      "properties": {
+        "folder": {
+          "default": "",
+          "description": "One folder name under the class folder (a Figma frame's name, say); empty for\nthe class folder itself.",
+          "type": "string"
+        },
+        "from": {
+          "description": "An absolute path to the file on this machine.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The file name to file it under; the source file's name when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "type": "string"
+        },
+        "source": {
+          "description": "What the file came from (a Figma node, a URL), kept in its record.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project",
+        "from"
+      ],
+      "type": "object"
+    },
+    "ImportFigma": {
+      "description": "Ingest one Figma frame into a new stored scene (18.2, 18.3). The user's own agent\nreads the frame through Figma's MCP and passes the text of `get_metadata` as\n`metadata`; GrapiX holds no Figma token and makes no network call. The frame becomes\nthe canvas (its width and height), its nodes become objects at their Figma positions,\nand the report names everything `get_metadata` does not carry (fills, text content,\nfonts, radii, clipping). The metadata text is retained in the project by content\nhash. Refuses an existing id; one frame per call.",
+      "properties": {
+        "frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FigmaNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The full-fidelity route: the frame as the agent read it through Figma's MCP\n(fills, strokes, radii, text, fonts, blend modes), in the typed shape of\n[`FigmaNode`]. Exactly one of `frame` and `metadata` is given."
+        },
+        "imageFolder": {
+          "description": "The folder under `Images` the frame's pictures are filed in; the root frame's\nname when absent. A picture fill's `image` is looked up there as `<image>.png`,\nthen `<image>.webp`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metadata": {
+          "description": "The structure-only route: the reply of Figma's `get_metadata` for the frame,\nas received. Positions and nesting only, with no paint and no text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The scene's display name; the Figma frame's name when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "type": "string"
+        },
+        "sceneId": {
+          "type": "string"
+        },
+        "sourceName": {
+          "description": "What to call the retained source, for example the frame's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "sceneId",
+        "sourceName"
+      ],
+      "type": "object"
+    },
     "ImportScene": {
       "description": "Import an SVG into a new stored scene through the four-tier\npipeline (7.2). The source is adopted into the project by content\nhash; the report is an `Imported` effect. Refuses an existing id.",
       "properties": {
@@ -2270,6 +4291,32 @@
         "sourceName",
         "svg"
       ],
+      "type": "object"
+    },
+    "InkShift": {
+      "description": "One colour range's adjustment in print inks, -1 to 1 each (-100% to 100%). Positive adds the\nink, negative removes it. `black` moves all three colour channels together.",
+      "properties": {
+        "black": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "cyan": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "magenta": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "yellow": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
       "type": "object"
     },
     "Invert": {
@@ -2344,6 +4391,30 @@
       },
       "type": "object"
     },
+    "KeyMatch": {
+      "description": "How Linear Color Key measures how far a pixel is from the key colour.",
+      "enum": [
+        "rgb",
+        "hue",
+        "chroma"
+      ],
+      "type": "string"
+    },
+    "KeyOperation": {
+      "description": "Which side of the key Linear Color Key makes transparent.",
+      "oneOf": [
+        {
+          "const": "key-colors",
+          "description": "The colours that match go transparent.",
+          "type": "string"
+        },
+        {
+          "const": "keep-colors",
+          "description": "Only the colours that match stay.",
+          "type": "string"
+        }
+      ]
+    },
     "KeyRef": {
       "description": "One authored key a capture names: a property and the frame it sits on.",
       "properties": {
@@ -2361,6 +4432,79 @@
         "frame"
       ],
       "type": "object"
+    },
+    "KeyView": {
+      "description": "What a keyer shows.",
+      "oneOf": [
+        {
+          "const": "final-output",
+          "description": "The picture with the key applied.",
+          "type": "string"
+        },
+        {
+          "const": "source-only",
+          "description": "The picture as it came in.",
+          "type": "string"
+        },
+        {
+          "const": "matte-only",
+          "description": "The matte: white where the picture is kept, on opaque black.",
+          "type": "string"
+        }
+      ]
+    },
+    "LeaveColor": {
+      "description": "Leave Color: greys everything but one colour. `tolerance` is how far a pixel may be from it and\nkeep its colour; `edge_softness` fades the rest in over that much more.",
+      "properties": {
+        "amount": {
+          "default": 0.0,
+          "description": "0-1: how much of the greying is applied; 0 leaves the picture alone.",
+          "format": "double",
+          "type": "number"
+        },
+        "color": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "edgeSoftness": {
+          "default": 0.0,
+          "description": "0-1.",
+          "format": "double",
+          "type": "number"
+        },
+        "matchColors": {
+          "$ref": "#/$defs/LeaveMatch",
+          "default": "rgb"
+        },
+        "tolerance": {
+          "default": 0.15,
+          "description": "0-1.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "LeaveMatch": {
+      "description": "How Leave Color decides a pixel is the colour to keep.",
+      "oneOf": [
+        {
+          "const": "rgb",
+          "description": "Distance in RGB.",
+          "type": "string"
+        },
+        {
+          "const": "hue",
+          "description": "Distance in hue only (greys match no hue).",
+          "type": "string"
+        }
+      ]
     },
     "Levels": {
       "description": "Levels: the RGB controls map every colour channel, then each channel's\nown; the alpha controls map coverage where the layer drew.",
@@ -2499,6 +4643,88 @@
         }
       ]
     },
+    "LimiterCompression": {
+      "description": "How far below the clip level the soft knee starts.",
+      "enum": [
+        "none",
+        "3",
+        "5",
+        "10",
+        "20"
+      ],
+      "type": "string"
+    },
+    "LimiterLevel": {
+      "description": "The level Video Limiter clips to, as a share of white.",
+      "enum": [
+        "90",
+        "95",
+        "100",
+        "105",
+        "109"
+      ],
+      "type": "string"
+    },
+    "LimiterMethod": {
+      "description": "What Video Limiter limits: brightness, colour, or both.",
+      "oneOf": [
+        {
+          "const": "luma",
+          "description": "Compress the luminance, keep each channel's offset from it.",
+          "type": "string"
+        },
+        {
+          "const": "chroma",
+          "description": "Pull the colour towards its luminance until every channel fits.",
+          "type": "string"
+        },
+        {
+          "const": "smart-limit",
+          "description": "Both, luminance first.",
+          "type": "string"
+        }
+      ]
+    },
+    "LinearColorKey": {
+      "description": "Linear Color Key: makes the pixels near one colour transparent (or keeps only them), fading\nover the softness past the tolerance.",
+      "properties": {
+        "keyColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "keyOperation": {
+          "$ref": "#/$defs/KeyOperation",
+          "default": "key-colors"
+        },
+        "matchColors": {
+          "$ref": "#/$defs/KeyMatch",
+          "default": "rgb"
+        },
+        "softness": {
+          "default": 0.1,
+          "description": "0-1: the fade past the tolerance.",
+          "format": "double",
+          "type": "number"
+        },
+        "tolerance": {
+          "default": 0.1,
+          "description": "0-1: how far from the key a pixel may be and still be keyed out fully.",
+          "format": "double",
+          "type": "number"
+        },
+        "view": {
+          "$ref": "#/$defs/KeyView",
+          "default": "final-output"
+        }
+      },
+      "type": "object"
+    },
     "LinearWipe": {
       "properties": {
         "angle": {
@@ -2522,6 +4748,22 @@
       },
       "type": "object"
     },
+    "LinkPaths": {
+      "description": "Make `target`'s path the same path as `source`'s (11.112): the numbers of `source` are copied in and the\ntwo are one linked path from then on, an edit of either changing both. A mask is given an id when it has\nnone. Refused when either path is animated or `target` is linked already.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/PathAddress"
+        },
+        "target": {
+          "$ref": "#/$defs/PathAddress"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "type": "object"
+    },
     "Mask": {
       "description": "One layer mask (3.19): a closed path in the object's own coordinates.",
       "properties": {
@@ -2531,11 +4773,47 @@
           "format": "double",
           "type": "number"
         },
+        "falloff": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MaskFalloff"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the feather falls off (3.27); a Gaussian when absent."
+        },
         "feather": {
           "default": 0.0,
           "description": "Softens the edge: a Gaussian blur of the mask's coverage, in pixels\n(the blur's standard deviation is half of it).",
           "format": "double",
           "type": "number"
+        },
+        "featherPoints": {
+          "description": "Variable feather (11.108): when there are points, the edge softens by the amount the points give along the path (blended around\nthe closed contour by distance along it) instead of by `feather`, which then does nothing. Absent or empty: the uniform feather.",
+          "items": {
+            "$ref": "#/$defs/FeatherPoint"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "featherY": {
+          "description": "The feather across the other axis, in pixels; absent, the same as\n`feather` (3.27). Both are in the object's own pixels, so the viewer's\nzoom never changes them.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "A name that stays with the mask when the stack is reordered or renamed,\nwhich an effect's mask reference points at (3.28). Absent for a mask\nnothing refers to; unique within the object when present.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "inverted": {
           "default": false,
@@ -2558,6 +4836,21 @@
         "path"
       ],
       "type": "object"
+    },
+    "MaskFalloff": {
+      "description": "How a mask's feather falls off across its edge (3.27, Masking spec v2).",
+      "oneOf": [
+        {
+          "const": "smooth",
+          "description": "A Gaussian: the edge ramps like an S, softest at the ends.",
+          "type": "string"
+        },
+        {
+          "const": "linear",
+          "description": "A box of the feather's width: the edge ramps in a straight line.",
+          "type": "string"
+        }
+      ]
     },
     "MaskMode": {
       "description": "How a mask combines with the masks above it (3.19), After Effects' modes.",
@@ -2584,10 +4877,88 @@
         },
         {
           "const": "difference",
-          "description": "Keeps where exactly one of it and the masks above covers.",
+          "description": "Keeps where exactly one of it and the masks above covers; on soft\ncoverage the absolute difference of the two (the Masking spec v2's\nbaseline, `|a - c|`).",
+          "type": "string"
+        },
+        {
+          "const": "lighten",
+          "description": "Keeps the larger of its coverage and the masks above's.",
+          "type": "string"
+        },
+        {
+          "const": "darken",
+          "description": "Keeps the smaller of its coverage and the masks above's.",
           "type": "string"
         }
       ]
+    },
+    "MatchAccuracy": {
+      "description": "How exactly Color Difference Key measures colour: on the values as they are, or on light.",
+      "enum": [
+        "faster",
+        "more-accurate"
+      ],
+      "type": "string"
+    },
+    "MatteLevels": {
+      "description": "A levels control on a matte: input black and white and output black and white on a 0 to 255\nscale, and a gamma.",
+      "properties": {
+        "gamma": {
+          "default": 1.0,
+          "description": "0.01-10; 1 is linear.",
+          "format": "double",
+          "type": "number"
+        },
+        "inBlack": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "inWhite": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        },
+        "outBlack": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "outWhite": {
+          "default": 255.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "MixerRow": {
+      "description": "One output channel's mix: how much of each input channel it takes, plus a constant.",
+      "properties": {
+        "blue": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "constant": {
+          "default": 0.0,
+          "description": "-2-2, added after the mix.",
+          "format": "double",
+          "type": "number"
+        },
+        "green": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "red": {
+          "default": 0.0,
+          "description": "-2-2 each, 1 is the whole channel.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
     },
     "MotionTokens": {
       "description": "Motion tokens: the primitives every preset composes from (G.6.1).\n\nDurations and staggers are milliseconds. Easings are cubic-bezier control\npoints, or the literal `hold` for a phase that must not interpolate.",
@@ -2621,6 +4992,25 @@
       ],
       "type": "object"
     },
+    "MoveGuide": {
+      "description": "Move a guide to another position.",
+      "properties": {
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "position": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "position"
+      ],
+      "type": "object"
+    },
     "MoveKeyframe": {
       "properties": {
         "fromFrame": {
@@ -2643,6 +5033,34 @@
       "required": [
         "objectId",
         "property",
+        "fromFrame",
+        "toFrame"
+      ],
+      "type": "object"
+    },
+    "MovePathKey": {
+      "description": "Move a path key to another frame (11.112); a frame that has a key\nalready is refused, as `moveKeyframe` refuses it.",
+      "properties": {
+        "fromFrame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/PathTarget"
+        },
+        "toFrame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "objectId",
+        "target",
         "fromFrame",
         "toFrame"
       ],
@@ -2976,6 +5394,334 @@
       ],
       "type": "string"
     },
+    "PathAddress": {
+      "description": "A path in the scene, addressed from outside by its place in its object (`target`).",
+      "properties": {
+        "objectId": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/PathTarget"
+        }
+      },
+      "required": [
+        "objectId",
+        "target"
+      ],
+      "type": "object"
+    },
+    "PathOp": {
+      "description": "One semantic change to one path. Each is exact and refuses by name what\nit cannot do; a whole gesture is one of these, so one undo step.",
+      "oneOf": [
+        {
+          "description": "A vertex on `segment` at `t`, the curve unchanged (De Casteljau).",
+          "properties": {
+            "op": {
+              "const": "insertVertex",
+              "type": "string"
+            },
+            "segment": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "t": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "op",
+            "segment",
+            "t"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Vertices taken out; the curves beside them join with their handles.",
+          "properties": {
+            "indices": {
+              "items": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "deleteVertices",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "indices"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A corner made smooth, or a vertex with handles made a corner.",
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "convertVertex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "index"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A vertex taken out with one curve fitted over the two beside it, kept only when the shape stays within `tolerance` (11.113).",
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "deleteKeepShape",
+              "type": "string"
+            },
+            "tolerance": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "op",
+            "index",
+            "tolerance"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One handle set to `vector` (an offset from its vertex).",
+          "properties": {
+            "coupling": {
+              "$ref": "#/$defs/HandleCoupling",
+              "default": "none"
+            },
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "setHandle",
+              "type": "string"
+            },
+            "side": {
+              "$ref": "#/$defs/HandleSide"
+            },
+            "vector": {
+              "$ref": "#/$defs/Vec2"
+            }
+          },
+          "required": [
+            "op",
+            "index",
+            "side",
+            "vector"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Vertices moved by `delta`, their handles with them.",
+          "properties": {
+            "delta": {
+              "$ref": "#/$defs/Vec2"
+            },
+            "indices": {
+              "items": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "moveVertices",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "indices",
+            "delta"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The curve dragged at `t` of `segment` by `delta`; its ends stay.",
+          "properties": {
+            "delta": {
+              "$ref": "#/$defs/Vec2"
+            },
+            "op": {
+              "const": "reshapeSegment",
+              "type": "string"
+            },
+            "segment": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "t": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "op",
+            "segment",
+            "t",
+            "delta"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The same outline drawn the other way.",
+          "properties": {
+            "op": {
+              "const": "reverse",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A closed path started from vertex `index`.",
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "setFirstVertex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "index"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The path closed or opened.",
+          "properties": {
+            "closed": {
+              "type": "boolean"
+            },
+            "op": {
+              "const": "setClosed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "closed"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A vertex given a kind: corner, smooth, symmetric or auto (11.113).",
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/$defs/VertexKind"
+            },
+            "op": {
+              "const": "setVertexKind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "index",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The tension of the path's `auto` vertices, 0 to 1 (11.113).",
+          "properties": {
+            "op": {
+              "const": "setAutoTension",
+              "type": "string"
+            },
+            "tension": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "op",
+            "tension"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PathTarget": {
+      "description": "Which path of an object an `editPath` edit changes.",
+      "oneOf": [
+        {
+          "description": "A shape's path: `subpath` 0 is its main path, 1 and on its compound\nsubpaths in order.",
+          "properties": {
+            "kind": {
+              "const": "shape",
+              "type": "string"
+            },
+            "subpath": {
+              "default": 0,
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One of the object's masks, by its place in the list.",
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "mask",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "index"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "PhaseKind": {
       "description": "The operator phases a scene timeline can name.\n\nThese are exactly `crate::mcp::MOTION_PHASES`, and a test below pins them\nagainst it: a phase added to one and not the other fails the gate rather\nthan producing a scene the agent surface cannot describe.",
       "oneOf": [
@@ -3005,6 +5751,64 @@
           "type": "string"
         }
       ]
+    },
+    "PhotoFilter": {
+      "description": "Photo Filter: multiplies the picture by a filter colour, `density` of the way, optionally\nkeeping the pixel's luminance.",
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.09,
+            "g": 0.54,
+            "r": 0.93,
+            "space": "srgb"
+          },
+          "description": "Used when `filter` is `custom`."
+        },
+        "density": {
+          "default": 0.25,
+          "description": "0-1.",
+          "format": "double",
+          "type": "number"
+        },
+        "filter": {
+          "$ref": "#/$defs/PhotoFilterPreset",
+          "default": "warming-85"
+        },
+        "preserveLuminosity": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "PhotoFilterPreset": {
+      "description": "The camera and colour filters Photo Filter offers. `Custom` uses the effect's own colour.",
+      "enum": [
+        "warming-85",
+        "warming-lba",
+        "warming-81",
+        "cooling-80",
+        "cooling-lbb",
+        "cooling-82",
+        "red",
+        "orange",
+        "yellow",
+        "green",
+        "cyan",
+        "blue",
+        "violet",
+        "magenta",
+        "sepia",
+        "deep-red",
+        "deep-blue",
+        "deep-emerald",
+        "deep-yellow",
+        "underwater",
+        "custom"
+      ],
+      "type": "string"
     },
     "Posterize": {
       "description": "Posterize: each colour channel snaps to `level` evenly spaced values.",
@@ -3084,6 +5888,26 @@
         "radial"
       ],
       "type": "string"
+    },
+    "RangeSpace": {
+      "description": "The colour space Color Range measures a pixel in. Lab is the default.",
+      "oneOf": [
+        {
+          "const": "lab",
+          "description": "CIE Lab, scaled so L runs 0 to 255 and a and b are centred on 128.",
+          "type": "string"
+        },
+        {
+          "const": "yuv",
+          "description": "Y, U and V, with U and V centred on 128.",
+          "type": "string"
+        },
+        {
+          "const": "rgb",
+          "description": "Red, green and blue, 0 to 255.",
+          "type": "string"
+        }
+      ]
     },
     "RationalRate": {
       "description": "A frame rate as an exact rational. Never a float (invariant 12).\n\n29.97 is 30000/1001 and cannot be represented in binary floating point.\nAccumulating a rounded rate across an 8-hour soak drifts the clock, so this\ntype deliberately offers no `f64` constructor.",
@@ -3167,6 +5991,27 @@
       ],
       "type": "object"
     },
+    "RemoveColorMatting": {
+      "description": "Remove Color Matting: takes a background colour back out of a picture that was matted against\nit, so its edges stop carrying a halo.",
+      "properties": {
+        "backgroundColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "clipHdr": {
+          "default": true,
+          "description": "Keep every channel at or under the alpha.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "RemoveControl": {
       "properties": {
         "fieldId": {
@@ -3187,6 +6032,20 @@
       },
       "required": [
         "fontId"
+      ],
+      "type": "object"
+    },
+    "RemoveGuide": {
+      "description": "Take a guide off the canvas.",
+      "properties": {
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
       ],
       "type": "object"
     },
@@ -3211,6 +6070,28 @@
       ],
       "type": "object"
     },
+    "RemovePathKey": {
+      "description": "Take one path key off a path channel (11.112). The last key's\nremoval ends the channel and leaves the path as that key had it.",
+      "properties": {
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/PathTarget"
+        }
+      },
+      "required": [
+        "objectId",
+        "target",
+        "frame"
+      ],
+      "type": "object"
+    },
     "RemovePhase": {
       "properties": {
         "address": {
@@ -3219,6 +6100,24 @@
       },
       "required": [
         "address"
+      ],
+      "type": "object"
+    },
+    "RemoveSubpath": {
+      "description": "Take one subpath out of a compound shape (11.112): the others keep their contour ids, and the path channels and links of\nthe shape follow them to their new places; those of the subpath taken out end with it. A shape keeps at least one path.",
+      "properties": {
+        "shapeId": {
+          "type": "string"
+        },
+        "subpath": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shapeId",
+        "subpath"
       ],
       "type": "object"
     },
@@ -3437,6 +6336,19 @@
           "required": [
             "to",
             "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Save the session as the next numbered version of itself (11.30), and continue in it.\n\nA scene stored in a project is written, with its unsaved edits, as a new stored scene under\nthe next free id (`strap` gives `strap_v002`, `strap_v003` gives `strap_v004`, and a number\nalready taken is passed over) with the name numbered the same way. The version it came from\nis not written to: it stays exactly as it was last saved. The session then belongs to the\nnew scene and starts a fresh history, because the scene it edits has a new identity. A scene\nsaved to a file is written beside it as the next numbered file (`strap.json` gives\n`strap_v002.json`), and the session continues in that file with its history. A scene that has\nnever been saved has no version to number from and refuses `sessionUnbound`. A failed write\nchanges nothing.",
+          "properties": {
+            "to": {
+              "const": "nextVersion",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to"
           ],
           "type": "object"
         }
@@ -3820,6 +6732,19 @@
           "type": "object"
         },
         {
+          "$ref": "#/$defs/SetSceneLabel",
+          "properties": {
+            "edit": {
+              "const": "setSceneLabel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/SetSceneId",
           "properties": {
             "edit": {
@@ -3976,6 +6901,19 @@
           "type": "object"
         },
         {
+          "$ref": "#/$defs/SetPreserveTransparency",
+          "properties": {
+            "edit": {
+              "const": "setPreserveTransparency",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/SetTrim",
           "properties": {
             "edit": {
@@ -4058,6 +6996,136 @@
           "properties": {
             "edit": {
               "const": "setShapePath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/EditPath",
+          "properties": {
+            "edit": {
+              "const": "editPath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LinkPaths",
+          "properties": {
+            "edit": {
+              "const": "linkPaths",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/UnlinkPath",
+          "properties": {
+            "edit": {
+              "const": "unlinkPath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/AddGuide",
+          "properties": {
+            "edit": {
+              "const": "addGuide",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MoveGuide",
+          "properties": {
+            "edit": {
+              "const": "moveGuide",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RemoveGuide",
+          "properties": {
+            "edit": {
+              "const": "removeGuide",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RemoveSubpath",
+          "properties": {
+            "edit": {
+              "const": "removeSubpath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetPathKey",
+          "properties": {
+            "edit": {
+              "const": "setPathKey",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RemovePathKey",
+          "properties": {
+            "edit": {
+              "const": "removePathKey",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MovePathKey",
+          "properties": {
+            "edit": {
+              "const": "movePathKey",
               "type": "string"
             }
           },
@@ -4234,6 +7302,105 @@
           "type": "object"
         }
       ]
+    },
+    "SelectiveColor": {
+      "description": "Selective Color: changes the amount of cyan, magenta, yellow and black ink in one range of\ncolours without touching the others. A pixel belongs to the primary and secondary range its\nhue falls in, to whites by how light its darkest channel is, to blacks by how dark its\nlightest channel is, and to neutrals by how close it sits to mid grey; the ranges' shifts are\nsummed by those weights.",
+      "properties": {
+        "blacks": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "blues": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "cyans": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "greens": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "magentas": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "method": {
+          "$ref": "#/$defs/SelectiveMethod",
+          "default": "relative"
+        },
+        "neutrals": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "reds": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "whites": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        },
+        "yellows": {
+          "$ref": "#/$defs/InkShift",
+          "default": {
+            "black": 0.0,
+            "cyan": 0.0,
+            "magenta": 0.0,
+            "yellow": 0.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "SelectiveMethod": {
+      "description": "How Selective Color reads its adjustments: a share of the ink a pixel already has\n(Relative), or a flat amount (Absolute).",
+      "enum": [
+        "relative",
+        "absolute"
+      ],
+      "type": "string"
     },
     "SessionKey": {
       "description": "Identity of one open editor session. A `u32`, so TS receives `number`\nrather than `bigint` (memory rule 22). Keys are monotonic from 1.",
@@ -4514,6 +7681,46 @@
       ],
       "type": "object"
     },
+    "SetPathKey": {
+      "description": "Put a whole path key on a path channel (11.112), creating the\nchannel on its first key. A key at a frame that has one replaces it.",
+      "properties": {
+        "bezier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CubicBezier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "easing": {
+          "$ref": "#/$defs/SceneEasing",
+          "default": "linear"
+        },
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/BezierPath"
+        },
+        "target": {
+          "$ref": "#/$defs/PathTarget"
+        }
+      },
+      "required": [
+        "objectId",
+        "target",
+        "frame",
+        "path"
+      ],
+      "type": "object"
+    },
     "SetPhase": {
       "properties": {
         "phase": {
@@ -4522,6 +7729,22 @@
       },
       "required": [
         "phase"
+      ],
+      "type": "object"
+    },
+    "SetPreserveTransparency": {
+      "description": "Turn Preserve Underlying Transparency on or off for one layer (3.28).",
+      "properties": {
+        "objectId": {
+          "type": "string"
+        },
+        "preserve": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "objectId",
+        "preserve"
       ],
       "type": "object"
     },
@@ -4534,6 +7757,18 @@
       },
       "required": [
         "id"
+      ],
+      "type": "object"
+    },
+    "SetSceneLabel": {
+      "description": "Change the Scene ID, the label a person edits (1.13). Nothing that points at the scene changes. An empty label takes it away.",
+      "properties": {
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
       ],
       "type": "object"
     },
@@ -4666,6 +7901,28 @@
       ],
       "type": "object"
     },
+    "ShiftChannels": {
+      "description": "Shift Channels: each of alpha, red, green and blue takes its value from any channel of the\npixel (or a constant). The defaults take each from itself.",
+      "properties": {
+        "takeAlphaFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "alpha"
+        },
+        "takeBlueFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "blue"
+        },
+        "takeGreenFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "green"
+        },
+        "takeRedFrom": {
+          "$ref": "#/$defs/ChannelSource",
+          "default": "red"
+        }
+      },
+      "type": "object"
+    },
     "SourceColorSpace": {
       "description": "What a colour or a texture was authored in. There is no `Unknown`: an\nuntagged source is a defect the importer must refuse, not a value a\nrenderer may guess at (B.1, \"never infer\").",
       "oneOf": [
@@ -4691,6 +7948,47 @@
           "type": "string"
         }
       ]
+    },
+    "SpillAccuracy": {
+      "description": "How exactly Spill Suppressor finds the spill.",
+      "oneOf": [
+        {
+          "const": "faster",
+          "description": "The key's strongest channel is held to the larger of the other two.",
+          "type": "string"
+        },
+        {
+          "const": "better",
+          "description": "The part of each pixel that points along the key's colour is removed.",
+          "type": "string"
+        }
+      ]
+    },
+    "SpillSuppressor": {
+      "description": "Spill Suppressor: takes the cast of a keyed screen's colour out of the picture.",
+      "properties": {
+        "colorAccuracy": {
+          "$ref": "#/$defs/SpillAccuracy",
+          "default": "faster"
+        },
+        "colorToSuppress": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "suppression": {
+          "default": 1.0,
+          "description": "0-2: how much of the spill goes.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
     },
     "StrokeCap": {
       "description": "How a stroke ends an open path and each dash. SVG's and CSS's names.",
@@ -4895,6 +8193,28 @@
       },
       "type": "object"
     },
+    "ThresholdChannel": {
+      "description": "What CC Threshold compares with the level.",
+      "oneOf": [
+        {
+          "enum": [
+            "luminance",
+            "saturation"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "rgb",
+          "description": "Each of red, green and blue on its own.",
+          "type": "string"
+        },
+        {
+          "const": "alpha",
+          "description": "The coverage: the result is hard-edged.",
+          "type": "string"
+        }
+      ]
+    },
     "TimelinePhase": {
       "description": "One named span of the scene timeline.",
       "properties": {
@@ -4980,6 +8300,26 @@
       "description": "A token reference in a preset: `{duration.base}`, `{easing.brand-in}`.\n\nA preset that hardcodes a value instead of referencing a token is a bug for\nthe same reason a component hardcoding a hex colour is (G.6.1). Kept as a\nstring with a checked shape rather than a free string, so a malformed\nreference is caught at parse, not at render.",
       "type": "string"
     },
+    "TonerTones": {
+      "description": "How many colours CC Toner maps the tones of the picture to.",
+      "oneOf": [
+        {
+          "const": "duotone",
+          "description": "Shadows and highlights.",
+          "type": "string"
+        },
+        {
+          "const": "tritone",
+          "description": "Shadows, midtones and highlights.",
+          "type": "string"
+        },
+        {
+          "const": "pentone",
+          "description": "Shadows, darktones, midtones, brights and highlights.",
+          "type": "string"
+        }
+      ]
+    },
     "TrackMatte": {
       "description": "A layer's track matte (3.19): its source by explicit id, and the mode.",
       "properties": {
@@ -5020,6 +8360,48 @@
           "type": "string"
         }
       ]
+    },
+    "Tritone": {
+      "description": "Tritone: luminance maps to a ramp shadows, midtones, highlights; `blend_with_original`\nbrings the original colour back. The colours' alpha is not used.",
+      "properties": {
+        "blendWithOriginal": {
+          "default": 0.0,
+          "description": "0-1: how much of the original comes back; 0 is the full ramp.",
+          "format": "double",
+          "type": "number"
+        },
+        "highlights": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "midtones": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.5,
+            "g": 0.5,
+            "r": 0.5,
+            "space": "srgb"
+          }
+        },
+        "shadows": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        }
+      },
+      "type": "object"
     },
     "Undo": {
       "description": "Reverse the latest applied batch, or the latest one `module` issued.",
@@ -5064,6 +8446,62 @@
         "value"
       ],
       "type": "object"
+    },
+    "UnlinkPath": {
+      "description": "Take one path out of its link (11.112): it keeps the path it has, and is independent from then on.",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/PathAddress"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "Unmult": {
+      "description": "Unmult: turns the distance from a black or white background into coverage, and (by default)\ntakes the background back out of the colour.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/UnmultBackground",
+          "default": "black"
+        },
+        "blackLevel": {
+          "default": 0.0,
+          "description": "0-1: how bright a pixel on a black background has to be to start to show.",
+          "format": "double",
+          "type": "number"
+        },
+        "clipHdr": {
+          "default": true,
+          "type": "boolean"
+        },
+        "removeColorMatting": {
+          "default": true,
+          "type": "boolean"
+        },
+        "softness": {
+          "default": 1.0,
+          "description": "0-1: the ramp from clear to solid.",
+          "format": "double",
+          "type": "number"
+        },
+        "whiteLevel": {
+          "default": 1.0,
+          "description": "0-1: how far from white a pixel on a white background has to be to start to show.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "UnmultBackground": {
+      "description": "The colour Unmult takes out of the picture.",
+      "enum": [
+        "black",
+        "white"
+      ],
+      "type": "string"
     },
     "UpdateFont": {
       "description": "Change a font's display name, fallbacks or enabled state (11.13).\nSwitching off a font something names is refused, as removing it is.",
@@ -5136,6 +8574,31 @@
       ],
       "type": "object"
     },
+    "VertexKind": {
+      "description": "How a path vertex's handles behave (11.113, pen spec v2 section 4).",
+      "oneOf": [
+        {
+          "const": "corner",
+          "description": "Handles move independently (or are absent).",
+          "type": "string"
+        },
+        {
+          "const": "smooth",
+          "description": "Handles stay collinear and opposite; each keeps its own length.",
+          "type": "string"
+        },
+        {
+          "const": "symmetric",
+          "description": "Handles stay collinear, opposite and of equal length.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Handles are derived from the neighbours; stored ones are ignored.",
+          "type": "string"
+        }
+      ]
+    },
     "Vibrance": {
       "description": "Vibrance: saturation weighted `(1 - s) * min(s, 0.5)`: a grey and a fully\nsaturated colour are left alone, and a half-saturated one gains most.",
       "properties": {
@@ -5150,6 +8613,38 @@
           "description": "-1–1, weighted toward low-saturation pixels.",
           "format": "double",
           "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "VideoLimiter": {
+      "description": "Video Limiter: keeps every pixel inside a legal range, softly bending the highlights first;\noptionally paints the pixels it had to change in a warning colour.",
+      "properties": {
+        "clipLevel": {
+          "$ref": "#/$defs/LimiterLevel",
+          "default": "100"
+        },
+        "clipMethod": {
+          "$ref": "#/$defs/LimiterMethod",
+          "default": "smart-limit"
+        },
+        "compressionBeforeClipping": {
+          "$ref": "#/$defs/LimiterCompression",
+          "default": "5"
+        },
+        "gamutWarning": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gamutWarningColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
         }
       },
       "type": "object"
@@ -5339,6 +8834,45 @@
       "properties": {
         "command": {
           "const": "importScene",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/ImportFigma",
+      "properties": {
+        "command": {
+          "const": "importFigma",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/ImportAsset",
+      "properties": {
+        "command": {
+          "const": "importAsset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/GoToHistoryStep",
+      "properties": {
+        "command": {
+          "const": "goToHistoryStep",
           "type": "string"
         }
       },

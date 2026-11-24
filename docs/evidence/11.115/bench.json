@@ -1,0 +1,6 @@
+[
+ { "vertices": 10, "hoverP50Ms": 0.005, "hoverP95Ms": 0.008, "hoverMaxMs": 0.272, "dragOpP95Ms": 0.008 },
+ { "vertices": 100, "hoverP50Ms": 0.032, "hoverP95Ms": 0.054, "hoverMaxMs": 0.431, "dragOpP95Ms": 0.025 },
+ { "vertices": 1000, "hoverP50Ms": 0.031, "hoverP95Ms": 0.077, "hoverMaxMs": 1.502, "dragOpP95Ms": 0.152 },
+ { "vertices": 10000, "hoverP50Ms": 0.195, "hoverP95Ms": 0.436, "hoverMaxMs": 3.76, "dragOpP95Ms": 2.423 }
+]

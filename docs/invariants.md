@@ -222,3 +222,97 @@ already obeys it.
     invariant 18 to the glyph: a covered font that lacks a glyph renders tofu
     or a fallback face, and either is different pixels. Planned — enforced by
     11.42 and 11.51.
+
+## Carried over from `memory.md` (moved by build plan 0.12, 19 November 2026)
+
+These were rules 10 to 29 of `memory.md`, which called them binding while saying it grants
+no authority. They are stated here, once, in their original words. The rest of that list
+was already here (rule 8 is invariants 8 and 9, rule 9 is 46, rule 12 is 56, rule 18 is 21)
+or is working procedure (rules 1 to 7 and 15), now in `AGENTS.md` and `memory.md`.
+
+67. The control plane has an L0 transport; the asset and media planes do not.
+    Do not describe those two as transported.
+68. The L0 transport is loopback TCP, not the named pipe ADR-001 specifies.
+    Say so when describing L0 security posture.
+69. The credential is a shared bearer token over an unencrypted socket. Never
+    describe it as mTLS, and never describe L1 as ready.
+70. `docs/adr/0002-platform-and-mcp-schema.md` is the accepted handoff and its
+    **Part E is the definition of done**. Verify against it; do not claim an
+    item without execution evidence.
+71. The structured refusal envelope is `StructuredRefusal` in `gx-contracts`
+    (0.6). It uses `allowed`, never `supported` — that inconsistency is
+    settled. The severity type is `RefusalSeverity`; `Severity` stays with
+    clock health. Optional fields are `Option<T>` with `skip_serializing_if`
+    **and** `#[ts(optional)]` — ts-rs cannot see serde's skip attribute, and
+    one without the other makes the TS shape lie about the wire.
+72. CI-only done-when criteria (0.3, 0.4) are not closable from a workstation.
+    Mark `active` with the workflow committed and every locally observable
+    half verified; `done` needs the CI run's green check plus the SBOM
+    artifact, which only exists after a push. Do not mark them `done` because
+    the YAML looks right.
+73. A failing-over-the-wire check that unit tests pass is usually a stale
+    spawned binary, not a contract break. Rebuild and re-run before treating
+    a wire failure as a serialisation bug — the conformance engine is a real
+    child process and cargo does not rebuild it between runs of the harness.
+74. **Hierarchy resolution walks from the roots, never down the array.** A
+    child may be declared before its parent; resolving in array order makes it
+    a root and silently drops the parent's transform. Duplicate ids keep the
+    *first* object, which is what 1.x did and what keeps resolution
+    deterministic while an invalid scene is being repaired.
+75. **A kind must never redeclare an `ObjectBase` field.** With
+    `#[serde(flatten)]` both are emitted, the reader keeps the last, and an
+    authored value is silently lost. `fill` was declared twice until 1.2. The
+    catalogue round-trip test uses a fully populated base so any recurrence
+    fails.
+76. **The generated TS maps `u64` to `bigint`; JSON gives `number`.** That
+    affects `Revision`, `Epoch`, `Sequence`, frame numbers, `durationFrames`
+    and `sizeBytes` — twelve types. The mapping is deliberate and consistent;
+    the conversion is owed by the TypeScript client codec, which does not exist
+    yet. Do not "fix" it with a cast in a test.
+77. **Never assign a wire literal with `as unknown as T` in a TypeScript
+    contract test.** A double cast type-checks anything; it hid two real drifts
+    until 1.2 replaced it with a direct assignment. Assign directly and let the
+    compiler do the work.
+78. Photoshop layer styles and blending options are owned by **11.60** (added
+    12 October 2026 at the user's request), the effects library by 3.22 and
+    11.62, and text animators by 11.61. Layer masks are owned by 11.47 and
+    asset provenance by 11.39 (merged 2 October 2026).
+79. **`serde_json` needs `float_roundtrip` and it is not cosmetic.** Every
+    scene object flattens `ObjectBase`, and `#[serde(flatten)]` forces
+    deserialisation through `deserialize_any`, whose default float parser is
+    accurate to a ULP rather than exact. Without the feature a scene written
+    and read back is a different scene, and a content hash over the
+    re-serialised document differs from the original's — a `.gpxpkg` manifest
+    would be wrong about its own contents. `scene.rs` has the regression test.
+80. **A worker the test harness leaks holds `gx-render-worker.exe` open**, so
+    the next `cargo build` fails with "access is denied" and the *next* test
+    run gets a stale binary it then hangs against. `start_worker` in
+    `services/render-engine/host/tests/ensure.rs` owns the child from spawn,
+    not from successful connect; if you see the access error, kill the image
+    with `taskkill /F /IM gx-render-worker.exe` before rebuilding.
+81. **The capability exchange declares what a device measured, not what a
+    build enabled** (invariant 21). An engine with no rasteriser declares
+    `MaterialSupport::none()`, and a validator refusing every mode against
+    that list is the correct answer, not a degraded one.
+82. **The render core is GPU-first and GrapiX-owned (ADR-0003, 12 October
+    2026).** Never add an EffectCraft crate as a product dependency: port a
+    component under its owning step, with attribution, stripping its silent
+    fallbacks. A CPU full-frame path is a reference, never Program's backend.
+83. **Colour follows the project's working space** (3.15; ADR-0002 B.1 as
+    amended 12 October 2026). Do not reintroduce "composite in linear,
+    always"; 3D shading alone is linear inside its pass.
+84. **Every Program command names the person who sent it, and the engine refuses one that
+    does not.** Cue, take, clear, a phase and an output change travel with the signed-in
+    operator (`gx_contracts::auth::OperatorName`), judged by the transport after the credential
+    and its scope and before the engine sees the request: `OperatorRequired` or
+    `OperatorNameInvalid`, by name. A name is an identity for the record and grants nothing;
+    the credential's subject is recorded beside it (`control.program_command`) and the
+    credential itself never is. Enforced by 2.15 (19 November 2026); the as-run record (12.11)
+    is built on it.
+85. **The MCP HTTP transport verifies a gx1 credential on every request, and a call is gated by
+    the scopes that credential grants.** HTTP is a port any local process can reach: a request
+    with no credential, one made with another secret, or one under another scheme is refused by
+    name (401 and the `unauthenticated` refusal) before the protocol sees it, and the server
+    refuses to start HTTP without a secret. The server's built-in scopes apply to stdio only.
+    The record names the credential's subject, never the credential. Enforced by 2.23
+    (19 November 2026).

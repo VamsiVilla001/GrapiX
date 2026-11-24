@@ -85,6 +85,22 @@ pub fn bound(value: f32) -> f32 {
     value
 }
 
+/// One pixel as a project's colour depth stores it (8 and 16 bit round half up
+/// to a whole level and hold 0-1; 32 bit is unchanged). Applied to every
+/// layer's blend result and every effect pass's output, so a lower depth is
+/// what the Editor shows, not only what a render writes.
+pub fn store_pixel(depth: gx_contracts::color::ColorDepth, p: WorkingRgba) -> WorkingRgba {
+    if !depth.is_integer() {
+        return p;
+    }
+    WorkingRgba {
+        r: depth.store(p.r),
+        g: depth.store(p.g),
+        b: depth.store(p.b),
+        a: depth.store(p.a),
+    }
+}
+
 /// A fixed per-pixel threshold in [0, 1) for Dissolve. `x` and `y` are the
 /// stage pixel's integer index: a hash key, never a coordinate in float math.
 pub fn hash_noise(x: u32, y: u32, seed: u32) -> f32 {

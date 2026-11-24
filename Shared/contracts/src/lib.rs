@@ -20,20 +20,29 @@ pub mod effect;
 pub mod effect_catalog;
 pub mod endpoints;
 pub mod enforce;
+pub mod figma_frame;
 pub mod font;
 pub mod font_edit;
+pub mod cue_suggest;
+pub mod ids;
 pub mod import;
 pub mod material;
+pub mod matte_view;
 pub mod material_edit;
 pub mod mcp;
 pub mod object_edit;
 pub mod package;
+pub mod path_anim;
+pub mod path_geometry;
+pub mod path_link;
+pub mod svg_path;
 pub mod phases;
 pub mod platform;
 pub mod project;
 pub mod provenance;
 pub mod render_edit;
 pub mod scene;
+pub mod settings;
 pub mod text_style;
 pub mod validate;
 
@@ -712,6 +721,44 @@ pub enum Refusal {
         required: Option<auth::Scope>,
         role: auth::Role,
     },
+    /// A Program command (cue, take, clear, a phase or an output change) arrived with no
+    /// operator on it (2.15). Every such command carries the person who sent it, so the
+    /// as-run record names the person and not only the credential; sign in to Playout
+    /// first. Checked by the transport before the engine sees the request.
+    OperatorRequired { request: String },
+    /// A Program command named an operator the rules do not accept (2.15):
+    /// `fault` says which rule.
+    OperatorNameInvalid {
+        request: String,
+        fault: auth::OperatorNameFault,
+    },
+    /// The engine is shedding non-live work so Program stays on time (3.24): a headless render,
+    /// a preview or a scene publication was refused at the level named, and may be asked again
+    /// after `retry_after_ms`. Program is never refused by this.
+    LoadShed {
+        request: String,
+        level: String,
+        retry_after_ms: u32,
+    },
+    /// A command was aimed at a channel this engine does not have (12.10, decision Q8): only
+    /// the Program channel exists. `channel` is the name as sent, cut short and escaped.
+    ChannelNotSupported { request: String, channel: String },
+    /// A command was aimed at a layer the engine does not draw (12.10): only the Program
+    /// channel's main layer is drawn until the engine composes layers.
+    LayerNotSupported { request: String, layer: String },
+    /// A Cue ID the operator typed breaks a rule (1.13): `fault` says which. `cue_id` is the text as typed, cut short.
+    CueIdInvalid { cue_id: String, fault: ids::IdFault },
+    /// A Cue ID the show already has, without regard to case (1.13). `held_by` is the key of the scene that holds it.
+    CueIdDuplicate { cue_id: String, held_by: TakeId },
+    /// A Cue ID, or the scene it calls, was changed or taken out while its cue is on air (1.13). Take it off air first.
+    CueIdLockedOnAir { cue_id: String },
+    /// A Cue ID the show does not have (1.13).
+    UnknownCueId { cue_id: String },
+    /// A bulk Cue ID plan (12.15) is not the plan the show would make now: a Cue ID was typed, taken or put on air since the preview, or
+    /// the plan was changed on the way back. Ask for the preview again.
+    CuePlanStale,
+    /// A Scene ID (the label a person edits, 1.13) breaks a rule: `fault` says which. `label` is the text as typed, cut short.
+    SceneLabelInvalid { label: String, fault: ids::IdFault },
     /// A stop request arrived while a scene is on Program (2.19). Stopping the
     /// engine would take Program off air, so it is refused by name: clear
     /// Program first, or stop the engine at its console.
@@ -886,6 +933,12 @@ pub enum Refusal {
         direction: command::HistoryDirection,
         detail: String,
     },
+    /// A jump named a step the session's change history does not list (11.82): it was
+    /// dropped when a new edit forked the history, or folded in past the history limit.
+    HistoryStepUnknown {
+        session: command::SessionKey,
+        step: u32,
+    },
     /// A create would overwrite a scene that is already stored.
     SceneAlreadyExists { project: String, scene_id: String },
     /// A project create names a project that already exists.
@@ -1017,6 +1070,14 @@ pub enum Refusal {
         scene: crate::color::WorkingColorSpace,
         project_space: crate::color::WorkingColorSpace,
     },
+    /// A scene's colour depth differs from its project's. Saving or opening
+    /// it would put one project's graphics on air rounded two different ways.
+    SceneColorDepthMismatch {
+        project: String,
+        scene_id: String,
+        scene: crate::color::ColorDepth,
+        project_depth: crate::color::ColorDepth,
+    },
     /// A shape's Trim Paths value is outside its domain (3.13): start and end
     /// are percentages in 0–100 and every value is finite. Clamping it would
     /// draw a window nobody authored. `value` is the authored number as text.
@@ -1063,6 +1124,19 @@ pub enum Refusal {
     /// build reads. Reading it as if absent would compose every scene in the
     /// wrong space.
     ProjectSettingsInvalid { project: String, detail: String },
+    /// An application setting (2.28) is not known, or its value is the wrong kind or outside its
+    /// range. `key` is the setting as written in the settings file; nothing was changed.
+    SettingInvalid { key: String, detail: String },
+    /// A saved workspace (2.29) cannot be kept: its id is not a safe file name, or the document is not a
+    /// workspace of this schema, or it is larger than the limit. `detail` says which; nothing was written.
+    WorkspaceInvalid { id: String, detail: String },
+    /// A saved workspace is from a newer build than this one writes (2.29). The file is left as it is, and
+    /// this build writes nothing over it.
+    WorkspaceNewer {
+        id: String,
+        found: u32,
+        supported: u32,
+    },
     /// An `addAssets` edit carries no assets. An empty add would only make an
     /// undo entry that changes nothing.
     AssetBatchEmpty,
@@ -1398,6 +1472,50 @@ impl std::fmt::Display for Refusal {
             Refusal::MediaTransportUnavailable { detail } => {
                 write!(f, "media transport unavailable: {detail}")
             }
+            Refusal::OperatorRequired { request } => write!(
+                f,
+                "{request} carries no operator: sign in to Playout, so the command names the person who sent it"
+            ),
+            Refusal::OperatorNameInvalid { request, fault } => {
+                write!(f, "{request} names an operator the rules do not accept: {fault}")
+            }
+            Refusal::LoadShed {
+                request,
+                level,
+                retry_after_ms,
+            } => write!(
+                f,
+                "{request} is refused while the engine sheds load ({level}): ask again in {retry_after_ms} ms"
+            ),
+            Refusal::ChannelNotSupported { request, channel } => write!(
+                f,
+                "{request} is aimed at the channel \"{channel}\": only the program channel exists"
+            ),
+            Refusal::LayerNotSupported { request, layer } => write!(
+                f,
+                "{request} is aimed at the layer \"{layer}\": only the main layer of the program channel is drawn"
+            ),
+            Refusal::CueIdInvalid { cue_id, fault } => {
+                write!(f, "the Cue ID \"{cue_id}\" is refused: {fault}")
+            }
+            Refusal::CueIdDuplicate { cue_id, held_by } => write!(
+                f,
+                "the Cue ID \"{cue_id}\" is already used in this show, by the scene {held_by}: a Cue ID is unique within a show, whatever its case"
+            ),
+            Refusal::CueIdLockedOnAir { cue_id } => write!(
+                f,
+                "the Cue ID \"{cue_id}\" is on air: it cannot be changed, pointed at another scene or taken out until it is off air"
+            ),
+            Refusal::UnknownCueId { cue_id } => {
+                write!(f, "this show has no Cue ID \"{cue_id}\"")
+            }
+            Refusal::CuePlanStale => write!(
+                f,
+                "the Cue ID plan is not what this show would suggest now: something changed since the preview, so ask for it again"
+            ),
+            Refusal::SceneLabelInvalid { label, fault } => {
+                write!(f, "the Scene ID \"{label}\" is refused: {fault}")
+            }
             Refusal::StopRefusedProgramOnAir { take_id, revision } => write!(
                 f,
                 "the engine will not stop while {} revision {} is on Program: clear Program first",
@@ -1602,6 +1720,11 @@ impl std::fmt::Display for Refusal {
                 };
                 write!(f, "session {}: {verb} would break a later edit: {detail}", session.0)
             }
+            Refusal::HistoryStepUnknown { session, step } => write!(
+                f,
+                "session {} has no step {step} in its change history any more",
+                session.0
+            ),
             Refusal::SceneAlreadyExists { project, scene_id } => {
                 write!(f, "scene {scene_id} already exists in project {project}")
             }
@@ -1716,9 +1839,25 @@ impl std::fmt::Display for Refusal {
                 scene.as_str(),
                 project_space.as_str()
             ),
+            Refusal::SceneColorDepthMismatch { project, scene_id, scene, project_depth } => write!(
+                f,
+                "scene {scene_id} composites at {} bits but project {project} declares {}",
+                scene.as_str(),
+                project_depth.as_str()
+            ),
             Refusal::ProjectSettingsInvalid { project, detail } => {
                 write!(f, "project {project} settings are unreadable: {detail}")
             }
+            Refusal::SettingInvalid { key, detail } => {
+                write!(f, "setting {key}: {detail}")
+            }
+            Refusal::WorkspaceInvalid { id, detail } => {
+                write!(f, "workspace {id}: {detail}")
+            }
+            Refusal::WorkspaceNewer { id, found, supported } => write!(
+                f,
+                "workspace {id} was saved by a newer GrapiX (layout version {found}; this one reads up to {supported}); it is left as it is"
+            ),
             Refusal::ShapeTrimInvalid { object, field, value } => write!(
                 f,
                 "shape {object} has {field} {value}, outside its domain (start and end 0-100, every value finite)"
@@ -2207,6 +2346,45 @@ impl Refusal {
                 locality: Locality::Lan,
                 offered: vec![MediaCodec::Jpeg],
             },
+            Self::OperatorRequired {
+                request: "take".into(),
+            },
+            Self::OperatorNameInvalid {
+                request: "take".into(),
+                fault: auth::OperatorNameFault::BadCharacter,
+            },
+            Self::LoadShed {
+                request: "render".into(),
+                level: "non-live-refused".into(),
+                retry_after_ms: 5000,
+            },
+            Self::ChannelNotSupported {
+                request: "take".into(),
+                channel: "preview".into(),
+            },
+            Self::LayerNotSupported {
+                request: "take".into(),
+                layer: "bug".into(),
+            },
+            Self::CueIdInvalid {
+                cue_id: "two words".into(),
+                fault: ids::IdFault::BadCharacter,
+            },
+            Self::CueIdDuplicate {
+                cue_id: "Open".into(),
+                held_by: TakeId("audit".into()),
+            },
+            Self::CueIdLockedOnAir {
+                cue_id: "Open".into(),
+            },
+            Self::UnknownCueId {
+                cue_id: "Open".into(),
+            },
+            Self::CuePlanStale,
+            Self::SceneLabelInvalid {
+                label: "a b".into(),
+                fault: ids::IdFault::BadCharacter,
+            },
             Self::StopRefusedProgramOnAir {
                 take_id: TakeId("audit".into()),
                 revision: Revision(1),
@@ -2252,6 +2430,10 @@ impl Refusal {
                 session: command::SessionKey(1),
                 direction: command::HistoryDirection::Undo,
                 detail: "audit".into(),
+            },
+            Self::HistoryStepUnknown {
+                session: command::SessionKey(1),
+                step: 1,
             },
             Self::SceneAlreadyExists {
                 project: "audit".into(),
@@ -2386,6 +2568,25 @@ impl Refusal {
                 scene_id: "audit".into(),
                 scene: crate::color::WorkingColorSpace::LinearSrgb,
                 project_space: crate::color::WorkingColorSpace::Srgb,
+            },
+            Self::SceneColorDepthMismatch {
+                project: "audit".into(),
+                scene_id: "audit".into(),
+                scene: crate::color::ColorDepth::Bits8,
+                project_depth: crate::color::ColorDepth::Bits16,
+            },
+            Self::SettingInvalid {
+                key: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::WorkspaceInvalid {
+                id: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::WorkspaceNewer {
+                id: "audit".into(),
+                found: 2,
+                supported: 1,
             },
             Self::ProjectSettingsInvalid {
                 project: "audit".into(),
@@ -2551,6 +2752,17 @@ impl Refusal {
             Self::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
             Self::MediaCodecNotOffered { .. } => "mediaCodecNotOffered",
             Self::ScopeNotGranted { .. } => "scopeNotGranted",
+            Self::OperatorRequired { .. } => "operatorRequired",
+            Self::OperatorNameInvalid { .. } => "operatorNameInvalid",
+            Self::LoadShed { .. } => "loadShed",
+            Self::ChannelNotSupported { .. } => "channelNotSupported",
+            Self::LayerNotSupported { .. } => "layerNotSupported",
+            Self::CueIdInvalid { .. } => "cueIdInvalid",
+            Self::CueIdDuplicate { .. } => "cueIdDuplicate",
+            Self::CueIdLockedOnAir { .. } => "cueIdLockedOnAir",
+            Self::UnknownCueId { .. } => "unknownCueId",
+            Self::CuePlanStale => "cuePlanStale",
+            Self::SceneLabelInvalid { .. } => "sceneLabelInvalid",
             Self::StopRefusedProgramOnAir { .. } => "stopRefusedProgramOnAir",
             Self::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
             Self::RundownEntryUnknown { .. } => "rundownEntryUnknown",
@@ -2565,6 +2777,7 @@ impl Refusal {
             Self::HistoryEmpty { .. } => "historyEmpty",
             Self::ModuleHistoryEmpty { .. } => "moduleHistoryEmpty",
             Self::HistoryConflict { .. } => "historyConflict",
+            Self::HistoryStepUnknown { .. } => "historyStepUnknown",
             Self::SceneAlreadyExists { .. } => "sceneAlreadyExists",
             Self::ProjectAlreadyExists { .. } => "projectAlreadyExists",
             Self::SceneNotStored { .. } => "sceneNotStored",
@@ -2602,7 +2815,11 @@ impl Refusal {
             Self::FontInUse { .. } => "fontInUse",
             Self::SceneSchemaUnsupported { .. } => "sceneSchemaUnsupported",
             Self::SceneWorkingSpaceMismatch { .. } => "sceneWorkingSpaceMismatch",
+            Self::SceneColorDepthMismatch { .. } => "sceneColorDepthMismatch",
             Self::ProjectSettingsInvalid { .. } => "projectSettingsInvalid",
+            Self::SettingInvalid { .. } => "settingInvalid",
+            Self::WorkspaceInvalid { .. } => "workspaceInvalid",
+            Self::WorkspaceNewer { .. } => "workspaceNewer",
             Self::ShapeTrimInvalid { .. } => "shapeTrimInvalid",
             Self::SceneHierarchyInvalid { .. } => "sceneHierarchyInvalid",
             Self::ObjectKindNotDrawable { .. } => "objectKindNotDrawable",

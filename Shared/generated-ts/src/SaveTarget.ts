@@ -3,4 +3,4 @@
 /**
  * Where `SaveScene` writes a session's document.
  */
-export type SaveTarget = { "to": "origin" } | { "to": "project", project: string, } | { "to": "file", path: string, };
+export type SaveTarget = { "to": "origin" } | { "to": "project", project: string, } | { "to": "file", path: string, } | { "to": "nextVersion" };

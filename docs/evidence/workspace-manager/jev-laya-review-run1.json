@@ -1,0 +1,2145 @@
+{
+ "errors": {
+  "questions": {
+   "E1_matches": {
+    "type": "noul",
+    "instructions": "Fact E1: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E1_control": {
+    "type": "noul",
+    "instructions": "Fact E1: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E1_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E1: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E1_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E1: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E2_matches": {
+    "type": "noul",
+    "instructions": "Fact E2: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E2_control": {
+    "type": "noul",
+    "instructions": "Fact E2: does the result satisfy this rule? RULE: Dropping a panel on the right side of a group whose parent runs the other way makes a new side-by-side split in the target's place, sharing its room equally.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E2_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E2: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E2_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E2: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E3_matches": {
+    "type": "noul",
+    "instructions": "Fact E3: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E3_control": {
+    "type": "noul",
+    "instructions": "Fact E3: does the result satisfy this rule? RULE: Dropping a panel above a group whose parent already runs the same way adds one more child to that parent and takes half of the target's share; the parent's other shares do not change.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E3_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E3: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E3_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E3: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E4_matches": {
+    "type": "noul",
+    "instructions": "Fact E4: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E4_control": {
+    "type": "noul",
+    "instructions": "Fact E4: does the result satisfy this rule? RULE: Closing the last panel of a group removes the group, and a split left with one child is replaced by that child; weights add up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E4_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E4: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E4_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E4: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E5_matches": {
+    "type": "noul",
+    "instructions": "Fact E5: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E5_control": {
+    "type": "noul",
+    "instructions": "Fact E5: does the result satisfy this rule? RULE: Closing every panel of two groups leaves the remaining groups sharing the room, weights adding up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E5_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E5: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E5_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E5: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E6_matches": {
+    "type": "noul",
+    "instructions": "Fact E6: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E6_control": {
+    "type": "noul",
+    "instructions": "Fact E6: does the result satisfy this rule? RULE: Maximising a group does not change the arrangement, so restoring brings back exactly the same proportions.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E6_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E6: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E6_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E6: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E7_matches": {
+    "type": "noul",
+    "instructions": "Fact E7: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E7_control": {
+    "type": "noul",
+    "instructions": "Fact E7: does the result satisfy this rule? RULE: Dragging a divider far past the end stops where the neighbour reaches its smallest share (0.04), and the two shares still add up to what they did.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E7_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E7: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E7_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E7: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E8_matches": {
+    "type": "noul",
+    "instructions": "Fact E8: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E8_control": {
+    "type": "noul",
+    "instructions": "Fact E8: does the result satisfy this rule? RULE: Showing a panel that is behind another tab brings its tab forward and gives its group focus.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E8_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E8: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E8_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E8: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E9_matches": {
+    "type": "noul",
+    "instructions": "Fact E9: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E9_control": {
+    "type": "noul",
+    "instructions": "Fact E9: does the result satisfy this rule? RULE: Reopening a closed panel puts it back in the group its registration names, and shows it.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E9_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E9: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E9_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E9: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E10_matches": {
+    "type": "noul",
+    "instructions": "Fact E10: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E10_control": {
+    "type": "noul",
+    "instructions": "Fact E10: does the result satisfy this rule? RULE: Opening a panel that is already open shows it instead of making a second copy.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E10_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E10: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E10_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E10: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E11_matches": {
+    "type": "noul",
+    "instructions": "Fact E11: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E11_control": {
+    "type": "noul",
+    "instructions": "Fact E11: does the result satisfy this rule? RULE: An author's older four-region layout is migrated with every panel kept exactly once, each tab group keeping its tabs, and the dock shares kept.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E11_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E11: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E11_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E11: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E12_matches": {
+    "type": "noul",
+    "instructions": "Fact E12: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E12_control": {
+    "type": "noul",
+    "instructions": "Fact E12: does the result satisfy this rule? RULE: A panel kind renamed since the layout was saved keeps its place under its new name, and the rename is reported.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E12_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E12: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E12_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E12: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E13_matches": {
+    "type": "noul",
+    "instructions": "Fact E13: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E13_control": {
+    "type": "noul",
+    "instructions": "Fact E13: does the result satisfy this rule? RULE: A layout from a build that had more panels is not damaged: panels this build cannot show stay where they are and are named, with the reason.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E13_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E13: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E13_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E13: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E14_matches": {
+    "type": "noul",
+    "instructions": "Fact E14: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E14_control": {
+    "type": "noul",
+    "instructions": "Fact E14: does the result satisfy this rule? RULE: A layout that breaks rules is reported with every broken rule named, by number and in words.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E14_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E14: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E14_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E14: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E15_matches": {
+    "type": "noul",
+    "instructions": "Fact E15: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E15_control": {
+    "type": "noul",
+    "instructions": "Fact E15: does the result satisfy this rule? RULE: UI state that is only about now (which group is maximised, which has focus) may be kept in the saved workspace if it is optional, validated and never changes the arrangement.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E15_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E15: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E15_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E15: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   },
+   "E16_matches": {
+    "type": "noul",
+    "instructions": "Fact E16: does the result satisfy this rule? RULE: A refused step names what is wrong in plain words, with the thing it is about, and changes nothing it was given.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E16_control": {
+    "type": "noul",
+    "instructions": "Fact E16: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "E16_cause_named": {
+    "type": "noul",
+    "instructions": "Fact E16: does the refusal text say what is wrong, in words an author of broadcast graphics who is not a programmer would understand?",
+    "criteria": {
+     "true": "Yes: it names the cause clearly.",
+     "false": "No."
+    }
+   },
+   "E16_next_step_clear": {
+    "type": "noul",
+    "instructions": "Fact E16: after reading the refusal text, is it clear what the author could do next?",
+    "criteria": {
+     "true": "Yes: the next step is clear.",
+     "false": "No."
+    }
+   }
+  },
+  "labels": {
+   "E1_matches": true,
+   "E1_control": false,
+   "E1_cause_named": null,
+   "E1_next_step_clear": null,
+   "E2_matches": true,
+   "E2_control": false,
+   "E2_cause_named": null,
+   "E2_next_step_clear": null,
+   "E3_matches": true,
+   "E3_control": false,
+   "E3_cause_named": null,
+   "E3_next_step_clear": null,
+   "E4_matches": true,
+   "E4_control": false,
+   "E4_cause_named": null,
+   "E4_next_step_clear": null,
+   "E5_matches": true,
+   "E5_control": false,
+   "E5_cause_named": null,
+   "E5_next_step_clear": null,
+   "E6_matches": true,
+   "E6_control": false,
+   "E6_cause_named": null,
+   "E6_next_step_clear": null,
+   "E7_matches": true,
+   "E7_control": false,
+   "E7_cause_named": null,
+   "E7_next_step_clear": null,
+   "E8_matches": true,
+   "E8_control": false,
+   "E8_cause_named": null,
+   "E8_next_step_clear": null,
+   "E9_matches": true,
+   "E9_control": false,
+   "E9_cause_named": null,
+   "E9_next_step_clear": null,
+   "E10_matches": true,
+   "E10_control": false,
+   "E10_cause_named": null,
+   "E10_next_step_clear": null,
+   "E11_matches": true,
+   "E11_control": false,
+   "E11_cause_named": null,
+   "E11_next_step_clear": null,
+   "E12_matches": true,
+   "E12_control": false,
+   "E12_cause_named": null,
+   "E12_next_step_clear": null,
+   "E13_matches": true,
+   "E13_control": false,
+   "E13_cause_named": null,
+   "E13_next_step_clear": null,
+   "E14_matches": true,
+   "E14_control": false,
+   "E14_cause_named": null,
+   "E14_next_step_clear": null,
+   "E15_matches": true,
+   "E15_control": false,
+   "E15_cause_named": null,
+   "E15_next_step_clear": null,
+   "E16_matches": true,
+   "E16_control": false,
+   "E16_cause_named": null,
+   "E16_next_step_clear": null
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "E1_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E1_control": {
+     "type": "noul",
+     "noul": 0.18
+    },
+    "E1_cause_named": {
+     "type": "noul",
+     "noul": 0.69
+    },
+    "E1_next_step_clear": {
+     "type": "noul",
+     "noul": 0.56
+    },
+    "E2_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E2_control": {
+     "type": "noul",
+     "noul": 0.1
+    },
+    "E2_cause_named": {
+     "type": "noul",
+     "noul": 0.57
+    },
+    "E2_next_step_clear": {
+     "type": "noul",
+     "noul": 0.55
+    },
+    "E3_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E3_control": {
+     "type": "noul",
+     "noul": 0.1
+    },
+    "E3_cause_named": {
+     "type": "noul",
+     "noul": 0.68
+    },
+    "E3_next_step_clear": {
+     "type": "noul",
+     "noul": 0.56
+    },
+    "E4_matches": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "E4_control": {
+     "type": "noul",
+     "noul": 0.26
+    },
+    "E4_cause_named": {
+     "type": "noul",
+     "noul": 0.43
+    },
+    "E4_next_step_clear": {
+     "type": "noul",
+     "noul": 0.72
+    },
+    "E5_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E5_control": {
+     "type": "noul",
+     "noul": 0.25
+    },
+    "E5_cause_named": {
+     "type": "noul",
+     "noul": 0.57
+    },
+    "E5_next_step_clear": {
+     "type": "noul",
+     "noul": 0.8
+    },
+    "E6_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E6_control": {
+     "type": "noul",
+     "noul": 0.39
+    },
+    "E6_cause_named": {
+     "type": "noul",
+     "noul": 0.56
+    },
+    "E6_next_step_clear": {
+     "type": "noul",
+     "noul": 0.54
+    },
+    "E7_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E7_control": {
+     "type": "noul",
+     "noul": 0.11
+    },
+    "E7_cause_named": {
+     "type": "noul",
+     "noul": 0.83
+    },
+    "E7_next_step_clear": {
+     "type": "noul",
+     "noul": 0.69
+    },
+    "E8_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E8_control": {
+     "type": "noul",
+     "noul": 0.11
+    },
+    "E8_cause_named": {
+     "type": "noul",
+     "noul": 0.82
+    },
+    "E8_next_step_clear": {
+     "type": "noul",
+     "noul": 0.59
+    },
+    "E9_matches": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "E9_control": {
+     "type": "noul",
+     "noul": 0.1
+    },
+    "E9_cause_named": {
+     "type": "noul",
+     "noul": 0.78
+    },
+    "E9_next_step_clear": {
+     "type": "noul",
+     "noul": 0.47
+    },
+    "E10_matches": {
+     "type": "noul",
+     "noul": 0.85
+    },
+    "E10_control": {
+     "type": "noul",
+     "noul": 0.1
+    },
+    "E10_cause_named": {
+     "type": "noul",
+     "noul": 0.38
+    },
+    "E10_next_step_clear": {
+     "type": "noul",
+     "noul": 0.55
+    },
+    "E11_matches": {
+     "type": "noul",
+     "noul": 0.88
+    },
+    "E11_control": {
+     "type": "noul",
+     "noul": 0.22
+    },
+    "E11_cause_named": {
+     "type": "noul",
+     "noul": 0.64
+    },
+    "E11_next_step_clear": {
+     "type": "noul",
+     "noul": 0.6
+    },
+    "E12_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "E12_control": {
+     "type": "noul",
+     "noul": 0.08
+    },
+    "E12_cause_named": {
+     "type": "noul",
+     "noul": 0.64
+    },
+    "E12_next_step_clear": {
+     "type": "noul",
+     "noul": 0.47
+    },
+    "E13_matches": {
+     "type": "noul",
+     "noul": 0.89
+    },
+    "E13_control": {
+     "type": "noul",
+     "noul": 0.16
+    },
+    "E13_cause_named": {
+     "type": "noul",
+     "noul": 0.71
+    },
+    "E13_next_step_clear": {
+     "type": "noul",
+     "noul": 0.58
+    },
+    "E14_matches": {
+     "type": "noul",
+     "noul": 0.91
+    },
+    "E14_control": {
+     "type": "noul",
+     "noul": 0.13
+    },
+    "E14_cause_named": {
+     "type": "noul",
+     "noul": 0.64
+    },
+    "E14_next_step_clear": {
+     "type": "noul",
+     "noul": 0.56
+    },
+    "E15_matches": {
+     "type": "noul",
+     "noul": 0.85
+    },
+    "E15_control": {
+     "type": "noul",
+     "noul": 0.45
+    },
+    "E15_cause_named": {
+     "type": "noul",
+     "noul": 0.52
+    },
+    "E15_next_step_clear": {
+     "type": "noul",
+     "noul": 0.55
+    },
+    "E16_matches": {
+     "type": "noul",
+     "noul": 0.85
+    },
+    "E16_control": {
+     "type": "noul",
+     "noul": 0.09
+    },
+    "E16_cause_named": {
+     "type": "noul",
+     "noul": 0.31
+    },
+    "E16_next_step_clear": {
+     "type": "noul",
+     "noul": 0.74
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 65537,
+    "output_tokens": 0,
+    "state_tokens": 968,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "E1_matches": {
+     "type": "noul",
+     "noul": 0.9762,
+     "confidence": 0.9762,
+     "answer_confidence": 0.9762,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E1_control": {
+     "type": "noul",
+     "noul": 0.9787,
+     "confidence": 0.9787,
+     "answer_confidence": 0.9787,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E1_cause_named": {
+     "type": "noul",
+     "noul": 0.9703,
+     "confidence": 0.9703,
+     "answer_confidence": 0.9703,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E1_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9736,
+     "confidence": 0.9736,
+     "answer_confidence": 0.9736,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E2_matches": {
+     "type": "noul",
+     "noul": 0.9752,
+     "confidence": 0.9752,
+     "answer_confidence": 0.9752,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E2_control": {
+     "type": "noul",
+     "noul": 0.9757,
+     "confidence": 0.9757,
+     "answer_confidence": 0.9757,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E2_cause_named": {
+     "type": "noul",
+     "noul": 0.9693,
+     "confidence": 0.9693,
+     "answer_confidence": 0.9693,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E2_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9732,
+     "confidence": 0.9732,
+     "answer_confidence": 0.9732,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E3_matches": {
+     "type": "noul",
+     "noul": 0.9753,
+     "confidence": 0.9753,
+     "answer_confidence": 0.9753,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E3_control": {
+     "type": "noul",
+     "noul": 0.9753,
+     "confidence": 0.9753,
+     "answer_confidence": 0.9753,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E3_cause_named": {
+     "type": "noul",
+     "noul": 0.9692,
+     "confidence": 0.9692,
+     "answer_confidence": 0.9692,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E3_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9727,
+     "confidence": 0.9727,
+     "answer_confidence": 0.9727,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E4_matches": {
+     "type": "noul",
+     "noul": 0.9753,
+     "confidence": 0.9753,
+     "answer_confidence": 0.9753,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E4_control": {
+     "type": "noul",
+     "noul": 0.9722,
+     "confidence": 0.9722,
+     "answer_confidence": 0.9722,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E4_cause_named": {
+     "type": "noul",
+     "noul": 0.9697,
+     "confidence": 0.9697,
+     "answer_confidence": 0.9697,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E4_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9733,
+     "confidence": 0.9733,
+     "answer_confidence": 0.9733,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E5_matches": {
+     "type": "noul",
+     "noul": 0.975,
+     "confidence": 0.975,
+     "answer_confidence": 0.975,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E5_control": {
+     "type": "noul",
+     "noul": 0.9682,
+     "confidence": 0.9682,
+     "answer_confidence": 0.9682,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E5_cause_named": {
+     "type": "noul",
+     "noul": 0.9699,
+     "confidence": 0.9699,
+     "answer_confidence": 0.9699,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E5_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9733,
+     "confidence": 0.9733,
+     "answer_confidence": 0.9733,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E6_matches": {
+     "type": "noul",
+     "noul": 0.9752,
+     "confidence": 0.9752,
+     "answer_confidence": 0.9752,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E6_control": {
+     "type": "noul",
+     "noul": 0.9706,
+     "confidence": 0.9706,
+     "answer_confidence": 0.9706,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E6_cause_named": {
+     "type": "noul",
+     "noul": 0.9692,
+     "confidence": 0.9692,
+     "answer_confidence": 0.9692,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E6_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9736,
+     "confidence": 0.9736,
+     "answer_confidence": 0.9736,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E7_matches": {
+     "type": "noul",
+     "noul": 0.9751,
+     "confidence": 0.9751,
+     "answer_confidence": 0.9751,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E7_control": {
+     "type": "noul",
+     "noul": 0.9765,
+     "confidence": 0.9765,
+     "answer_confidence": 0.9765,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E7_cause_named": {
+     "type": "noul",
+     "noul": 0.97,
+     "confidence": 0.97,
+     "answer_confidence": 0.97,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E7_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9728,
+     "confidence": 0.9728,
+     "answer_confidence": 0.9728,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E8_matches": {
+     "type": "noul",
+     "noul": 0.9744,
+     "confidence": 0.9744,
+     "answer_confidence": 0.9744,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E8_control": {
+     "type": "noul",
+     "noul": 0.9775,
+     "confidence": 0.9775,
+     "answer_confidence": 0.9775,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E8_cause_named": {
+     "type": "noul",
+     "noul": 0.9704,
+     "confidence": 0.9704,
+     "answer_confidence": 0.9704,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E8_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9733,
+     "confidence": 0.9733,
+     "answer_confidence": 0.9733,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E9_matches": {
+     "type": "noul",
+     "noul": 0.9755,
+     "confidence": 0.9755,
+     "answer_confidence": 0.9755,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E9_control": {
+     "type": "noul",
+     "noul": 0.9751,
+     "confidence": 0.9751,
+     "answer_confidence": 0.9751,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E9_cause_named": {
+     "type": "noul",
+     "noul": 0.9706,
+     "confidence": 0.9706,
+     "answer_confidence": 0.9706,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E9_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9738,
+     "confidence": 0.9738,
+     "answer_confidence": 0.9738,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E10_matches": {
+     "type": "noul",
+     "noul": 0.9759,
+     "confidence": 0.9759,
+     "answer_confidence": 0.9759,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E10_control": {
+     "type": "noul",
+     "noul": 0.9731,
+     "confidence": 0.9731,
+     "answer_confidence": 0.9731,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E10_cause_named": {
+     "type": "noul",
+     "noul": 0.969,
+     "confidence": 0.969,
+     "answer_confidence": 0.969,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E10_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9719,
+     "confidence": 0.9719,
+     "answer_confidence": 0.9719,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E11_matches": {
+     "type": "noul",
+     "noul": 0.9753,
+     "confidence": 0.9753,
+     "answer_confidence": 0.9753,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E11_control": {
+     "type": "noul",
+     "noul": 0.9711,
+     "confidence": 0.9711,
+     "answer_confidence": 0.9711,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E11_cause_named": {
+     "type": "noul",
+     "noul": 0.9697,
+     "confidence": 0.9697,
+     "answer_confidence": 0.9697,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E11_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9717,
+     "confidence": 0.9717,
+     "answer_confidence": 0.9717,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E12_matches": {
+     "type": "noul",
+     "noul": 0.9763,
+     "confidence": 0.9763,
+     "answer_confidence": 0.9763,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E12_control": {
+     "type": "noul",
+     "noul": 0.9676,
+     "confidence": 0.9676,
+     "answer_confidence": 0.9676,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E12_cause_named": {
+     "type": "noul",
+     "noul": 0.9699,
+     "confidence": 0.9699,
+     "answer_confidence": 0.9699,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E12_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9731,
+     "confidence": 0.9731,
+     "answer_confidence": 0.9731,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E13_matches": {
+     "type": "noul",
+     "noul": 0.9753,
+     "confidence": 0.9753,
+     "answer_confidence": 0.9753,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E13_control": {
+     "type": "noul",
+     "noul": 0.9666,
+     "confidence": 0.9666,
+     "answer_confidence": 0.9666,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E13_cause_named": {
+     "type": "noul",
+     "noul": 0.9686,
+     "confidence": 0.9686,
+     "answer_confidence": 0.9686,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E13_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9716,
+     "confidence": 0.9716,
+     "answer_confidence": 0.9716,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E14_matches": {
+     "type": "noul",
+     "noul": 0.9759,
+     "confidence": 0.9759,
+     "answer_confidence": 0.9759,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E14_control": {
+     "type": "noul",
+     "noul": 0.9782,
+     "confidence": 0.9782,
+     "answer_confidence": 0.9782,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E14_cause_named": {
+     "type": "noul",
+     "noul": 0.97,
+     "confidence": 0.97,
+     "answer_confidence": 0.97,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E14_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9734,
+     "confidence": 0.9734,
+     "answer_confidence": 0.9734,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E15_matches": {
+     "type": "noul",
+     "noul": 0.9758,
+     "confidence": 0.9758,
+     "answer_confidence": 0.9758,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E15_control": {
+     "type": "noul",
+     "noul": 0.966,
+     "confidence": 0.966,
+     "answer_confidence": 0.966,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E15_cause_named": {
+     "type": "noul",
+     "noul": 0.9699,
+     "confidence": 0.9699,
+     "answer_confidence": 0.9699,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E15_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9731,
+     "confidence": 0.9731,
+     "answer_confidence": 0.9731,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E16_matches": {
+     "type": "noul",
+     "noul": 0.9763,
+     "confidence": 0.9763,
+     "answer_confidence": 0.9763,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E16_control": {
+     "type": "noul",
+     "noul": 0.9777,
+     "confidence": 0.9777,
+     "answer_confidence": 0.9777,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E16_cause_named": {
+     "type": "noul",
+     "noul": 0.9688,
+     "confidence": 0.9688,
+     "answer_confidence": 0.9688,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "E16_next_step_clear": {
+     "type": "noul",
+     "noul": 0.9723,
+     "confidence": 0.9723,
+     "answer_confidence": 0.9723,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ },
+ "accuracy-1": {
+  "questions": {
+   "A1_matches": {
+    "type": "noul",
+    "instructions": "Fact A1: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A1_control": {
+    "type": "noul",
+    "instructions": "Fact A1: does the result satisfy this rule? RULE: Showing a panel that is behind another tab brings its tab forward and gives its group focus.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A2_matches": {
+    "type": "noul",
+    "instructions": "Fact A2: does the result satisfy this rule? RULE: Dropping a panel on the right side of a group whose parent runs the other way makes a new side-by-side split in the target's place, sharing its room equally.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A2_control": {
+    "type": "noul",
+    "instructions": "Fact A2: does the result satisfy this rule? RULE: Reopening a closed panel puts it back in the group its registration names, and shows it.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A3_matches": {
+    "type": "noul",
+    "instructions": "Fact A3: does the result satisfy this rule? RULE: Dropping a panel above a group whose parent already runs the same way adds one more child to that parent and takes half of the target's share; the parent's other shares do not change.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A3_control": {
+    "type": "noul",
+    "instructions": "Fact A3: does the result satisfy this rule? RULE: Opening a panel that is already open shows it instead of making a second copy.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A4_matches": {
+    "type": "noul",
+    "instructions": "Fact A4: does the result satisfy this rule? RULE: Closing the last panel of a group removes the group, and a split left with one child is replaced by that child; weights add up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A4_control": {
+    "type": "noul",
+    "instructions": "Fact A4: does the result satisfy this rule? RULE: An author's older four-region layout is migrated with every panel kept exactly once, each tab group keeping its tabs, and the dock shares kept.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A5_matches": {
+    "type": "noul",
+    "instructions": "Fact A5: does the result satisfy this rule? RULE: Closing every panel of two groups leaves the remaining groups sharing the room, weights adding up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A5_control": {
+    "type": "noul",
+    "instructions": "Fact A5: does the result satisfy this rule? RULE: A panel kind renamed since the layout was saved keeps its place under its new name, and the rename is reported.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A6_matches": {
+    "type": "noul",
+    "instructions": "Fact A6: does the result satisfy this rule? RULE: Maximising a group does not change the arrangement, so restoring brings back exactly the same proportions.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A6_control": {
+    "type": "noul",
+    "instructions": "Fact A6: does the result satisfy this rule? RULE: A layout from a build that had more panels is not damaged: panels this build cannot show stay where they are and are named, with the reason.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A7_matches": {
+    "type": "noul",
+    "instructions": "Fact A7: does the result satisfy this rule? RULE: Dragging a divider far past the end stops where the neighbour reaches its smallest share (0.04), and the two shares still add up to what they did.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A7_control": {
+    "type": "noul",
+    "instructions": "Fact A7: does the result satisfy this rule? RULE: A layout that breaks rules is reported with every broken rule named, by number and in words.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   }
+  },
+  "labels": {
+   "A1_matches": true,
+   "A1_control": false,
+   "A2_matches": true,
+   "A2_control": false,
+   "A3_matches": true,
+   "A3_control": false,
+   "A4_matches": true,
+   "A4_control": false,
+   "A5_matches": true,
+   "A5_control": false,
+   "A6_matches": true,
+   "A6_control": false,
+   "A7_matches": true,
+   "A7_control": false
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "A1_matches": {
+     "type": "noul",
+     "noul": 0.91
+    },
+    "A1_control": {
+     "type": "noul",
+     "noul": 0.75
+    },
+    "A2_matches": {
+     "type": "noul",
+     "noul": 0.9
+    },
+    "A2_control": {
+     "type": "noul",
+     "noul": 0.26
+    },
+    "A3_matches": {
+     "type": "noul",
+     "noul": 0.5
+    },
+    "A3_control": {
+     "type": "noul",
+     "noul": 0.86
+    },
+    "A4_matches": {
+     "type": "noul",
+     "noul": 0.73
+    },
+    "A4_control": {
+     "type": "noul",
+     "noul": 0.18
+    },
+    "A5_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "A5_control": {
+     "type": "noul",
+     "noul": 0.28
+    },
+    "A6_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "A6_control": {
+     "type": "noul",
+     "noul": 0.85
+    },
+    "A7_matches": {
+     "type": "noul",
+     "noul": 0.9
+    },
+    "A7_control": {
+     "type": "noul",
+     "noul": 0.45
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 22279,
+    "output_tokens": 0,
+    "state_tokens": 1528,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "A1_matches": {
+     "type": "noul",
+     "noul": 0.9464,
+     "confidence": 0.9464,
+     "answer_confidence": 0.9464,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A1_control": {
+     "type": "noul",
+     "noul": 0.9478,
+     "confidence": 0.9478,
+     "answer_confidence": 0.9478,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A2_matches": {
+     "type": "noul",
+     "noul": 0.9417,
+     "confidence": 0.9417,
+     "answer_confidence": 0.9417,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A2_control": {
+     "type": "noul",
+     "noul": 0.938,
+     "confidence": 0.938,
+     "answer_confidence": 0.938,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A3_matches": {
+     "type": "noul",
+     "noul": 0.9507,
+     "confidence": 0.9507,
+     "answer_confidence": 0.9507,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A3_control": {
+     "type": "noul",
+     "noul": 0.9471,
+     "confidence": 0.9471,
+     "answer_confidence": 0.9471,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A4_matches": {
+     "type": "noul",
+     "noul": 0.9428,
+     "confidence": 0.9428,
+     "answer_confidence": 0.9428,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A4_control": {
+     "type": "noul",
+     "noul": 0.9488,
+     "confidence": 0.9488,
+     "answer_confidence": 0.9488,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A5_matches": {
+     "type": "noul",
+     "noul": 0.9399,
+     "confidence": 0.9399,
+     "answer_confidence": 0.9399,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A5_control": {
+     "type": "noul",
+     "noul": 0.9439,
+     "confidence": 0.9439,
+     "answer_confidence": 0.9439,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A6_matches": {
+     "type": "noul",
+     "noul": 0.9597,
+     "confidence": 0.9597,
+     "answer_confidence": 0.9597,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A6_control": {
+     "type": "noul",
+     "noul": 0.9389,
+     "confidence": 0.9389,
+     "answer_confidence": 0.9389,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A7_matches": {
+     "type": "noul",
+     "noul": 0.95,
+     "confidence": 0.95,
+     "answer_confidence": 0.95,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A7_control": {
+     "type": "noul",
+     "noul": 0.9387,
+     "confidence": 0.9387,
+     "answer_confidence": 0.9387,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ },
+ "accuracy-2": {
+  "questions": {
+   "A8_matches": {
+    "type": "noul",
+    "instructions": "Fact A8: does the result satisfy this rule? RULE: Showing a panel that is behind another tab brings its tab forward and gives its group focus.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A8_control": {
+    "type": "noul",
+    "instructions": "Fact A8: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A9_matches": {
+    "type": "noul",
+    "instructions": "Fact A9: does the result satisfy this rule? RULE: Reopening a closed panel puts it back in the group its registration names, and shows it.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A9_control": {
+    "type": "noul",
+    "instructions": "Fact A9: does the result satisfy this rule? RULE: Dropping a panel on the right side of a group whose parent runs the other way makes a new side-by-side split in the target's place, sharing its room equally.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A10_matches": {
+    "type": "noul",
+    "instructions": "Fact A10: does the result satisfy this rule? RULE: Opening a panel that is already open shows it instead of making a second copy.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A10_control": {
+    "type": "noul",
+    "instructions": "Fact A10: does the result satisfy this rule? RULE: Dropping a panel above a group whose parent already runs the same way adds one more child to that parent and takes half of the target's share; the parent's other shares do not change.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A11_matches": {
+    "type": "noul",
+    "instructions": "Fact A11: does the result satisfy this rule? RULE: An author's older four-region layout is migrated with every panel kept exactly once, each tab group keeping its tabs, and the dock shares kept.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A11_control": {
+    "type": "noul",
+    "instructions": "Fact A11: does the result satisfy this rule? RULE: Closing the last panel of a group removes the group, and a split left with one child is replaced by that child; weights add up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A12_matches": {
+    "type": "noul",
+    "instructions": "Fact A12: does the result satisfy this rule? RULE: A panel kind renamed since the layout was saved keeps its place under its new name, and the rename is reported.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A12_control": {
+    "type": "noul",
+    "instructions": "Fact A12: does the result satisfy this rule? RULE: Closing every panel of two groups leaves the remaining groups sharing the room, weights adding up to one.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A13_matches": {
+    "type": "noul",
+    "instructions": "Fact A13: does the result satisfy this rule? RULE: A layout from a build that had more panels is not damaged: panels this build cannot show stay where they are and are named, with the reason.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A13_control": {
+    "type": "noul",
+    "instructions": "Fact A13: does the result satisfy this rule? RULE: Maximising a group does not change the arrangement, so restoring brings back exactly the same proportions.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A14_matches": {
+    "type": "noul",
+    "instructions": "Fact A14: does the result satisfy this rule? RULE: A layout that breaks rules is reported with every broken rule named, by number and in words.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "A14_control": {
+    "type": "noul",
+    "instructions": "Fact A14: does the result satisfy this rule? RULE: Dragging a divider far past the end stops where the neighbour reaches its smallest share (0.04), and the two shares still add up to what they did.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "D1_matches": {
+    "type": "noul",
+    "instructions": "Fact D1: does the result satisfy this rule? RULE: UI state that is only about now (which group is maximised, which has focus) may be kept in the saved workspace if it is optional, validated and never changes the arrangement.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   },
+   "D1_control": {
+    "type": "noul",
+    "instructions": "Fact D1: does the result satisfy this rule? RULE: Dropping a panel on the centre of a group adds it as a tab of that group and shows it; the group it left keeps its other tabs.",
+    "criteria": {
+     "true": "Yes: the result satisfies the rule.",
+     "false": "No."
+    }
+   }
+  },
+  "labels": {
+   "A8_matches": true,
+   "A8_control": false,
+   "A9_matches": true,
+   "A9_control": false,
+   "A10_matches": true,
+   "A10_control": false,
+   "A11_matches": true,
+   "A11_control": false,
+   "A12_matches": true,
+   "A12_control": false,
+   "A13_matches": true,
+   "A13_control": false,
+   "A14_matches": true,
+   "A14_control": false,
+   "D1_matches": true,
+   "D1_control": false
+  },
+  "jev": {
+   "model": "jev-1.14.0",
+   "answers": {
+    "A8_matches": {
+     "type": "noul",
+     "noul": 0.84
+    },
+    "A8_control": {
+     "type": "noul",
+     "noul": 0.28
+    },
+    "A9_matches": {
+     "type": "noul",
+     "noul": 0.9
+    },
+    "A9_control": {
+     "type": "noul",
+     "noul": 0.35
+    },
+    "A10_matches": {
+     "type": "noul",
+     "noul": 0.96
+    },
+    "A10_control": {
+     "type": "noul",
+     "noul": 0.15
+    },
+    "A11_matches": {
+     "type": "noul",
+     "noul": 0.78
+    },
+    "A11_control": {
+     "type": "noul",
+     "noul": 0.8
+    },
+    "A12_matches": {
+     "type": "noul",
+     "noul": 0.95
+    },
+    "A12_control": {
+     "type": "noul",
+     "noul": 0.52
+    },
+    "A13_matches": {
+     "type": "noul",
+     "noul": 0.8
+    },
+    "A13_control": {
+     "type": "noul",
+     "noul": 0.45
+    },
+    "A14_matches": {
+     "type": "noul",
+     "noul": 0.87
+    },
+    "A14_control": {
+     "type": "noul",
+     "noul": 0.18
+    },
+    "D1_matches": {
+     "type": "noul",
+     "noul": 0.92
+    },
+    "D1_control": {
+     "type": "noul",
+     "noul": 0.14
+    }
+   }
+  },
+  "laya": {
+   "model": "convaiinnovations/laya-multilingual",
+   "max_len": 8192,
+   "usage": {
+    "input_tokens": 24239,
+    "output_tokens": 0,
+    "state_tokens": 1450,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+   },
+   "answers": {
+    "A8_matches": {
+     "type": "noul",
+     "noul": 0.906,
+     "confidence": 0.906,
+     "answer_confidence": 0.906,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A8_control": {
+     "type": "noul",
+     "noul": 0.9008,
+     "confidence": 0.9008,
+     "answer_confidence": 0.9008,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A9_matches": {
+     "type": "noul",
+     "noul": 0.8961,
+     "confidence": 0.8961,
+     "answer_confidence": 0.8961,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A9_control": {
+     "type": "noul",
+     "noul": 0.8899,
+     "confidence": 0.8899,
+     "answer_confidence": 0.8899,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A10_matches": {
+     "type": "noul",
+     "noul": 0.8894,
+     "confidence": 0.8894,
+     "answer_confidence": 0.8894,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A10_control": {
+     "type": "noul",
+     "noul": 0.9031,
+     "confidence": 0.9031,
+     "answer_confidence": 0.9031,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A11_matches": {
+     "type": "noul",
+     "noul": 0.895,
+     "confidence": 0.895,
+     "answer_confidence": 0.895,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A11_control": {
+     "type": "noul",
+     "noul": 0.8994,
+     "confidence": 0.8994,
+     "answer_confidence": 0.8994,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A12_matches": {
+     "type": "noul",
+     "noul": 0.8988,
+     "confidence": 0.8988,
+     "answer_confidence": 0.8988,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A12_control": {
+     "type": "noul",
+     "noul": 0.8797,
+     "confidence": 0.8797,
+     "answer_confidence": 0.8797,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A13_matches": {
+     "type": "noul",
+     "noul": 0.9035,
+     "confidence": 0.9035,
+     "answer_confidence": 0.9035,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A13_control": {
+     "type": "noul",
+     "noul": 0.9259,
+     "confidence": 0.9259,
+     "answer_confidence": 0.9259,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A14_matches": {
+     "type": "noul",
+     "noul": 0.8737,
+     "confidence": 0.8737,
+     "answer_confidence": 0.8737,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "A14_control": {
+     "type": "noul",
+     "noul": 0.9057,
+     "confidence": 0.9057,
+     "answer_confidence": 0.9057,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "D1_matches": {
+     "type": "noul",
+     "noul": 0.8957,
+     "confidence": 0.8957,
+     "answer_confidence": 0.8957,
+     "action": {
+      "act_probability": 1.0
+     }
+    },
+    "D1_control": {
+     "type": "noul",
+     "noul": 0.8925,
+     "confidence": 0.8925,
+     "answer_confidence": 0.8925,
+     "action": {
+      "act_probability": 1.0
+     }
+    }
+   }
+  }
+ }
+}

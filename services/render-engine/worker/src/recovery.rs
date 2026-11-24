@@ -16,7 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use gx_contracts::platform::service_data_root;
-use gx_contracts::scene::SceneDocument;
+use gx_contracts::scene::{SceneDocument, SCENE_SCHEMA_VERSION};
 use gx_contracts::{ContentHash, Epoch, Refusal, Revision, TakeId};
 use gx_control_plane::status::ProgramState;
 use serde::{Deserialize, Serialize};
@@ -186,6 +186,19 @@ impl RecoveryState {
                     ),
                 });
             }
+            // A scene written under another scene schema is refused by that name, before its
+            // hash is compared: its pin was taken over the other schema's JSON form, so a hash
+            // mismatch would only say that something changed, not what or what to do. Holding
+            // this to the document's own version means a future scene schema change is refused
+            // the same way without anyone remembering to bump the journal's version.
+            if scene.document.version != SCENE_SCHEMA_VERSION {
+                return Err(RecoveryError::SceneSchemaMismatch {
+                    take_id: scene.take_id.to_string(),
+                    revision: scene.revision.0,
+                    found: scene.document.version,
+                    supported: SCENE_SCHEMA_VERSION,
+                });
+            }
             let Some(held) = self.published.get(&scene.take_id) else {
                 return Err(RecoveryError::InvalidState {
                     detail: format!(
@@ -306,6 +319,14 @@ pub enum RecoveryError {
         found: u32,
         supported: u32,
     },
+    /// A prepared scene was written under another scene schema, so its pinned hash cannot be
+    /// checked. The journal is not restored and not touched: the operator chooses to discard it.
+    SceneSchemaMismatch {
+        take_id: String,
+        revision: u64,
+        found: u32,
+        supported: u32,
+    },
     InvalidState {
         detail: String,
     },
@@ -349,6 +370,15 @@ impl fmt::Display for RecoveryError {
                 f,
                 "recovery journal schema {found} is unsupported (this worker supports {supported})"
             ),
+            Self::SceneSchemaMismatch {
+                take_id,
+                revision,
+                found,
+                supported,
+            } => write!(
+                f,
+                "the recovery journal holds scene {take_id}/{revision} written under scene schema {found}, and this engine reads scene schema {supported}, so it cannot be restored. Nothing was changed. To start without it, run the engine with --discard-recovery: the journal is moved aside to a dated .bak file and the engine starts empty."
+            ),
             Self::InvalidState { detail } => write!(f, "invalid recovery journal state: {detail}"),
             Self::EpochExhausted => f.write_str("recovery journal epoch is exhausted"),
         }
@@ -362,9 +392,10 @@ impl Error for RecoveryError {
             Self::CreateDirectory { source, .. } | Self::Read { source, .. } => Some(source),
             Self::Encode { source } | Self::Decode { source, .. } => Some(source),
             Self::Write { source, .. } => Some(source),
-            Self::UnsupportedSchema { .. } | Self::InvalidState { .. } | Self::EpochExhausted => {
-                None
-            }
+            Self::UnsupportedSchema { .. }
+            | Self::SceneSchemaMismatch { .. }
+            | Self::InvalidState { .. }
+            | Self::EpochExhausted => None,
         }
     }
 }
@@ -406,6 +437,30 @@ impl RecoveryJournal {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Move the journal, its asset store and its drop report aside to `<name>.discarded-<stamp>.bak`
+    /// (the operator chose `--discard-recovery`), so the engine starts empty. Nothing is deleted: the
+    /// bytes are kept beside where they were. Returns the journal's new path, or `None` when there
+    /// was no journal. Run before the journal is read.
+    pub fn discard_aside(&self, stamp: u64) -> Result<Option<PathBuf>, RecoveryError> {
+        let aside = |from: PathBuf| -> Result<Option<PathBuf>, RecoveryError> {
+            if !from.exists() {
+                return Ok(None);
+            }
+            let mut name = from
+                .file_name()
+                .expect("a journal sibling names a file")
+                .to_os_string();
+            name.push(format!(".discarded-{stamp}.bak"));
+            let to = from.with_file_name(name);
+            fs::rename(&from, &to).map_err(|source| RecoveryError::Read { path: from, source })?;
+            Ok(Some(to))
+        };
+        let moved = aside(self.path.clone())?;
+        aside(self.asset_store_directory())?;
+        aside(self.drop_report_path())?;
+        Ok(moved)
     }
 
     /// The engine's own content-addressed asset store beside this journal
@@ -603,5 +658,96 @@ mod tests {
         plain.as_object_mut().unwrap().remove("revisionFloors");
         let read: RecoveryState = serde_json::from_value(plain).unwrap();
         assert!(read.revision_floors.is_empty());
+    }
+
+    fn state_with_a_scene_of_version(version: u32) -> RecoveryState {
+        let mut document = gx_contracts::scene::new_scene(
+            "t",
+            "t",
+            gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+        );
+        document.version = version;
+        let mut state = RecoveryState::empty(Epoch(1));
+        // The pin is the document's own hash, so the hash check can never be what refuses it.
+        state.published.insert(
+            TakeId("t".into()),
+            gx_control_plane::intent::HeldRevision {
+                revision: Revision(1),
+                content_hash: document.content_hash(),
+            },
+        );
+        state.prepared_scenes.push(PreparedSceneRecord {
+            take_id: TakeId("t".into()),
+            revision: Revision(1),
+            document,
+        });
+        state
+    }
+
+    /// 11.43: the journal an operator already had (scene schema 3) stopped the engine with "does not
+    /// hash to its published pin" after scene schema 4. It is now refused by what changed, and says
+    /// what to do; the same state at the current schema restores, so only the schema refuses it.
+    #[test]
+    fn a_scene_of_another_scene_schema_is_refused_by_name_and_says_what_to_do() {
+        state_with_a_scene_of_version(SCENE_SCHEMA_VERSION)
+            .validate()
+            .expect("the same state at the current scene schema is valid");
+        for other in [SCENE_SCHEMA_VERSION - 1, SCENE_SCHEMA_VERSION + 1] {
+            let error = state_with_a_scene_of_version(other)
+                .validate()
+                .expect_err("a scene of another schema is refused");
+            assert!(
+                matches!(
+                    error,
+                    RecoveryError::SceneSchemaMismatch { found, supported, .. }
+                        if found == other && supported == SCENE_SCHEMA_VERSION
+                ),
+                "{error}"
+            );
+            let message = error.to_string();
+            assert!(message.contains("--discard-recovery"), "{message}");
+            assert!(message.contains("Nothing was changed"), "{message}");
+            assert!(!message.contains("does not hash"), "{message}");
+        }
+    }
+
+    /// `--discard-recovery` keeps every byte: it moves, never deletes.
+    #[test]
+    fn discard_aside_moves_the_journal_its_store_and_its_report_and_deletes_nothing() {
+        let journal = journal();
+        let root = journal.path().parent().unwrap().to_path_buf();
+        assert_eq!(
+            journal.discard_aside(1).unwrap(),
+            None,
+            "no journal, nothing to move"
+        );
+        journal.record(&RecoveryState::empty(Epoch(7))).unwrap();
+        fs::create_dir_all(journal.asset_store_directory()).unwrap();
+        fs::write(journal.asset_store_directory().join("a"), b"asset").unwrap();
+        fs::write(journal.drop_report_path(), b"report").unwrap();
+
+        let kept = journal
+            .discard_aside(42)
+            .unwrap()
+            .expect("the journal moved");
+        assert_eq!(kept, root.join("recovery.json.discarded-42.bak"));
+        assert!(
+            !journal.path().exists(),
+            "nothing is left at the journal's path"
+        );
+        assert!(!journal.asset_store_directory().exists());
+        assert!(!journal.drop_report_path().exists());
+        assert!(fs::read(&kept).unwrap().starts_with(b"{"));
+        assert_eq!(
+            fs::read(root.join("recovery.json.assets.discarded-42.bak").join("a")).unwrap(),
+            b"asset"
+        );
+        assert_eq!(
+            fs::read(root.join("recovery.json.dropped.json.discarded-42.bak")).unwrap(),
+            b"report"
+        );
+        // With the path clear, the next load is the normal first start.
+        assert_eq!(journal.load().unwrap(), None);
+        let _ = fs::remove_dir_all(root);
     }
 }

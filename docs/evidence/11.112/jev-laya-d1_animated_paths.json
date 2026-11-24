@@ -1,0 +1,132 @@
+{
+ "input": {
+  "state": {
+   "decision": "How GrapiX should represent and render an animated Bezier path (a shape's path or a mask's path whose vertices and handles move over time).",
+   "what_exists_today": "A path is BezierPath {closed, vertices, in_tangents, out_tangents} (handles are offsets). A scene's timeline holds only numeric KeyframeChannel {object_id, property, keys[{frame, value, easing}]}; Auto-Key, easing, the speed graph and the keyframe editor all work on those numeric channels. Edits to a path are one editPath edit (insert, delete, convert, move, set handle, reshape, reverse, set first vertex, join, keep-shape delete). The GPU compositor draws a shape's layer source ONCE at prepare into a texture; the frame path only changes transforms, opacity and effect parameters. Animated width or height is already refused by name for the GPU engine (it needs a GPU source backend); the CPU reference renders everything per frame.",
+   "requirements_from_the_specs": "Pen and Masking specs v2: a stable anchor id per vertex across keyframes; inserting a vertex on an animated path splits the curve exactly (De Casteljau) in EVERY keyframe so the shape at each key is unchanged; deleting follows a stated policy; Set First Vertex is explicit; a key with a different topology must hold, never interpolate by index; one drag is one undo step; editor and playout must evaluate the same geometry at the same frame.",
+   "options": {
+    "A": "A path channel in the timeline: {object_id, target (shape subpath or mask index), keys[{frame, path, easing}]}. Each key holds a whole BezierPath carrying stable vertex ids. Interpolation is per vertex id between neighbouring keys of equal topology; a topology mismatch holds the earlier key. An insert edits every key.",
+    "B": "Per-vertex numeric channels in the existing timeline: properties like path.<vertexId>.x, .y, .inX, .inY, .outX, .outY (six per vertex), reusing the numeric keyframe machinery, easing, Auto-Key and editor.",
+    "C": "Do not animate paths; offer morphs only as an effect or a trim."
+   },
+   "rendering_note": "Either A or B needs the shape source redrawn per frame. A proposed way: size the layer source texture once to the union of all keys' bounds, and redraw into that same texture each frame the path changes (Vello GPU, bounded to animated shapes); the CPU reference re-prepares the animated layer each frame."
+  },
+  "questions": {
+   "best_representation": {
+    "type": "choice",
+    "instructions": "Which representation should GrapiX adopt for animated paths?",
+    "criteria": {
+     "A": "Option A: a path channel whose keys are whole paths with stable vertex ids.",
+     "B": "Option B: per-vertex numeric channels in the existing timeline.",
+     "C": "Option C: no path animation, morph effect only."
+    }
+   },
+   "hold_on_topology_change": {
+    "type": "noul",
+    "instructions": "When two neighbouring path keys have different vertex ids or a different open or closed state, should the engine hold the earlier key rather than interpolate by vertex index?",
+    "criteria": {
+     "true": "Yes: hold the earlier key and say so by name; interpolating by index silently distorts the shape.",
+     "false": "No: interpolate by index anyway so something always moves."
+    }
+   },
+   "gpu_refuse_until_redraw": {
+    "type": "noul",
+    "instructions": "Is it acceptable to land path animation first on the contract, the evaluator, the CPU reference and the Editor, and have the GPU engine refuse an animated path by name until per-frame source redraw is built, as it already does for animated width and height?",
+    "criteria": {
+     "true": "Yes: ship in verified steps and refuse by name rather than render it wrongly.",
+     "false": "No: nothing may land until the GPU renders it too."
+    }
+   },
+   "ids_on_the_path": {
+    "type": "noul",
+    "instructions": "Should every vertex carry a stable id stored on the path itself (an optional list parallel to the vertices, absent on old scenes), rather than correspondence by vertex index?",
+    "criteria": {
+     "true": "Yes: ids on the path survive inserts, deletes, reorders and undo, and keep old scenes valid.",
+     "false": "No: correspondence by index is enough."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "best_representation": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.91,
+    "probabilities": {
+     "A": 0.94,
+     "B": 0.06,
+     "C": 0
+    }
+   },
+   "hold_on_topology_change": {
+    "type": "noul",
+    "noul": 0.96
+   },
+   "gpu_refuse_until_redraw": {
+    "type": "noul",
+    "noul": 0.89
+   },
+   "ids_on_the_path": {
+    "type": "noul",
+    "noul": 0.92
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 2512,
+   "output_tokens": 0,
+   "state_tokens": 549,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "best_representation": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.1556,
+     "B": 0.2706,
+     "C": 0.5738
+    },
+    "confidence": 0.1244,
+    "answer_confidence": 0.5738,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "hold_on_topology_change": {
+    "type": "noul",
+    "noul": 0.9563,
+    "confidence": 0.9563,
+    "answer_confidence": 0.9563,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "gpu_refuse_until_redraw": {
+    "type": "noul",
+    "noul": 0.9735,
+    "confidence": 0.9735,
+    "answer_confidence": 0.9735,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "ids_on_the_path": {
+    "type": "noul",
+    "noul": 0.95,
+    "confidence": 0.95,
+    "answer_confidence": 0.95,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

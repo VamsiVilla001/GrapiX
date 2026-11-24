@@ -14,6 +14,53 @@
 
 use gx_contracts::DeviceTier;
 
+/// The drawing half of a device, shareable: see [`Gpu::draw_handle`].
+#[derive(Clone)]
+pub(crate) struct DrawHandle {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    drawer: std::sync::Arc<std::sync::Mutex<Option<crate::compositor::draw::GpuDrawer>>>,
+}
+
+impl DrawHandle {
+    /// Draw `paths` again into `target`, a texture [`Gpu::draw_paths`] made with
+    /// the same `width` x `height`: the frame's pixels replace what it held, and
+    /// everything that already samples it sees them.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn redraw_paths(
+        &self,
+        target: &wgpu::Texture,
+        object: &str,
+        paths: &[&crate::rasterise::PreparedPath],
+        origin: [f64; 2],
+        width: u32,
+        height: u32,
+        masks: &[crate::rasterise::mask::PreparedMask],
+    ) -> Result<(), gx_contracts::Refusal> {
+        let mut drawer = self
+            .drawer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let drawer = drawer.get_or_insert_with(|| {
+            crate::render_work::gpu_build();
+            crate::compositor::draw::GpuDrawer::new(&self.device)
+        });
+        drawer
+            .draw(
+                &self.device,
+                &self.queue,
+                object,
+                paths,
+                origin,
+                width,
+                height,
+                masks,
+                Some(target),
+            )
+            .map(|_| ())
+    }
+}
+
 /// The negotiated render device.
 pub struct Gpu {
     /// `Some` only on a real GPU. A software adapter leaves this `None` even
@@ -30,7 +77,7 @@ struct GpuInner {
     max_texture_dimension_2d: u32,
     /// 3.17: the vector drawing backend, built on first use and kept for the
     /// device's life (building Vello GPU's pipelines takes about a second).
-    drawer: std::sync::Mutex<Option<crate::compositor::draw::GpuDrawer>>,
+    drawer: std::sync::Arc<std::sync::Mutex<Option<crate::compositor::draw::GpuDrawer>>>,
 }
 
 /// Negotiate a device and the tier it supports.
@@ -109,7 +156,7 @@ fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
             device,
             queue,
             max_texture_dimension_2d,
-            drawer: std::sync::Mutex::new(None),
+            drawer: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }),
         tier,
     }
@@ -197,7 +244,20 @@ impl Gpu {
             width,
             height,
             masks,
+            None,
         ))
+    }
+
+    /// A handle that can draw again into a texture this device made, from
+    /// anywhere that outlives a borrow of the device: what an animated path's
+    /// layer source uses every frame (11.112). `None` without hardware.
+    pub(crate) fn draw_handle(&self) -> Option<DrawHandle> {
+        let gpu = self.inner.as_ref()?;
+        Some(DrawHandle {
+            device: gpu.device.clone(),
+            queue: gpu.queue.clone(),
+            drawer: std::sync::Arc::clone(&gpu.drawer),
+        })
     }
 
     /// The negotiated tier. The single answer every tier question gets.

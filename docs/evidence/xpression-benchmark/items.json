@@ -1,0 +1,1793 @@
+{
+ "questions": {
+  "coverage": {
+   "type": "choice",
+   "instructions": "How well does GrapiX cover this Ross XPression feature, going only by the plan rows given?",
+   "criteria": {
+    "built": "Built: the rows that cover it are done or already working, so the feature exists.",
+    "planned": "Planned: there is a row for all of it but it has not been built (pending).",
+    "partial": "Partial: some of it is built or planned, but a named part of the feature has no row or is not built.",
+    "missing": "Missing: no row covers it and it does not exist."
+   }
+  },
+  "core_for_broadcast": {
+   "type": "noul",
+   "instructions": "Is this feature core for a broadcast motion graphics application that uses Ross XPression as its benchmark (leaving AI features aside)?",
+   "criteria": {
+    "true": "Yes: a broadcast graphics operator or designer will expect it, and the application is not a credible alternative without it.",
+    "false": "No: it is optional, rare, vendor-specific or a convenience."
+   }
+  }
+ },
+ "items": [
+  {
+   "key": "file.new",
+   "menu": "File",
+   "label": "New project",
+   "state": {
+    "xpression_feature": "File > New project",
+    "what_it_is": "Create a new project (Ctrl+Alt+N).",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.open",
+   "menu": "File",
+   "label": "Open Project and Open Recent",
+   "state": {
+    "xpression_feature": "File > Open Project and Open Recent",
+    "what_it_is": "Open a project file; a dynamic recent list.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.revert",
+   "menu": "File",
+   "label": "Revert",
+   "state": {
+    "xpression_feature": "File > Revert",
+    "what_it_is": "Discard changes and reload the last saved state (F9).",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.30",
+      "name": "Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version",
+      "status": "pending (not started)",
+      "done_when": "Ctrl+S writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S is the only way to create a new version: t"
+     },
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.import_project",
+   "menu": "File",
+   "label": "Import > From Project/File",
+   "state": {
+    "xpression_feature": "File > Import > From Project/File",
+    "what_it_is": "Bring scenes and assets from another XPression project into the open one.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "7.2",
+      "name": "Import pipeline: four tiers, compatibility report, source retained",
+      "status": "done",
+      "done_when": "Every substitution named in the report"
+     },
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     },
+     {
+      "id": "11.64",
+      "name": "Scene Manager: one container, multiple independent graphics",
+      "status": "done",
+      "done_when": "A Scene Manager module creates and selects a saved container, adds and saves independent graphics, searches them by name or id, and opens each through the existing Rust command model. Graphic switching preserves separate"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.save",
+   "menu": "File",
+   "label": "Save, Save As, Increment And Save",
+   "state": {
+    "xpression_feature": "File > Save, Save As, Increment And Save",
+    "what_it_is": "Save in place; save under a new name; save as the next numbered version.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.30",
+      "name": "Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version",
+      "status": "pending (not started)",
+      "done_when": "Ctrl+S writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S is the only way to create a new version: t"
+     },
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.export_package",
+   "menu": "File",
+   "label": "Export Package",
+   "state": {
+    "xpression_feature": "File > Export Package",
+    "what_it_is": "Export the project or scenes as a transferable package.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "1.8",
+      "name": ".gpxpkg format and manifest",
+      "status": "done",
+      "done_when": "Per-file SHA-256, verified after write"
+     },
+     {
+      "id": "7.6",
+      "name": "Package build, verify, publish; design-system version stamped when present (optional, historical)",
+      "status": "done",
+      "done_when": "Publishing is all-or-nothing"
+     },
+     {
+      "id": "7.7",
+      "name": "Preflight",
+      "status": "done",
+      "done_when": "Returns structured refusals with allowed values"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.project_server",
+   "menu": "File",
+   "label": "Project Server: Publish, Deploy, Setup",
+   "state": {
+    "xpression_feature": "File > Project Server: Publish, Deploy, Setup",
+    "what_it_is": "Publish a project to a project server and deploy it to playout machines; configure the server.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.1",
+      "name": "Published library store; stable Take IDs",
+      "status": "done",
+      "done_when": "IDs stable across republish"
+     },
+     {
+      "id": "7.6",
+      "name": "Package build, verify, publish; design-system version stamped when present (optional, historical)",
+      "status": "done",
+      "done_when": "Publishing is all-or-nothing"
+     },
+     {
+      "id": "5.10",
+      "name": "Editor publishes by the engine's declared route: by path when co-located, chunked over a LAN (added 8 Nov 2026, user decision, split from 5.8; reworded 8 Nov 2026, user decision: the Editor cannot read the control-plane capability exchange, because R6 bars a control client and 5.7 answers the control port only for Playout, so it reads the same declaration from the engine on its asset plane)",
+      "status": "done",
+      "done_when": "The Editor's publish (cmd_publish → gx_editor::publish::publish_document → gx_asset_plane::publish_as_package) learns the engine's declared locality only from the engine itself. It sends a closed {locality:{}} read to th"
+     },
+     {
+      "id": "12.2",
+      "name": "Playout library: published graphics by Take ID",
+      "status": "pending (not started)",
+      "done_when": "Search, import, fetch, direct recall"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.exit",
+   "menu": "File",
+   "label": "Exit",
+   "state": {
+    "xpression_feature": "File > Exit",
+    "what_it_is": "Quit the application.",
+    "grapix_rows_that_might_cover_it": "(none)",
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "file.takelist_io",
+   "menu": "File (Sequence)",
+   "label": "Take Item List: import and export XML, Insert Take Item",
+   "state": {
+    "xpression_feature": "File (Sequence) > Take Item List: import and export XML, Insert Take Item",
+    "what_it_is": "Import and export the rundown as XML; insert a take item.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.4",
+      "name": "Rundown persistence and sequence engine",
+      "status": "done",
+      "done_when": "Cursor survives restart"
+     },
+     {
+      "id": "12.3",
+      "name": "Take list and rundown",
+      "status": "pending (not started)",
+      "done_when": "Persisted cursor, continue behaviour"
+     },
+     {
+      "id": "11.57",
+      "name": "Hash publish to Playout from the engine-rendered preview",
+      "status": "pending (not started)",
+      "done_when": "Builds on 11.65's engine preview monitor (split 16 Oct 2026, decision Q2) and publishes a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.undo",
+   "menu": "Edit",
+   "label": "Undo, Redo",
+   "state": {
+    "xpression_feature": "Edit > Undo, Redo",
+    "what_it_is": "Undo and redo (Ctrl+Z, Ctrl+Shift+Z).",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.37",
+      "name": "Undo/redo on the command log",
+      "status": "done",
+      "done_when": "Project-level and per-module undo (Ctrl+Z) and redo (Ctrl+Shift+Z) are built on the 11.36 command log, not on per-module state snapshots. Applying N commands to a fixture scene then undoing all N gives a content hash equ"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.undo_history",
+   "menu": "Edit",
+   "label": "Undo/Redo History",
+   "state": {
+    "xpression_feature": "Edit > Undo/Redo History",
+    "what_it_is": "A list of undoable steps to jump back to.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.37",
+      "name": "Undo/redo on the command log",
+      "status": "done",
+      "done_when": "Project-level and per-module undo (Ctrl+Z) and redo (Ctrl+Shift+Z) are built on the 11.36 command log, not on per-module state snapshots. Applying N commands to a fixture scene then undoing all N gives a content hash equ"
+     },
+     {
+      "id": "11.35",
+      "name": "Workspace modes",
+      "status": "pending (not started)",
+      "done_when": "Named workspace modes — at least Design, Animate and Data binding — each a saved layout of panels and docks, switched from the Window menu and toolbar without touching the document, selection or undo history; a mode the "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.transform_tools",
+   "menu": "Edit",
+   "label": "Select, Move, Rotate, Scale, Pivot tools",
+   "state": {
+    "xpression_feature": "Edit > Select, Move, Rotate, Scale, Pivot tools",
+    "what_it_is": "Mode tools with Ctrl+Q/W/E/R/T.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.7",
+      "name": "Overlay layer: handles, guides, selection, marquee",
+      "status": "done",
+      "done_when": "Structured so the engine can take over the raster"
+     },
+     {
+      "id": "11.44",
+      "name": "Viewport: gizmos, rulers, margins and safe guides",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.6/11.7. Scene cameras plus an editor camera; move, rotate-XYZ and scale gizmos; single and multi selection; After Effects/Photoshop-style rulers and margins configured in the project tab; title/action-safe gui"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.align",
+   "menu": "Edit",
+   "label": "Object Align",
+   "state": {
+    "xpression_feature": "Edit > Object Align",
+    "what_it_is": "Align and distribute selected objects.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.44",
+      "name": "Viewport: gizmos, rulers, margins and safe guides",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.6/11.7. Scene cameras plus an editor camera; move, rotate-XYZ and scale gizmos; single and multi selection; After Effects/Photoshop-style rulers and margins configured in the project tab; title/action-safe gui"
+     },
+     {
+      "id": "11.45",
+      "name": "Object manager on the command model: parenting, groups, order, unique names",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.8. The object manager is the authoritative hierarchy driving the viewport, inspector and every scene view; parenting, groups, reordering, show/hide and lock are 11.36 commands and all undoable. A test shows th"
+     },
+     {
+      "id": "11.9",
+      "name": "Type-aware inspector",
+      "status": "done",
+      "done_when": "Multi-select Mixed state, one undo transaction"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.hid",
+   "menu": "Edit",
+   "label": "Human Interface Devices",
+   "state": {
+    "xpression_feature": "Edit > Human Interface Devices",
+    "what_it_is": "Set up control surfaces, joysticks and other input devices.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.31",
+      "name": "One command registry behind every menu, toolbar, shortcut and agent action",
+      "status": "pending (not started)",
+      "done_when": "Every user action is one named command with a label, shortcut, enabled state and refusal reason; the menu bar, toolbar, keyboard shortcuts and the agent surface all dispatch the same command, so a disabled menu item and "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.scripting",
+   "menu": "Edit",
+   "label": "Scripting",
+   "state": {
+    "xpression_feature": "Edit > Scripting",
+    "what_it_is": "Scripts and events attached to scenes.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "16.4",
+      "name": "Script sandbox on rquickjs: deterministic per-scene JS",
+      "status": "pending (not started)",
+      "done_when": "CPU and memory bounded, disposable. No wall-clock access (Date.now, performance.now, timers) and no network (fetch, sockets); time comes only from the engine frame number and rational rate, data only through bindings, an"
+     },
+     {
+      "id": "11.55",
+      "name": "Logic: conditional triggers, scene transitions, per-scene JS modules",
+      "status": "pending (not started)",
+      "done_when": "Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes r"
+     },
+     {
+      "id": "16.14",
+      "name": "After Effects scripting: .jsx scripts run against GrapiX through undoable commands",
+      "status": "pending (not started)",
+      "done_when": "Scripts written for After Effects' documented object model (app, app.project, CompItem, layers, Property with keys and eases, app.beginUndoGroup) run in the Editor: File, Scripts lists a Scripts folder and Run Script Fil"
+     },
+     {
+      "id": "16.15",
+      "name": "ScriptUI panels and extensions: dockable script panels",
+      "status": "pending (not started)",
+      "done_when": "A script in Scripts/ScriptUI Panels is listed at the bottom of the Window menu, builds its interface into the panel it is given (this), docks, floats and closes like any Editor panel and reopens at the next launch; the c"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.media_setup",
+   "menu": "Edit",
+   "label": "OpenMAM Setup and Clip Store Setup",
+   "state": {
+    "xpression_feature": "Edit > OpenMAM Setup and Clip Store Setup",
+    "what_it_is": "Connect to a media asset manager and a clip store (video server).",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "16.1",
+      "name": "Video decoder tier: FFmpeg with NVDEC",
+      "status": "pending (not started)",
+      "done_when": "Licence position settled first (the licensing row P.2 was removed from the plan on 18 Nov 2026; the written positions are in docs/p2-licensing-positions.md)"
+     },
+     {
+      "id": "11.52",
+      "name": "Asset manager: versioned replace and provenance shown",
+      "status": "pending (not started)",
+      "done_when": "Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; "
+     },
+     {
+      "id": "11.49",
+      "name": "Video layer with alpha",
+      "status": "pending (not started)",
+      "done_when": "A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.keyboard_gpi",
+   "menu": "Edit",
+   "label": "Keyboard / GPI Mapping",
+   "state": {
+    "xpression_feature": "Edit > Keyboard / GPI Mapping",
+    "what_it_is": "Map keys and GPI inputs to commands.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.31",
+      "name": "One command registry behind every menu, toolbar, shortcut and agent action",
+      "status": "pending (not started)",
+      "done_when": "Every user action is one named command with a label, shortcut, enabled state and refusal reason; the menu bar, toolbar, keyboard shortcuts and the agent surface all dispatch the same command, so a disabled menu item and "
+     },
+     {
+      "id": "6.6",
+      "name": "Automation trigger evaluation; execution explicitly deferred",
+      "status": "done",
+      "done_when": "Deferral is a named refusal, not silence"
+     },
+     {
+      "id": "11.30",
+      "name": "Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version",
+      "status": "pending (not started)",
+      "done_when": "Ctrl+S writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S is the only way to create a new version: t"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.tessera",
+   "menu": "Edit",
+   "label": "Tessera (camera tracking, virtual studio)",
+   "state": {
+    "xpression_feature": "Edit > Tessera (camera tracking, virtual studio)",
+    "what_it_is": "Tracked-camera and virtual set engine.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "3.7",
+      "name": "Meshes, glTF, materials, lights, cameras",
+      "status": "done",
+      "done_when": "Per-object, per-face and per-element assignment"
+     },
+     {
+      "id": "11.48",
+      "name": "3D object library: assignable-face primitives, extrusion, nulls",
+      "status": "pending (not started)",
+      "done_when": "Extends 3.7. Real 3D primitives with assignable faces, extruded text and logos, cameras, lights and null/locator objects. 11.41 golden frames show lights, cameras and Z/XYZ transforms affecting the render; assigning a ma"
+     },
+     {
+      "id": "16.8",
+      "name": "3D: camera parity in Program",
+      "status": "pending (not started)",
+      "done_when": "Perspective and orthographic match"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.hardware_setup",
+   "menu": "Edit",
+   "label": "Hardware Setup",
+   "state": {
+    "xpression_feature": "Edit > Hardware Setup",
+    "what_it_is": "Video inputs and outputs, audio devices, timecode I/O, preview and monitor, GPI/tally boards, camera tracking, server channels.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.5",
+      "name": "Output configuration; is_live gated on tier, platform and reference",
+      "status": "done",
+      "done_when": "Live refused below T0, naming the failing condition"
+     },
+     {
+      "id": "12.7",
+      "name": "Output configuration with refusal reasons shown",
+      "status": "done",
+      "done_when": "A refused live adapter names the failing condition"
+     },
+     {
+      "id": "15.1",
+      "name": "Hardware, SDKs and lab access in hand",
+      "status": "pending (not started)",
+      "done_when": "Devices on a bench, SDKs licensed"
+     },
+     {
+      "id": "15.2",
+      "name": "DeckLink integration via thin FFI",
+      "status": "pending (not started)",
+      "done_when": "C++ confined to the boundary"
+     },
+     {
+      "id": "15.4",
+      "name": "Reference input and lock detection",
+      "status": "pending (not started)",
+      "done_when": "Lock state in capability and status"
+     },
+     {
+      "id": "15.5",
+      "name": "ProgramClock slaved to the card timebase; free-run reported",
+      "status": "pending (not started)",
+      "done_when": "Cadence never a function of transport"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "edit.preferences",
+   "menu": "Edit",
+   "label": "Preferences",
+   "state": {
+    "xpression_feature": "Edit > Preferences",
+    "what_it_is": "A settings dialog: editor, renderer, viewports, folders, caches, sequencer, fonts, remote server, RossTalk, log level, localisation.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     },
+     {
+      "id": "2.4",
+      "name": "OS directory conventions; the in-repo default removed",
+      "status": "done",
+      "done_when": "AppData and Application Support used correctly"
+     },
+     {
+      "id": "2.8",
+      "name": "Font subsystem ported across unchanged",
+      "status": "done",
+      "done_when": "All sources resolve on Windows"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "windows.menu",
+   "menu": "Windows",
+   "label": "Windows menu, docking layouts",
+   "state": {
+    "xpression_feature": "Windows > Windows menu, docking layouts",
+    "what_it_is": "Make a window active; saved and recalled docking layouts.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.33",
+      "name": "Window menu: every module reachable; tabbed docks and saved layouts",
+      "status": "pending (not started)",
+      "done_when": "The Window menu lists every Editor module and shows, focuses or hides it; a hidden panel is never lost and reopens where it was; panels stack as tabs inside any dock and drag between docks and tab groups; the user can sa"
+     },
+     {
+      "id": "11.5",
+      "name": "Dockable workspace",
+      "status": "done",
+      "done_when": "Layout follows the 11.63 EffectCraft/After Effects reference (criterion amended 16 Oct 2026, decision Q1; it formerly read \"follows the card sort\")"
+     },
+     {
+      "id": "11.76",
+      "name": "Named workspaces: Author, Animate, Effects, Review",
+      "status": "pending (not started)",
+      "done_when": "The layout is saved under a name and switched from the Window menu, as After Effects does and as an XPression operator keeps a layout per task; four ship (Author, Animate with the timeline and speed graph large, Effects "
+     },
+     {
+      "id": "11.75",
+      "name": "Pop out any panel into its own window",
+      "status": "pending (not started)",
+      "done_when": "Any panel or panel group can be popped out into a second Editor window (for the second monitor, as the user spreads XPression's Object Manager, Scene Director, Material Manager and Key Graph Editor), shows the same state"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "projects.settings",
+   "menu": "Projects",
+   "label": "Convert Project Mode and project settings",
+   "state": {
+    "xpression_feature": "Projects > Convert Project Mode and project settings",
+    "what_it_is": "Change the project's mode (resolution, frame rate family, SD or HD).",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     },
+     {
+      "id": "3.15",
+      "name": "Project working colour space: compositing follows the project's declared colour space",
+      "status": "done",
+      "done_when": "WorkingColorSpace offers sRGB (display-referred) and linear sRGB, with no default. A project declares one — new projects sRGB; a project created before 3.15, with no declaration, reads as linear sRGB, the space it was au"
+     },
+     {
+      "id": "1.1",
+      "name": "Scene document schema",
+      "status": "done",
+      "done_when": "Round-trips through both languages"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "projects.reveal",
+   "menu": "Projects",
+   "label": "Display project path in Explorer",
+   "state": {
+    "xpression_feature": "Projects > Display project path in Explorer",
+    "what_it_is": "Open the project's folder in Windows Explorer.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "anim.controller",
+   "menu": "Animation",
+   "label": "Animation Controller, Set Keyframe",
+   "state": {
+    "xpression_feature": "Animation > Animation Controller, Set Keyframe",
+    "what_it_is": "Per-object animation controllers and keyframing.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.20",
+      "name": "Editable animation contract and service integration",
+      "status": "done",
+      "done_when": "Document existing timeline/preset consumers and extend only missing scene channels, easing and validated edit operations; Rust/TS round-trip keys, evaluate rational-rate frames consistently, preserve old scenes and undo/"
+     },
+     {
+      "id": "11.21",
+      "name": "Inspector keyframe diamonds and Auto-Key",
+      "status": "done",
+      "done_when": "Position, Scale, Rotation, Opacity, Size and other supported properties show empty/filled current-playhead diamonds; toggling keys and Auto-Key creates or updates exactly one key, with defined first-key/base-value/off be"
+     },
+     {
+      "id": "11.68",
+      "name": "Keyframes the way After Effects and EffectCraft do them: per-property tracks, easing, graph editor",
+      "status": "active (partly built)",
+      "done_when": "Every animatable property has its own keyframe track with stopwatch-style enable, keyframe selection and nudging, easy ease and custom bezier easing, and a value and speed graph editor, matching the After Effects interac"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "anim.scene_director",
+   "menu": "Animation",
+   "label": "Scene Director",
+   "state": {
+    "xpression_feature": "Animation > Scene Director",
+    "what_it_is": "Timeline of the scene's animations, events and stop points.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.25",
+      "name": "Named animation phases on the scene timeline",
+      "status": "done",
+      "done_when": "The scene timeline carries named in, hold, out, continue and update phases as frame spans over the existing channels, matching the MOTION_PHASES vocabulary presets already use; phases round-trip Rust/TS, are authored and"
+     },
+     {
+      "id": "11.53",
+      "name": "Timeline: named stop points and a looping hold",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.25's phases, which already give In (in), Out (out) and the held state (hold). A hold phase may be marked looping, and named stop points tell Playout's Continue where to pause. Moving or retiming a key is one 1"
+     },
+     {
+      "id": "11.10",
+      "name": "Timeline: virtualised rows, canvas layers, dirty-rect repaint",
+      "status": "done",
+      "done_when": "Node count flat from 100 to 100,000 keys"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "anim.key_graph",
+   "menu": "Animation",
+   "label": "Key Graph Editor",
+   "state": {
+    "xpression_feature": "Animation > Key Graph Editor",
+    "what_it_is": "Edit curves between keys.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.11",
+      "name": "Speed graph and curve editing",
+      "status": "done",
+      "done_when": "Scrub causes no static-layer repaint"
+     },
+     {
+      "id": "11.23",
+      "name": "Simple easing, Custom Bezier and starter presets",
+      "status": "done",
+      "done_when": "Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier persist and evaluate correctly; Fade, Slide, Scale and Pop use the existing preset library, supported parameters and save-selection workflow; advanced curves appea"
+     },
+     {
+      "id": "11.78",
+      "name": "Pre- and post-infinity on the speed graph: constant, reset, repeat",
+      "status": "pending (not started)",
+      "done_when": "A property's curve can continue before its first key and after its last as constant, reset or repeat (cycle), previewed in the speed graph and evaluated by the engine's animation evaluator and the contract, so a looping "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.project_manager",
+   "menu": "Display",
+   "label": "Project Manager panel",
+   "state": {
+    "xpression_feature": "Display > Project Manager panel",
+    "what_it_is": "Browse the project's scenes and media folders.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     },
+     {
+      "id": "11.52",
+      "name": "Asset manager: versioned replace and provenance shown",
+      "status": "pending (not started)",
+      "done_when": "Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; "
+     },
+     {
+      "id": "11.64",
+      "name": "Scene Manager: one container, multiple independent graphics",
+      "status": "done",
+      "done_when": "A Scene Manager module creates and selects a saved container, adds and saves independent graphics, searches them by name or id, and opens each through the existing Rust command model. Graphic switching preserves separate"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.scene_manager",
+   "menu": "Display",
+   "label": "Scene Manager panel",
+   "state": {
+    "xpression_feature": "Display > Scene Manager panel",
+    "what_it_is": "List, search and manage scenes.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.64",
+      "name": "Scene Manager: one container, multiple independent graphics",
+      "status": "done",
+      "done_when": "A Scene Manager module creates and selects a saved container, adds and saves independent graphics, searches them by name or id, and opens each through the existing Rust command model. Graphic switching preserves separate"
+     },
+     {
+      "id": "11.72",
+      "name": "Scene Manager as a dense list, with a row menu and keys, as XPression's Scene Manager is worked",
+      "status": "active (partly built)",
+      "done_when": "The Scene Manager shows one 26 px row per scene by default (a thumbnail view stays one click away and is remembered per user); a click opens the scene, the arrows, Home and End walk the rows, Enter opens, Delete takes tw"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.object_manager",
+   "menu": "Display",
+   "label": "Object Manager panel",
+   "state": {
+    "xpression_feature": "Display > Object Manager panel",
+    "what_it_is": "Scene object tree.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.8",
+      "name": "Object manager treegrid",
+      "status": "done",
+      "done_when": "Hierarchy, visibility, lock, alpha, transforms"
+     },
+     {
+      "id": "11.45",
+      "name": "Object manager on the command model: parenting, groups, order, unique names",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.8. The object manager is the authoritative hierarchy driving the viewport, inspector and every scene view; parenting, groups, reordering, show/hide and lock are 11.36 commands and all undoable. A test shows th"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.material_manager",
+   "menu": "Display",
+   "label": "Material Manager panel",
+   "state": {
+    "xpression_feature": "Display > Material Manager panel",
+    "what_it_is": "Materials and textures.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.12",
+      "name": "Material manager",
+      "status": "done",
+      "done_when": "Shared instances, relink, usage lookup"
+     },
+     {
+      "id": "11.50",
+      "name": "One physically lit material type and a material library",
+      "status": "pending (not started)",
+      "done_when": "Supersedes 1.3's split of MaterialKind into solid colour, image, PBR and unlit: one physically lit material type replaces them in Rust, generated TS, validator, engine and UI, still consumed by all three from one Rust de"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.inspector",
+   "menu": "Display",
+   "label": "Object Inspector panel",
+   "state": {
+    "xpression_feature": "Display > Object Inspector panel",
+    "what_it_is": "Properties of the selection.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.9",
+      "name": "Type-aware inspector",
+      "status": "done",
+      "done_when": "Multi-select Mixed state, one undo transaction"
+     },
+     {
+      "id": "11.46",
+      "name": "Inspector: per-type property sets, scrub fields, animation stopwatch",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.9/11.21. Each object type in 11.47–11.49 shows exactly its defined property set; numeric fields scrub by dragging and accept negative values, and one scrub is committed as one command, not one per mouse move. "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.widgets",
+   "menu": "Display",
+   "label": "Widgets panel",
+   "state": {
+    "xpression_feature": "Display > Widgets panel",
+    "what_it_is": "Ready-made objects such as clocks, counters and timers.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.56",
+      "name": "Widgets: clock, countdown, counter, round timer",
+      "status": "pending (not started)",
+      "done_when": "Time is derived from the engine frame count and rational rate, never from the wall clock (invariant 62). At 60000/1001 a countdown shows exactly the rationally computed value after N frames; a long-run test shows zero dr"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.stagger",
+   "menu": "Display",
+   "label": "Stagger Animations",
+   "state": {
+    "xpression_feature": "Display > Stagger Animations",
+    "what_it_is": "Offset the animations of several objects by a step.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.77",
+      "name": "Stagger animations: offset the keys of several selected objects by a step",
+      "status": "pending (not started)",
+      "done_when": "With several objects selected, a Stagger command offsets each one's selected keys by a step (frames, in the order of selection or the layer order, with a reverse and a from-centre option), as one undoable gesture, ported"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.effects",
+   "menu": "Display",
+   "label": "Effects panel",
+   "state": {
+    "xpression_feature": "Display > Effects panel",
+    "what_it_is": "Browse and apply effects.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.69",
+      "name": "Effects & Presets and Effect Controls in the Editor: EffectCraft's 306 effects listed, the ones GrapiX renders marked usable",
+      "status": "active (partly built)",
+      "done_when": "An Effects & Presets panel lists EffectCraft's whole catalogue (306 effects in After Effects' categories, attributed, generated into the contract from the pinned reference) with search; the 16 effects the GrapiX engine r"
+     },
+     {
+      "id": "11.70",
+      "name": "Preset library: EffectCraft's 8 original presets and GrapiX's own animation and effect presets",
+      "status": "active (partly built)",
+      "done_when": "The Effects & Presets panel carries animation presets beside effects: EffectCraft's 8 original text-animator presets (attributed; they apply once text animators exist, 11.61, and say so until then) and GrapiX's own broad"
+     },
+     {
+      "id": "11.79",
+      "name": "Effects & Presets categories as collapsible dropdowns",
+      "status": "active (partly built)",
+      "done_when": "Each category of the Effects & Presets panel (EffectCraft's catalogue categories and the preset categories) is a bar that opens and folds, folded until opened as After Effects' tree is; the open set is kept per user; a t"
+     },
+     {
+      "id": "3.25",
+      "name": "Port EffectCraft's effects beyond the first 16, broadcast-first",
+      "status": "active (partly built)",
+      "done_when": "Effects from EffectCraft's catalogue are ported in priority order for broadcast graphics (Transition, Stylize, Distort, Generate, Blur & Sharpen, Color Correction, Keying, then the rest; Audio and analysis effects last),"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.clip_browser",
+   "menu": "Display",
+   "label": "Clip Browser",
+   "state": {
+    "xpression_feature": "Display > Clip Browser",
+    "what_it_is": "Browse video and audio clips; cue a clip on a server channel.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.49",
+      "name": "Video layer with alpha",
+      "status": "pending (not started)",
+      "done_when": "A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants "
+     },
+     {
+      "id": "16.1",
+      "name": "Video decoder tier: FFmpeg with NVDEC",
+      "status": "pending (not started)",
+      "done_when": "Licence position settled first (the licensing row P.2 was removed from the plan on 18 Nov 2026; the written positions are in docs/p2-licensing-positions.md)"
+     },
+     {
+      "id": "11.52",
+      "name": "Asset manager: versioned replace and provenance shown",
+      "status": "pending (not started)",
+      "done_when": "Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.server_channels",
+   "menu": "Display",
+   "label": "Server Channels",
+   "state": {
+    "xpression_feature": "Display > Server Channels",
+    "what_it_is": "Video server channels clips play on.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "15.2",
+      "name": "DeckLink integration via thin FFI",
+      "status": "pending (not started)",
+      "done_when": "C++ confined to the boundary"
+     },
+     {
+      "id": "15.3",
+      "name": "AJA integration",
+      "status": "pending (not started)",
+      "done_when": "Same wrapper shape"
+     },
+     {
+      "id": "6.5",
+      "name": "Output configuration; is_live gated on tier, platform and reference",
+      "status": "done",
+      "done_when": "Live refused below T0, naming the failing condition"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.pbus",
+   "menu": "Display",
+   "label": "PBus Mapping",
+   "state": {
+    "xpression_feature": "Display > PBus Mapping",
+    "what_it_is": "Map an external parameter bus (control surfaces, data) to object properties.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.19",
+      "name": "Data binding panel integrated with object properties",
+      "status": "done",
+      "done_when": "Discover the data schema; create, edit and remove property bindings, preview sample data, show invalid paths/types explicitly and preserve bindings through save/reopen"
+     },
+     {
+      "id": "11.26",
+      "name": "Template control contract: declared operator fields",
+      "status": "done",
+      "done_when": "A scene declares which object properties an operator may fill, as a typed, named field list carried on the document; each field names its target object/property, its type and its default, refuses an unknown or non-fillab"
+     },
+     {
+      "id": "11.54",
+      "name": "Template field constraints",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published re"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.object_library",
+   "menu": "Display",
+   "label": "Object Library",
+   "state": {
+    "xpression_feature": "Display > Object Library",
+    "what_it_is": "A library of reusable objects and scenes.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.47",
+      "name": "2D object library: pen paths, masks, clip groups, trim paths",
+      "status": "pending (not started)",
+      "done_when": "Text, image quad, shapes, pen-tool paths, masks and clip groups (a clip shape plus a content composition), keyframable paths and trim paths. Each object type has an 11.41 golden-frame test; a clip group clips its content"
+     },
+     {
+      "id": "11.48",
+      "name": "3D object library: assignable-face primitives, extrusion, nulls",
+      "status": "pending (not started)",
+      "done_when": "Extends 3.7. Real 3D primitives with assignable faces, extruded text and logos, cameras, lights and null/locator objects. 11.41 golden frames show lights, cameras and Z/XYZ transforms affecting the render; assigning a ma"
+     },
+     {
+      "id": "11.40",
+      "name": "Component registry and project variables",
+      "status": "pending (not started)",
+      "done_when": "Named project variables (colour, font, spacing, motion duration and easing) are referenced by name from objects instead of copied; a registry holds reusable components (scorebug, lower third, player card, bracket, …) wit"
+     },
+     {
+      "id": "6.1",
+      "name": "Published library store; stable Take IDs",
+      "status": "done",
+      "done_when": "IDs stable across republish"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.audio_files",
+   "menu": "Display",
+   "label": "Audio Files",
+   "state": {
+    "xpression_feature": "Display > Audio Files",
+    "what_it_is": "Audio clips used by scenes and sequences.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     },
+     {
+      "id": "3.25",
+      "name": "Port EffectCraft's effects beyond the first 16, broadcast-first",
+      "status": "active (partly built)",
+      "done_when": "Effects from EffectCraft's catalogue are ported in priority order for broadcast graphics (Transition, Stylize, Distort, Generate, Blur & Sharpen, Color Correction, Keying, then the rest; Audio and analysis effects last),"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.sequencer_list",
+   "menu": "Display",
+   "label": "Sequencer List",
+   "state": {
+    "xpression_feature": "Display > Sequencer List",
+    "what_it_is": "The rundown of take items.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.4",
+      "name": "Rundown persistence and sequence engine",
+      "status": "done",
+      "done_when": "Cursor survives restart"
+     },
+     {
+      "id": "12.3",
+      "name": "Take list and rundown",
+      "status": "pending (not started)",
+      "done_when": "Persisted cursor, continue behaviour"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.output_monitors",
+   "menu": "Display",
+   "label": "Output Monitors",
+   "state": {
+    "xpression_feature": "Display > Output Monitors",
+    "what_it_is": "Monitors of program, preview, fill and key.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "12.5",
+      "name": "Confidence monitors, fill and key",
+      "status": "pending (not started)",
+      "done_when": "Native-resolution tier available"
+     },
+     {
+      "id": "11.65",
+      "name": "Engine preview monitor in the Editor",
+      "status": "active (partly built)",
+      "done_when": "The Preview panel shows an engine-rendered frame (11.41) of the active graphic at the playhead, labelled \"Engine\", within 250 ms of an edit on the reference machine (method recorded); the Three.js viewport is labelled \"D"
+     },
+     {
+      "id": "3.11",
+      "name": "Preview and Program frame emission; bounded queue, counted drops",
+      "status": "done",
+      "done_when": "Stall drops frames, never blocks the clock"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.online_preview",
+   "menu": "Display",
+   "label": "Online Preview",
+   "state": {
+    "xpression_feature": "Display > Online Preview",
+    "what_it_is": "Preview what is on or going to air.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.65",
+      "name": "Engine preview monitor in the Editor",
+      "status": "active (partly built)",
+      "done_when": "The Preview panel shows an engine-rendered frame (11.41) of the active graphic at the playhead, labelled \"Engine\", within 250 ms of an edit on the reference machine (method recorded); the Three.js viewport is labelled \"D"
+     },
+     {
+      "id": "3.21",
+      "name": "GPU Program/Preview output: encode, quantise once, bounded asynchronous readback",
+      "status": "active (partly built)",
+      "done_when": "Frames leave the GPU through the 3.15 output transforms with exactly one quantisation, via a bounded asynchronous readback ring that never stalls the Program clock; a lower third, a scorebug with about 20 live text field"
+     },
+     {
+      "id": "8.9",
+      "name": "render.preview returning a real frame",
+      "status": "done",
+      "done_when": "An agent can see its own output"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.take_inspector",
+   "menu": "Display",
+   "label": "Take Inspector",
+   "state": {
+    "xpression_feature": "Display > Take Inspector",
+    "what_it_is": "Inspect and edit the selected take item's values.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "12.3",
+      "name": "Take list and rundown",
+      "status": "pending (not started)",
+      "done_when": "Persisted cursor, continue behaviour"
+     },
+     {
+      "id": "12.8",
+      "name": "Playout operator fill form and pages",
+      "status": "pending (not started)",
+      "done_when": "Publish a graphic with text, colour and required fields; open it in Playout without the Editor project; the form is built from the published package alone; fill valid values, get a named refusal for an invalid or missing"
+     },
+     {
+      "id": "11.27",
+      "name": "Test fill in the Editor: fill a template instance (operator pages are 12.8)",
+      "status": "done",
+      "done_when": "The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.object_toolbar",
+   "menu": "Display",
+   "label": "Object Toolbar",
+   "state": {
+    "xpression_feature": "Display > Object Toolbar",
+    "what_it_is": "Create objects.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.32",
+      "name": "Menu bar and toolbar (After Effects conventions)",
+      "status": "pending (not started)",
+      "done_when": "A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Dup"
+     },
+     {
+      "id": "11.7",
+      "name": "Overlay layer: handles, guides, selection, marquee",
+      "status": "done",
+      "done_when": "Structured so the engine can take over the raster"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "display.status_log",
+   "menu": "Display",
+   "label": "Status Log",
+   "state": {
+    "xpression_feature": "Display > Status Log",
+    "what_it_is": "Application log.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "2.11",
+      "name": "Structured JSON Lines log sink: one schema, one file per process, bounded queue that never blocks, losses on record, rotation",
+      "status": "done",
+      "done_when": "A test floods the sink faster than it writes: the caller never waits, every written line parses against the ADR-0004 schema, seq has no gaps except those a log.lost record states, files rotate by size and expire after 30"
+     },
+     {
+      "id": "2.27",
+      "name": "Live telemetry in Help: a small, detailed performance graph in Playout",
+      "status": "done",
+      "done_when": "Playout's Help menu opens a compact telemetry panel fed by the engine (the existing performance request and heartbeat, extended where needed): a live graph per resource, not just CPU and RAM: GPU frame time and readback "
+     },
+     {
+      "id": "11.74",
+      "name": "Chrome savings: a status line for the Activity log, one header row, a one-row timeline toolbar",
+      "status": "pending (not started)",
+      "done_when": "The Activity log is one status line showing the latest entry that opens to the full log as a drawer (6.2 % of the height now for two lines); the header row (scene id, name, New, Open, Import, Save, Undo, Redo, Reset layo"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "tools.flush",
+   "menu": "Tools",
+   "label": "Advanced > Flush",
+   "state": {
+    "xpression_feature": "Tools > Advanced > Flush",
+    "what_it_is": "Flush caches.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.58",
+      "name": "Console and debugger",
+      "status": "pending (not started)",
+      "done_when": "Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, "
+     },
+     {
+      "id": "2.27",
+      "name": "Live telemetry in Help: a small, detailed performance graph in Playout",
+      "status": "done",
+      "done_when": "Playout's Help menu opens a compact telemetry panel fed by the engine (the existing performance request and heartbeat, extended where needed): a live graph per resource, not just CPU and RAM: GPU frame time and readback "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "tools.debug",
+   "menu": "Tools",
+   "label": "Debug > Video Cache Monitor",
+   "state": {
+    "xpression_feature": "Tools > Debug > Video Cache Monitor",
+    "what_it_is": "Diagnostic monitors.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.58",
+      "name": "Console and debugger",
+      "status": "pending (not started)",
+      "done_when": "Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, "
+     },
+     {
+      "id": "2.27",
+      "name": "Live telemetry in Help: a small, detailed performance graph in Playout",
+      "status": "done",
+      "done_when": "Playout's Help menu opens a compact telemetry panel fed by the engine (the existing performance request and heartbeat, extended where needed): a live graph per resource, not just CPU and RAM: GPU frame time and readback "
+     },
+     {
+      "id": "2.14",
+      "name": "Diagnostic bundle: gx-diag and a menu item in each shell",
+      "status": "done",
+      "done_when": "A bundle from a conformance run holds every process log, the as-run log, versions and build hashes, the capability surface and the sanitised configuration, and no credential (Done 17 Nov 2026, module by module as the use"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "tools.input_grabber",
+   "menu": "Tools",
+   "label": "Input Grabber",
+   "state": {
+    "xpression_feature": "Tools > Input Grabber",
+    "what_it_is": "Capture a live video input into the scene.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "15.2",
+      "name": "DeckLink integration via thin FFI",
+      "status": "pending (not started)",
+      "done_when": "C++ confined to the boundary"
+     },
+     {
+      "id": "15.4",
+      "name": "Reference input and lock detection",
+      "status": "pending (not started)",
+      "done_when": "Lock state in capability and status"
+     },
+     {
+      "id": "11.49",
+      "name": "Video layer with alpha",
+      "status": "pending (not started)",
+      "done_when": "A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants "
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "tools.record",
+   "menu": "Tools",
+   "label": "Record Client",
+   "state": {
+    "xpression_feature": "Tools > Record Client",
+    "what_it_is": "Record the program output to a file.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "3.10",
+      "name": "OutputAdapter trait; null, virtual, recording",
+      "status": "done",
+      "done_when": "Unknown adapter id refused with the offered list"
+     },
+     {
+      "id": "14.5",
+      "name": "NVENC encode",
+      "status": "pending (not started)",
+      "done_when": "Bandwidth within a LAN budget"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "help.topics",
+   "menu": "Help",
+   "label": "Help Topics",
+   "state": {
+    "xpression_feature": "Help > Help Topics",
+    "what_it_is": "Open the manual.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "2.14",
+      "name": "Diagnostic bundle: gx-diag and a menu item in each shell",
+      "status": "done",
+      "done_when": "A bundle from a conformance run holds every process log, the as-run log, versions and build hashes, the capability surface and the sanitised configuration, and no credential (Done 17 Nov 2026, module by module as the use"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "seq.rundown",
+   "menu": "Sequence",
+   "label": "Sequencer: ordered take items, cue, take, out, run order",
+   "state": {
+    "xpression_feature": "Sequence > Sequencer: ordered take items, cue, take, out, run order",
+    "what_it_is": "The operator's rundown.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.4",
+      "name": "Rundown persistence and sequence engine",
+      "status": "done",
+      "done_when": "Cursor survives restart"
+     },
+     {
+      "id": "12.3",
+      "name": "Take list and rundown",
+      "status": "pending (not started)",
+      "done_when": "Persisted cursor, continue behaviour"
+     },
+     {
+      "id": "12.4",
+      "name": "Transport controls: cue, take, continue, out, clear",
+      "status": "done",
+      "done_when": "Committed frame number shown"
+     },
+     {
+      "id": "12.8",
+      "name": "Playout operator fill form and pages",
+      "status": "pending (not started)",
+      "done_when": "Publish a graphic with text, colour and required fields; open it in Playout without the Editor project; the form is built from the published package alone; fill valid values, get a named refusal for an invalid or missing"
+     },
+     {
+      "id": "12.9",
+      "name": "Lower-third operator workflow acceptance (end to end)",
+      "status": "pending (not started)",
+      "done_when": "In the running Editor, create a lower third with named In/Hold/Continue/Update/Out phases and typed required fields and publish it. In the running Playout, find it in the library, add it to a persisted rundown page, fill"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "seq.asrun",
+   "menu": "Sequence",
+   "label": "As-run log",
+   "state": {
+    "xpression_feature": "Sequence > As-run log",
+    "what_it_is": "A record of what went to air and when.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "12.11",
+      "name": "As-run record",
+      "status": "active (partly built)",
+      "done_when": "Every accepted or refused Cue, Take, Update, Continue, Out and Clear writes one as-run record to the 2.10 JSON Lines audit sink: monotonic sequence, intent id, operator identity and scope (2.9), page, revision, hash, cha"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "data.datalinq",
+   "menu": "Data",
+   "label": "DataLinq: live data from XML, CSV, Excel, databases and web",
+   "state": {
+    "xpression_feature": "Data > DataLinq: live data from XML, CSV, Excel, databases and web",
+    "what_it_is": "Scenes bound to external data that updates live.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.19",
+      "name": "Data binding panel integrated with object properties",
+      "status": "done",
+      "done_when": "Discover the data schema; create, edit and remove property bindings, preview sample data, show invalid paths/types explicitly and preserve bindings through save/reopen"
+     },
+     {
+      "id": "19.2",
+      "name": "Data contract",
+      "status": "pending (not started)",
+      "done_when": "DataSource, DataTable, DataRecord and typed DataField values, plus a source revision and timestamp and a staleness state, defined in Rust (gx-contracts) with TS generated; round-trips both ways; a schema change is a name"
+     },
+     {
+      "id": "19.4",
+      "name": "Connectors: files and web",
+      "status": "pending (not started)",
+      "done_when": "CSV, Excel (xlsx), JSON and XML from a file, HTTP (with a poll interval) or WebSocket, RSS/Atom, and manually edited tables. Each connector detects schema drift and names it, and a file watch uses 2.5"
+     },
+     {
+      "id": "19.5",
+      "name": "Connectors: databases and sheets",
+      "status": "pending (not started)",
+      "done_when": "SQL through PostgreSQL, MySQL, SQL Server and ODBC; Google Sheets. Source credentials live in the OS keychain and never appear in scenes, packages, logs or the MCP surface"
+     },
+     {
+      "id": "19.6",
+      "name": "Many sources, change propagation and staleness",
+      "status": "pending (not started)",
+      "done_when": "Multiple sources run concurrently. Subscribers get a snapshot then ordered deltas. The last good value is retained, and staleness past a source's declared limit is surfaced to every subscriber (never silently stale). A d"
+     },
+     {
+      "id": "19.8",
+      "name": "Playout reads the Data Server",
+      "status": "pending (not started)",
+      "done_when": "At cue/take, Playout resolves each bound field from the server and sends the values with the intent. The committed frame records the data revision it used. A missing or stale field follows the 19.1 policy and names the f"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "ctl.external",
+   "menu": "Control",
+   "label": "External control protocol (RossTalk), automation, GPI and tally",
+   "state": {
+    "xpression_feature": "Control > External control protocol (RossTalk), automation, GPI and tally",
+    "what_it_is": "A text protocol and contact closures for automation to cue and take.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.6",
+      "name": "Automation trigger evaluation; execution explicitly deferred",
+      "status": "done",
+      "done_when": "Deferral is a named refusal, not silence"
+     },
+     {
+      "id": "8.11",
+      "name": "playout.* and outputs.*, scope-gated",
+      "status": "done",
+      "done_when": "author token refused on take and configure"
+     },
+     {
+      "id": "2.23",
+      "name": "MCP HTTP authentication, or loopback-only recorded as the decision",
+      "status": "done",
+      "done_when": "A request to the MCP HTTP server without a credential that grants the scope its tool needs is refused by name (the control plane's token, verified once per connection), or the user records that loopback-only is the accep"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "mos.newsroom",
+   "menu": "Integration",
+   "label": "MOS newsroom integration",
+   "state": {
+    "xpression_feature": "Integration > MOS newsroom integration",
+    "what_it_is": "Rundown and story data from a newsroom system.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "6.4",
+      "name": "Rundown persistence and sequence engine",
+      "status": "done",
+      "done_when": "Cursor survives restart"
+     },
+     {
+      "id": "12.3",
+      "name": "Take list and rundown",
+      "status": "pending (not started)",
+      "done_when": "Persisted cursor, continue behaviour"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "text.crawl_roll",
+   "menu": "Objects",
+   "label": "Crawl and roll (ticker, credits)",
+   "state": {
+    "xpression_feature": "Objects > Crawl and roll (ticker, credits)",
+    "what_it_is": "Scrolling text objects: tickers and end-credit rolls.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.51",
+      "name": "Text engine depth: auto-fit, complex scripts, font links",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.13/3.6. OTF, TTF and WOFF files, Adobe font links and CSS embed links resolve through the font manager; tracking, leading and auto-fit/shrink-to-box; complex-script shaping for at least Latin, CJK and Arabic R"
+     },
+     {
+      "id": "11.55",
+      "name": "Logic: conditional triggers, scene transitions, per-scene JS modules",
+      "status": "pending (not started)",
+      "done_when": "Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes r"
+     },
+     {
+      "id": "12.10",
+      "name": "Overlay layers with channel/layer targeting on one Program channel",
+      "status": "active (partly built)",
+      "done_when": "Cue, Take, Update, Continue, Out and Clear carry a channel and layer target; only the Program channel is accepted and any other channel refuses by name; a bug, a lower third and a ticker on separate layers are cued, take"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "live.video",
+   "menu": "Objects",
+   "label": "Live video in a scene (camera feeds, picture in picture)",
+   "state": {
+    "xpression_feature": "Objects > Live video in a scene (camera feeds, picture in picture)",
+    "what_it_is": "A live video input as a layer.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.49",
+      "name": "Video layer with alpha",
+      "status": "pending (not started)",
+      "done_when": "A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants "
+     },
+     {
+      "id": "16.1",
+      "name": "Video decoder tier: FFmpeg with NVDEC",
+      "status": "pending (not started)",
+      "done_when": "Licence position settled first (the licensing row P.2 was removed from the plan on 18 Nov 2026; the written positions are in docs/p2-licensing-positions.md)"
+     },
+     {
+      "id": "15.4",
+      "name": "Reference input and lock detection",
+      "status": "pending (not started)",
+      "done_when": "Lock state in capability and status"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "audio.engine",
+   "menu": "Audio",
+   "label": "Audio: sound with graphics, levels, output",
+   "state": {
+    "xpression_feature": "Audio > Audio: sound with graphics, levels, output",
+    "what_it_is": "Audio cues played with a graphic.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.43",
+      "name": "Project settings, explicit save and single-file .gpx packaging",
+      "status": "active (partly built)",
+      "done_when": "Work is saved as a .gpx project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "outputs.keyfill",
+   "menu": "Outputs",
+   "label": "Key and fill video outputs, genlock, multiple channels",
+   "state": {
+    "xpression_feature": "Outputs > Key and fill video outputs, genlock, multiple channels",
+    "what_it_is": "Fill and key to a switcher, locked to the facility reference.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "12.5",
+      "name": "Confidence monitors, fill and key",
+      "status": "pending (not started)",
+      "done_when": "Native-resolution tier available"
+     },
+     {
+      "id": "12.10",
+      "name": "Overlay layers with channel/layer targeting on one Program channel",
+      "status": "active (partly built)",
+      "done_when": "Cue, Take, Update, Continue, Out and Clear carry a channel and layer target; only the Program channel is accepted and any other channel refuses by name; a bug, a lower third and a ticker on separate layers are cued, take"
+     },
+     {
+      "id": "15.2",
+      "name": "DeckLink integration via thin FFI",
+      "status": "pending (not started)",
+      "done_when": "C++ confined to the boundary"
+     },
+     {
+      "id": "15.4",
+      "name": "Reference input and lock detection",
+      "status": "pending (not started)",
+      "done_when": "Lock state in capability and status"
+     },
+     {
+      "id": "15.5",
+      "name": "ProgramClock slaved to the card timebase; free-run reported",
+      "status": "pending (not started)",
+      "done_when": "Cadence never a function of transport"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "tracking.camera",
+   "menu": "Virtual",
+   "label": "Camera tracking and virtual studio",
+   "state": {
+    "xpression_feature": "Virtual > Camera tracking and virtual studio",
+    "what_it_is": "Tracked cameras drive 3D scenes.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "3.7",
+      "name": "Meshes, glTF, materials, lights, cameras",
+      "status": "done",
+      "done_when": "Per-object, per-face and per-element assignment"
+     },
+     {
+      "id": "16.8",
+      "name": "3D: camera parity in Program",
+      "status": "pending (not started)",
+      "done_when": "Perspective and orthographic match"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "roles.security",
+   "menu": "Security",
+   "label": "Operator roles and permissions",
+   "state": {
+    "xpression_feature": "Security > Operator roles and permissions",
+    "what_it_is": "Who may edit and who may take.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "2.9",
+      "name": "gx1 HMAC tokens; roles and scopes",
+      "status": "done",
+      "done_when": "Algorithm fixed by prefix at parse time"
+     },
+     {
+      "id": "2.15",
+      "name": "Named operator login for Playout: the person, not only the credential",
+      "status": "active (partly built)",
+      "done_when": "An operator signs in to Playout by name; every Program command carries that person; a command without a signed-in operator is refused by name; the as-run record names the person and the credential (user decision 16 Nov 2"
+     },
+     {
+      "id": "5.7",
+      "name": "Control-port scope enforcement: every request checked against the token role's scopes at the transport, before the engine sees it (added 8 Nov 2026 from the done-row review: server.rs verified a token's signature and then ignored its claims; only the MCP server enforced scopes)",
+      "status": "done",
+      "done_when": "A conformance test sends every control request with an author-scoped token and each is refused by name at the transport; the engine handler is never reached (asserted by trace). Done before Phase 14 exposes the port beyo"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "i18n.localisation",
+   "menu": "Preferences",
+   "label": "Localisation and language",
+   "state": {
+    "xpression_feature": "Preferences > Localisation and language",
+    "what_it_is": "Interface language.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.42",
+      "name": "Lint framework and first rules",
+      "status": "pending (not started)",
+      "done_when": "A lint command returns structured findings: severity, rule, object and fix hint. First rules: title/action-safe violation; missing glyph for any bound field or target language; text overflow against a worst-case string f"
+     },
+     {
+      "id": "1.1",
+      "name": "Scene document schema",
+      "status": "done",
+      "done_when": "Round-trips through both languages"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "template.pages",
+   "menu": "Sequence",
+   "label": "Template pages for operators (fill fields, constraints)",
+   "state": {
+    "xpression_feature": "Sequence > Template pages for operators (fill fields, constraints)",
+    "what_it_is": "Operator fills a template's declared fields.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "11.26",
+      "name": "Template control contract: declared operator fields",
+      "status": "done",
+      "done_when": "A scene declares which object properties an operator may fill, as a typed, named field list carried on the document; each field names its target object/property, its type and its default, refuses an unknown or non-fillab"
+     },
+     {
+      "id": "11.54",
+      "name": "Template field constraints",
+      "status": "pending (not started)",
+      "done_when": "Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published re"
+     },
+     {
+      "id": "12.8",
+      "name": "Playout operator fill form and pages",
+      "status": "pending (not started)",
+      "done_when": "Publish a graphic with text, colour and required fields; open it in Playout without the Editor project; the form is built from the published package alone; fill valid values, get a named refusal for an invalid or missing"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  },
+  {
+   "key": "transitions",
+   "menu": "Animation",
+   "label": "Scene transitions and transition effects",
+   "state": {
+    "xpression_feature": "Animation > Scene transitions and transition effects",
+    "what_it_is": "Transitions between scenes or takes.",
+    "grapix_rows_that_might_cover_it": [
+     {
+      "id": "16.3",
+      "name": "Transitions beyond cut, dual-target",
+      "status": "pending (not started)",
+      "done_when": "Dropped-frame behaviour certified"
+     },
+     {
+      "id": "11.55",
+      "name": "Logic: conditional triggers, scene transitions, per-scene JS modules",
+      "status": "pending (not started)",
+      "done_when": "Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes r"
+     }
+    ],
+    "note": "GrapiX is a Windows broadcast motion graphics application: an Editor (authoring) and Playout (operator) over a GPU render engine. Judge only by the rows given; a row that is pending is planned, not built."
+   }
+  }
+ ]
+}

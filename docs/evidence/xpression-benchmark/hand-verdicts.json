@@ -1,0 +1,680 @@
+{
+ "file.new": {
+  "label": "New project",
+  "menu": "File",
+  "verdict": "built",
+  "note": "Start screen, New project dialog (22 Nov), run in the real window 23 Nov",
+  "rows": [
+   "11.43"
+  ]
+ },
+ "file.open": {
+  "label": "Open Project and Open Recent",
+  "menu": "File",
+  "verdict": "built",
+  "note": "Open project and the recent list are built",
+  "rows": [
+   "11.43"
+  ]
+ },
+ "file.revert": {
+  "label": "Revert",
+  "menu": "File",
+  "verdict": "missing",
+  "note": "No row names revert; 11.30 is save only",
+  "rows": [
+   "11.30",
+   "11.43"
+  ]
+ },
+ "file.import_project": {
+  "label": "Import > From Project/File",
+  "menu": "File",
+  "verdict": "missing",
+  "note": "7.2 imports design sources (SVG, Figma), not another GrapiX project's scenes",
+  "rows": [
+   "7.2",
+   "11.43",
+   "11.64"
+  ]
+ },
+ "file.save": {
+  "label": "Save, Save As, Increment And Save",
+  "menu": "File",
+  "verdict": "partial",
+  "note": "Save As built 23 Nov; Save in place and Increment And Save are 11.30, pending",
+  "rows": [
+   "11.30",
+   "11.43"
+  ]
+ },
+ "file.export_package": {
+  "label": "Export Package",
+  "menu": "File",
+  "verdict": "partial",
+  "note": "Package format, build, verify and publish exist (1.8, 7.6); no menu command or dialog",
+  "rows": [
+   "1.8",
+   "7.6",
+   "7.7"
+  ]
+ },
+ "file.project_server": {
+  "label": "Project Server: Publish, Deploy, Setup",
+  "menu": "File",
+  "verdict": "partial",
+  "note": "Published library, publish by route and Playout library exist; no deploy to several Playout machines, no server setup UI",
+  "rows": [
+   "6.1",
+   "7.6",
+   "5.10",
+   "12.2"
+  ]
+ },
+ "file.exit": {
+  "label": "Exit",
+  "menu": "File",
+  "verdict": "built",
+  "note": "Window close; the shell exits in order (2.16)",
+  "rows": []
+ },
+ "file.takelist_io": {
+  "label": "Take Item List: import and export XML, Insert Take Item",
+  "menu": "File (Sequence)",
+  "verdict": "partial",
+  "note": "Rundown and take list are planned (6.4 done, 12.3 pending); no import or export format",
+  "rows": [
+   "6.4",
+   "12.3",
+   "11.57"
+  ]
+ },
+ "edit.undo": {
+  "label": "Undo, Redo",
+  "menu": "Edit",
+  "verdict": "built",
+  "note": "Command-log undo and redo are done",
+  "rows": [
+   "11.37"
+  ]
+ },
+ "edit.undo_history": {
+  "label": "Undo/Redo History",
+  "menu": "Edit",
+  "verdict": "missing",
+  "note": "The log exists in the command model; no history panel or menu",
+  "rows": [
+   "11.37",
+   "11.35"
+  ]
+ },
+ "edit.transform_tools": {
+  "label": "Select, Move, Rotate, Scale, Pivot tools",
+  "menu": "Edit",
+  "verdict": "partial",
+  "note": "Selection and creation tools exist; move, rotate, scale and pivot gizmos are 11.44, pending",
+  "rows": [
+   "11.7",
+   "11.44"
+  ]
+ },
+ "edit.align": {
+  "label": "Object Align",
+  "menu": "Edit",
+  "verdict": "missing",
+  "note": "No row for align, distribute or snapping",
+  "rows": [
+   "11.44",
+   "11.45",
+   "11.9"
+  ]
+ },
+ "edit.hid": {
+  "label": "Human Interface Devices",
+  "menu": "Edit",
+  "verdict": "missing",
+  "note": "No row for physical control devices",
+  "rows": [
+   "11.31"
+  ]
+ },
+ "edit.scripting": {
+  "label": "Scripting",
+  "menu": "Edit",
+  "verdict": "planned",
+  "note": "Script sandbox, logic, After Effects scripts and ScriptUI panels are all pending",
+  "rows": [
+   "16.4",
+   "11.55",
+   "16.14",
+   "16.15"
+  ]
+ },
+ "edit.media_setup": {
+  "label": "OpenMAM Setup and Clip Store Setup",
+  "menu": "Edit",
+  "verdict": "missing",
+  "note": "Video decode and a video layer are planned; no media server or MAM connection",
+  "rows": [
+   "16.1",
+   "11.52",
+   "11.49"
+  ]
+ },
+ "edit.keyboard_gpi": {
+  "label": "Keyboard / GPI Mapping",
+  "menu": "Edit",
+  "verdict": "partial",
+  "note": "One command registry is planned (11.31); no mapping UI, no GPI; automation triggers are deferred (6.6)",
+  "rows": [
+   "11.31",
+   "6.6",
+   "11.30"
+  ]
+ },
+ "edit.tessera": {
+  "label": "Tessera (camera tracking, virtual studio)",
+  "menu": "Edit",
+  "verdict": "missing",
+  "note": "3D cameras exist; no tracking data input and no virtual set",
+  "rows": [
+   "3.7",
+   "11.48",
+   "16.8"
+  ]
+ },
+ "edit.hardware_setup": {
+  "label": "Hardware Setup",
+  "menu": "Edit",
+  "verdict": "partial",
+  "note": "Output configuration and status exist; hardware I/O, timecode, GPI and tally are parked (X2)",
+  "rows": [
+   "6.5",
+   "12.7",
+   "15.1",
+   "15.2",
+   "15.4",
+   "15.5"
+  ]
+ },
+ "edit.preferences": {
+  "label": "Preferences",
+  "menu": "Edit",
+  "verdict": "missing",
+  "note": "No settings dialog or settings store",
+  "rows": [
+   "11.43",
+   "2.4",
+   "2.8"
+  ]
+ },
+ "windows.menu": {
+  "label": "Windows menu, docking layouts",
+  "menu": "Windows",
+  "verdict": "partial",
+  "note": "Dockable workspace done; Window menu lists panels; saved layouts and named workspaces pending",
+  "rows": [
+   "11.33",
+   "11.5",
+   "11.76",
+   "11.75"
+  ]
+ },
+ "projects.settings": {
+  "label": "Convert Project Mode and project settings",
+  "menu": "Projects",
+  "verdict": "partial",
+  "note": "Colour space and bit depth are project settings; resolution and frame rate are per scene",
+  "rows": [
+   "11.43",
+   "3.15",
+   "1.1"
+  ]
+ },
+ "projects.reveal": {
+  "label": "Display project path in Explorer",
+  "menu": "Projects",
+  "verdict": "missing",
+  "note": "Small, no row",
+  "rows": [
+   "11.43"
+  ]
+ },
+ "anim.controller": {
+  "label": "Animation Controller, Set Keyframe",
+  "menu": "Animation",
+  "verdict": "built",
+  "note": "Editable animation contract and keyframes are done",
+  "rows": [
+   "11.20",
+   "11.21",
+   "11.68"
+  ]
+ },
+ "anim.scene_director": {
+  "label": "Scene Director",
+  "menu": "Animation",
+  "verdict": "partial",
+  "note": "Timeline and named phases done; stop points and looping hold (11.53) pending",
+  "rows": [
+   "11.25",
+   "11.53",
+   "11.10"
+  ]
+ },
+ "anim.key_graph": {
+  "label": "Key Graph Editor",
+  "menu": "Animation",
+  "verdict": "built",
+  "note": "Speed graph and curve editing done; infinity modes (11.78) pending",
+  "rows": [
+   "11.11",
+   "11.23",
+   "11.78"
+  ]
+ },
+ "display.project_manager": {
+  "label": "Project Manager panel",
+  "menu": "Display",
+  "verdict": "partial",
+  "note": "Start screen and Scene Manager; asset manager (11.52) pending",
+  "rows": [
+   "11.43",
+   "11.52",
+   "11.64"
+  ]
+ },
+ "display.scene_manager": {
+  "label": "Scene Manager panel",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Scene Manager done; dense list active",
+  "rows": [
+   "11.64",
+   "11.72"
+  ]
+ },
+ "display.object_manager": {
+  "label": "Object Manager panel",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Treegrid done; command-model parenting pending",
+  "rows": [
+   "11.8",
+   "11.45"
+  ]
+ },
+ "display.material_manager": {
+  "label": "Material Manager panel",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Material manager done",
+  "rows": [
+   "11.12",
+   "11.50"
+  ]
+ },
+ "display.inspector": {
+  "label": "Object Inspector panel",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Type-aware inspector done",
+  "rows": [
+   "11.9",
+   "11.46"
+  ]
+ },
+ "display.widgets": {
+  "label": "Widgets panel",
+  "menu": "Display",
+  "verdict": "planned",
+  "note": "Widgets row pending",
+  "rows": [
+   "11.56"
+  ]
+ },
+ "display.stagger": {
+  "label": "Stagger Animations",
+  "menu": "Display",
+  "verdict": "planned",
+  "note": "Pending",
+  "rows": [
+   "11.77"
+  ]
+ },
+ "display.effects": {
+  "label": "Effects panel",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Effects & Presets and Effect Controls are active with 46 effects",
+  "rows": [
+   "11.69",
+   "11.70",
+   "11.79",
+   "3.25"
+  ]
+ },
+ "display.clip_browser": {
+  "label": "Clip Browser",
+  "menu": "Display",
+  "verdict": "missing",
+  "note": "Video layer and decoder are planned; no clip browser panel or clip cueing",
+  "rows": [
+   "11.49",
+   "16.1",
+   "11.52"
+  ]
+ },
+ "display.server_channels": {
+  "label": "Server Channels",
+  "menu": "Display",
+  "verdict": "missing",
+  "note": "Hardware and server channels are parked",
+  "rows": [
+   "15.2",
+   "15.3",
+   "6.5"
+  ]
+ },
+ "display.pbus": {
+  "label": "PBus Mapping",
+  "menu": "Display",
+  "verdict": "partial",
+  "note": "Data bindings and template controls exist; no external parameter mapping",
+  "rows": [
+   "11.19",
+   "11.26",
+   "11.54"
+  ]
+ },
+ "display.object_library": {
+  "label": "Object Library",
+  "menu": "Display",
+  "verdict": "planned",
+  "note": "2D and 3D libraries and a component registry are pending",
+  "rows": [
+   "11.47",
+   "11.48",
+   "11.40",
+   "6.1"
+  ]
+ },
+ "display.audio_files": {
+  "label": "Audio Files",
+  "menu": "Display",
+  "verdict": "missing",
+  "note": "An Assets/Audio folder exists; no audio object, playback or mixing in any row",
+  "rows": [
+   "11.43",
+   "3.25"
+  ]
+ },
+ "display.sequencer_list": {
+  "label": "Sequencer List",
+  "menu": "Display",
+  "verdict": "planned",
+  "note": "Rundown persistence done; the Playout take list is pending",
+  "rows": [
+   "6.4",
+   "12.3"
+  ]
+ },
+ "display.output_monitors": {
+  "label": "Output Monitors",
+  "menu": "Display",
+  "verdict": "planned",
+  "note": "Confidence monitors pending; engine preview monitor in the Editor active",
+  "rows": [
+   "12.5",
+   "11.65",
+   "3.11"
+  ]
+ },
+ "display.online_preview": {
+  "label": "Online Preview",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Engine preview monitor active",
+  "rows": [
+   "11.65",
+   "3.21",
+   "8.9"
+  ]
+ },
+ "display.take_inspector": {
+  "label": "Take Inspector",
+  "menu": "Display",
+  "verdict": "planned",
+  "note": "Operator fill form pending",
+  "rows": [
+   "12.3",
+   "12.8",
+   "11.27"
+  ]
+ },
+ "display.object_toolbar": {
+  "label": "Object Toolbar",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Layer creation tools in the Editor",
+  "rows": [
+   "11.32",
+   "11.7"
+  ]
+ },
+ "display.status_log": {
+  "label": "Status Log",
+  "menu": "Display",
+  "verdict": "built",
+  "note": "Activity log, JSON log and live telemetry",
+  "rows": [
+   "2.11",
+   "2.27",
+   "11.74"
+  ]
+ },
+ "tools.flush": {
+  "label": "Advanced > Flush",
+  "menu": "Tools",
+  "verdict": "missing",
+  "note": "No row for cache control",
+  "rows": [
+   "11.58",
+   "2.27"
+  ]
+ },
+ "tools.debug": {
+  "label": "Debug > Video Cache Monitor",
+  "menu": "Tools",
+  "verdict": "partial",
+  "note": "Diagnostics bundle and telemetry done; console and debugger pending",
+  "rows": [
+   "11.58",
+   "2.27",
+   "2.14"
+  ]
+ },
+ "tools.input_grabber": {
+  "label": "Input Grabber",
+  "menu": "Tools",
+  "verdict": "missing",
+  "note": "No live video input row; hardware parked",
+  "rows": [
+   "15.2",
+   "15.4",
+   "11.49"
+  ]
+ },
+ "tools.record": {
+  "label": "Record Client",
+  "menu": "Tools",
+  "verdict": "partial",
+  "note": "Recording output adapter exists in the engine; no operator command or UI",
+  "rows": [
+   "3.10",
+   "14.5"
+  ]
+ },
+ "help.topics": {
+  "label": "Help Topics",
+  "menu": "Help",
+  "verdict": "missing",
+  "note": "Only a diagnostic bundle in Help; no in-app help",
+  "rows": [
+   "2.14"
+  ]
+ },
+ "seq.rundown": {
+  "label": "Sequencer: ordered take items, cue, take, out, run order",
+  "menu": "Sequence",
+  "verdict": "planned",
+  "note": "Engine side done; Playout UI pending",
+  "rows": [
+   "6.4",
+   "12.3",
+   "12.4",
+   "12.8",
+   "12.9"
+  ]
+ },
+ "seq.asrun": {
+  "label": "As-run log",
+  "menu": "Sequence",
+  "verdict": "built",
+  "note": "Active; recorded",
+  "rows": [
+   "12.11"
+  ]
+ },
+ "data.datalinq": {
+  "label": "DataLinq: live data from XML, CSV, Excel, databases and web",
+  "menu": "Data",
+  "verdict": "partial",
+  "note": "Bindings exist; every connector is parked in the Data Server (X4)",
+  "rows": [
+   "11.19",
+   "19.2",
+   "19.4",
+   "19.5",
+   "19.6",
+   "19.8"
+  ]
+ },
+ "ctl.external": {
+  "label": "External control protocol (RossTalk), automation, GPI and tally",
+  "menu": "Control",
+  "verdict": "missing",
+  "note": "Automation trigger evaluation is explicitly deferred (6.6); the MCP surface is for agents, not station automation",
+  "rows": [
+   "6.6",
+   "8.11",
+   "2.23"
+  ]
+ },
+ "mos.newsroom": {
+  "label": "MOS newsroom integration",
+  "menu": "Integration",
+  "verdict": "missing",
+  "note": "No row",
+  "rows": [
+   "6.4",
+   "12.3"
+  ]
+ },
+ "text.crawl_roll": {
+  "label": "Crawl and roll (ticker, credits)",
+  "menu": "Objects",
+  "verdict": "missing",
+  "note": "No scrolling text object in any row",
+  "rows": [
+   "11.51",
+   "11.55",
+   "12.10"
+  ]
+ },
+ "live.video": {
+  "label": "Live video in a scene (camera feeds, picture in picture)",
+  "menu": "Objects",
+  "verdict": "missing",
+  "note": "Video file layer planned; live input not",
+  "rows": [
+   "11.49",
+   "16.1",
+   "15.4"
+  ]
+ },
+ "audio.engine": {
+  "label": "Audio: sound with graphics, levels, output",
+  "menu": "Audio",
+  "verdict": "missing",
+  "note": "No row",
+  "rows": [
+   "11.43"
+  ]
+ },
+ "outputs.keyfill": {
+  "label": "Key and fill video outputs, genlock, multiple channels",
+  "menu": "Outputs",
+  "verdict": "planned",
+  "note": "Parked (X2); overlay channels active (12.10)",
+  "rows": [
+   "12.5",
+   "12.10",
+   "15.2",
+   "15.4",
+   "15.5"
+  ]
+ },
+ "tracking.camera": {
+  "label": "Camera tracking and virtual studio",
+  "menu": "Virtual",
+  "verdict": "missing",
+  "note": "No row; 3D camera parity is planned",
+  "rows": [
+   "3.7",
+   "16.8"
+  ]
+ },
+ "roles.security": {
+  "label": "Operator roles and permissions",
+  "menu": "Security",
+  "verdict": "built",
+  "note": "Tokens, roles and scopes; named operator login active",
+  "rows": [
+   "2.9",
+   "2.15",
+   "5.7"
+  ]
+ },
+ "i18n.localisation": {
+  "label": "Localisation and language",
+  "menu": "Preferences",
+  "verdict": "missing",
+  "note": "No row",
+  "rows": [
+   "11.42",
+   "1.1"
+  ]
+ },
+ "template.pages": {
+  "label": "Template pages for operators (fill fields, constraints)",
+  "menu": "Sequence",
+  "verdict": "partial",
+  "note": "Field contract done; constraints and the fill form pending",
+  "rows": [
+   "11.26",
+   "11.54",
+   "12.8"
+  ]
+ },
+ "transitions": {
+  "label": "Scene transitions and transition effects",
+  "menu": "Animation",
+  "verdict": "planned",
+  "note": "Pending",
+  "rows": [
+   "16.3",
+   "11.55"
+  ]
+ }
+}

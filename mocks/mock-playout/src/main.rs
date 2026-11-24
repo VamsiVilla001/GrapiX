@@ -212,6 +212,10 @@ fn run((engine, token, op): (SocketAddr, Option<String>, Operation)) -> Result<(
         .map_err(|e| Error::Connect(e.to_string()))?,
         None => Client::connect(engine).map_err(|e| Error::Connect(e.to_string()))?,
     };
+    // 2.15: a Program command is sent for a signed-in operator. This mock is one.
+    client.set_operator(Some(
+        &gx_contracts::auth::OperatorName::parse("Mock Playout").expect("a valid name"),
+    ));
     let reply = match op {
         Operation::Cue(pin, at) => client.handle(ClientRequest::Cue(CueRequest {
             take_id: pin.take_id,

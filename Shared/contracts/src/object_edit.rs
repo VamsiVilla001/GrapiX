@@ -33,7 +33,8 @@ pub enum ObjectField {
 }
 
 impl ObjectField {
-    fn name(&self) -> &'static str {
+    /// The field's wire name, as an inspector or a history list shows it.
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Opacity(_) => "opacity",
             Self::X(_) => "x",

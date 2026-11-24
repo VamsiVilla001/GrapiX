@@ -83,6 +83,88 @@ impl WorkingColorSpace {
     }
 }
 
+/// How many bits a project keeps per colour channel while it composites, as
+/// After Effects' bits per channel: 8, 16 or 32.
+///
+/// At 8 and 16 bits every layer and every effect result is rounded to that
+/// many levels and held to 0–1, so what the Editor shows is what an 8- or
+/// 16-bit render writes. At 32 bits a result stays a float and is not
+/// clamped, so a value above 1 (a bright highlight, an HDR source) survives
+/// until the output transform. The engine always works in 32-bit floats; the
+/// depth is the rounding it applies between steps, not the format it stores.
+///
+/// There is no `Default`: a depth changes pixels, so a document names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ColorDepth {
+    #[serde(rename = "8")]
+    Bits8,
+    #[serde(rename = "16")]
+    Bits16,
+    #[serde(rename = "32")]
+    Bits32,
+}
+
+impl ColorDepth {
+    /// What a newly created project declares.
+    pub const NEW_PROJECT: Self = Self::Bits16;
+
+    /// What a project or scene saved before depth existed meant: every
+    /// result was a 32-bit float, so an upgrade states that and renders
+    /// exactly as before.
+    pub const BEFORE_DEPTH: Self = Self::Bits32;
+
+    /// Bits per channel.
+    pub const fn bits(self) -> u32 {
+        match self {
+            Self::Bits8 => 8,
+            Self::Bits16 => 16,
+            Self::Bits32 => 32,
+        }
+    }
+
+    /// The wire name, for messages.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bits8 => "8",
+            Self::Bits16 => "16",
+            Self::Bits32 => "32",
+        }
+    }
+
+    /// Whether results are rounded to whole levels and held to 0–1.
+    pub const fn is_integer(self) -> bool {
+        !matches!(self, Self::Bits32)
+    }
+
+    /// The most levels a channel holds at this depth (255 or 65535), `None`
+    /// for a float.
+    pub const fn levels(self) -> Option<u32> {
+        match self {
+            Self::Bits8 => Some(255),
+            Self::Bits16 => Some(65_535),
+            Self::Bits32 => None,
+        }
+    }
+
+    /// One channel value as this depth stores it: rounded half up to the
+    /// nearest level and held to 0–1 for 8 and 16 bits, unchanged for 32.
+    /// A non-finite value is stored as 0 at 8 and 16 bits; at 32 it is left
+    /// alone so a NaN stays visible rather than being quietly repaired.
+    pub fn store(self, value: f32) -> f32 {
+        match self.levels() {
+            None => value,
+            Some(levels) => {
+                if !value.is_finite() {
+                    return 0.0;
+                }
+                let n = levels as f32;
+                ((value.clamp(0.0, 1.0) * n + 0.5).floor()) / n
+            }
+        }
+    }
+}
+
 /// What a colour or a texture was authored in. There is no `Unknown`: an
 /// untagged source is a defect the importer must refuse, not a value a
 /// renderer may guess at (B.1, "never infer").
@@ -706,6 +788,42 @@ mod tests {
         assert_eq!(wire["coordinateMode"], "scene");
         let back: ColorValue = serde_json::from_value(wire).unwrap();
         assert_eq!(back, value);
+    }
+
+    #[test]
+    fn colour_depth_rounds_and_clamps_as_after_effects_does() {
+        use ColorDepth::*;
+        assert_eq!((Bits8.bits(), Bits16.bits(), Bits32.bits()), (8, 16, 32));
+        assert_eq!(ColorDepth::NEW_PROJECT, Bits16);
+        assert_eq!(ColorDepth::BEFORE_DEPTH, Bits32);
+        // 8 bit: 0.5 sits between levels 127 and 128 (127.5), half rounds up.
+        assert_eq!(Bits8.store(0.5), 128.0 / 255.0);
+        assert_eq!(Bits8.store(0.4999), 127.0 / 255.0);
+        assert_eq!(Bits8.store(0.0019), 0.0);
+        assert_eq!(Bits8.store(0.0020), 1.0 / 255.0);
+        // 16 bit holds finer steps than 8.
+        assert_eq!(Bits16.store(0.5), 32768.0 / 65535.0);
+        assert_ne!(Bits16.store(0.5001), Bits8.store(0.5001));
+        // Integer depths hold to 0-1; 32 keeps an over-bright value.
+        for depth in [Bits8, Bits16] {
+            assert_eq!(depth.store(1.7), 1.0);
+            assert_eq!(depth.store(-0.3), 0.0);
+            assert_eq!(depth.store(f32::NAN), 0.0);
+            assert_eq!(depth.store(f32::INFINITY), 0.0);
+        }
+        assert_eq!(Bits32.store(1.7), 1.7);
+        assert_eq!(Bits32.store(-0.3), -0.3);
+        assert!(Bits32.store(f32::NAN).is_nan());
+        // A stored value stores to itself.
+        for depth in [Bits8, Bits16, Bits32] {
+            let once = depth.store(0.337);
+            assert_eq!(depth.store(once), once);
+        }
+        // Wire names are the digits, and there is no default.
+        for depth in [Bits8, Bits16, Bits32] {
+            assert_eq!(serde_json::to_value(depth).unwrap(), depth.as_str());
+        }
+        assert!(serde_json::from_value::<ColorDepth>(serde_json::json!("24")).is_err());
     }
 
     /// 3.15: both working spaces round-trip linear light, sRGB through the

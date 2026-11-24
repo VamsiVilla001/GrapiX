@@ -1,0 +1,210 @@
+{
+ "input": {
+  "state": {
+   "decision": "How GrapiX's Editor should line up and spread selected items in a graphic (row 11.83, first slice: line up and spread; snapping and shared-pivot transforms are later).",
+   "what_exists_today": "A scene holds drawable items (rectangles, ellipses, text, images, shapes) and containers (groups and layers). An item has x, y, a width and height, a rotation, scales and an anchor; its box on the canvas is the box of its four corners after scale and rotation. An item inside a group is placed in the group's own space: the group's scale, rotation and position are applied to its children, so two items in different groups cannot be compared by their stored x and y. The page can measure every item's on-canvas box. Any edit batch is one undo step. A locked item refuses a change.",
+   "what_is_being_built": "Edit > Line up and spread: line up the selected items by their left edges, centres across, right edges, top edges, middles down or bottom edges; and spread three or more items so the gaps between them are equal across or down. Each action is one batch of position edits, so one click is one undo step. Moves change only x and y.",
+   "who_uses_it": "Broadcast graphics designers who know Photoshop, After Effects and Ross XPression. XPression's Object Align offers align edges and distribute horizontally and vertically. Figma and Photoshop line up to the selection's outer box, and Figma also lines up a single item to its parent frame.",
+   "option_reference_A": "Line up to the outer box of the selection (two or more items), the way Photoshop and Figma do: the left edge of the leftmost item is where every left edge goes. A single item is refused.",
+   "option_reference_B": "Line up to the first item selected, which stays where it is.",
+   "option_reference_C": "Line up to the canvas only.",
+   "option_reference_D": "Both A and C, as separate menu items: lines up to the selection, and a second set that lines up to the canvas edges and centres (so one item can be centred on screen). The canvas set works only for items not inside a group.",
+   "option_locked_A": "If any selected item is locked, refuse the whole action by name, listing the locked items, and move nothing.",
+   "option_locked_B": "Skip the locked items, line up the rest, and say how many were skipped.",
+   "option_groups_A": "If the selected items are not all inside the same group (or all at the top level), refuse by name and move nothing. Items inside one group are lined up in that group's own space, which matches what is seen when the group is not rotated.",
+   "option_groups_B": "Convert every item to canvas space through its parents' transforms, line up there and convert back.",
+   "option_spread_A": "Spread so the gaps between the edges of neighbouring items are equal; the two outermost items stay where they are.",
+   "option_spread_B": "Spread so the distances between the centres of neighbouring items are equal.",
+   "constraints": "One click is one undo step. A refused action changes nothing and says why in plain words. Rust owns the document; the page sends edits. A nested group's world transform is not available to the page in this slice."
+  },
+  "questions": {
+   "best_reference": {
+    "type": "choice",
+    "instructions": "Which reference should line up use?",
+    "criteria": {
+     "A": "Option A: the outer box of the selection.",
+     "B": "Option B: the first item selected.",
+     "C": "Option C: the canvas only.",
+     "D": "Option D: the selection, plus a separate set for the canvas."
+    }
+   },
+   "best_locked": {
+    "type": "choice",
+    "instructions": "What should line up do when a locked item is in the selection?",
+    "criteria": {
+     "A": "Option A: refuse the whole action and name the locked items.",
+     "B": "Option B: skip the locked items and move the rest."
+    }
+   },
+   "best_groups": {
+    "type": "choice",
+    "instructions": "What should line up do when the selected items are in different groups, given the page cannot read a group's world transform in this slice?",
+    "criteria": {
+     "A": "Option A: refuse by name, and line up only items that share a group.",
+     "B": "Option B: convert through the parents' transforms and line up in canvas space."
+    }
+   },
+   "best_spread": {
+    "type": "choice",
+    "instructions": "What should spread mean?",
+    "criteria": {
+     "A": "Option A: equal gaps between the edges of neighbouring items.",
+     "B": "Option B: equal distances between the centres of neighbouring items."
+    }
+   },
+   "silent_skip_is_surprising": {
+    "type": "noul",
+    "instructions": "Would a designer be surprised, in a live graphics workflow, if line up silently left a locked item where it was while moving the others?",
+    "criteria": {
+     "true": "Yes, a locked item left behind surprises people even when a message says so.",
+     "false": "No, a message saying how many were skipped is enough."
+    }
+   },
+   "refusing_mixed_groups_acceptable": {
+    "type": "noul",
+    "instructions": "Is refusing to line up items from different groups, with a plain message, acceptable for a first release of this feature?",
+    "criteria": {
+     "true": "Yes, it is honest and can be widened later.",
+     "false": "No, it makes the feature too limited to use."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "best_reference": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.69,
+    "probabilities": {
+     "A": 0.77,
+     "B": 0.01,
+     "C": 0,
+     "D": 0.22
+    }
+   },
+   "best_locked": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.82,
+    "probabilities": {
+     "A": 0.91,
+     "B": 0.09
+    }
+   },
+   "best_groups": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.92,
+    "probabilities": {
+     "A": 0.96,
+     "B": 0.04
+    }
+   },
+   "best_spread": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.74,
+    "probabilities": {
+     "A": 0.87,
+     "B": 0.13
+    }
+   },
+   "silent_skip_is_surprising": {
+    "type": "noul",
+    "noul": 0.79
+   },
+   "refusing_mixed_groups_acceptable": {
+    "type": "noul",
+    "noul": 0.81
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 4774,
+   "output_tokens": 0,
+   "state_tokens": 735,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "best_reference": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5759,
+     "B": 0.0864,
+     "C": 0.0825,
+     "D": 0.2552
+    },
+    "confidence": 0.2183,
+    "answer_confidence": 0.5759,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "best_locked": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5169,
+     "B": 0.4831
+    },
+    "confidence": 0.0008,
+    "answer_confidence": 0.5169,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "best_groups": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5633,
+     "B": 0.4367
+    },
+    "confidence": 0.0116,
+    "answer_confidence": 0.5633,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "best_spread": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.7924,
+     "B": 0.2076
+    },
+    "confidence": 0.2632,
+    "answer_confidence": 0.7924,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "silent_skip_is_surprising": {
+    "type": "noul",
+    "noul": 0.9238,
+    "confidence": 0.9238,
+    "answer_confidence": 0.9238,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "refusing_mixed_groups_acceptable": {
+    "type": "noul",
+    "noul": 0.952,
+    "confidence": 0.952,
+    "answer_confidence": 0.952,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

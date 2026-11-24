@@ -21,16 +21,21 @@
 pub mod command;
 pub mod design_system;
 pub mod fidelity;
+pub mod figma;
+pub mod figma_rich;
 pub mod import;
 pub mod preview;
 pub mod project;
 pub mod publish;
+pub mod recent;
 
-pub use command::{import_into_project, CommandError, Workspace};
+pub use command::{import_into_project, CommandError, SavedProjectAs, Workspace};
 pub use design_system::{
     drift_report, ingest_claude_design, ingest_figma, ingest_w3c, DesignSystemStore, DriftEntry,
     DriftReport, Provenance, StampedTemplate,
 };
 pub use fidelity::{FidelityRecord, FidelityVerdict};
 pub use import::{import_svg, ImportOutcome};
-pub use project::{EditorError, Projects};
+pub use project::{
+    detect, AssetClass, Detected, EditorError, ImportedAsset, Projects, MAX_IMAGE_SIDE,
+};

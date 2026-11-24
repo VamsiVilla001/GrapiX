@@ -68,6 +68,7 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
 
     SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        color_depth: gx_contracts::color::ColorDepth::BEFORE_DEPTH,
         id: id.to_owned(),
         name: "Conformance scene".to_owned(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -112,6 +113,9 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects: vec![SceneObject::Rect(RectObject { base, radius: 4.0 })],
     }
 }
@@ -194,7 +198,14 @@ pub fn scene_plane_suite(report: &mut Report) {
     server.serve_in_background();
 
     let mut client = match Client::connect(control) {
-        Ok(client) => client,
+        Ok(mut client) => {
+            // 2.15: a Program command is sent for a signed-in operator.
+            client.set_operator(Some(
+                &gx_contracts::auth::OperatorName::parse("Conformance Operator")
+                    .expect("a valid name"),
+            ));
+            client
+        }
         Err(error) => {
             report.skip_unavailable(format!("cannot connect to the control plane: {error}"));
             return;

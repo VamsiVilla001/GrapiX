@@ -194,6 +194,8 @@ pub const IDEMPOTENT_INPUTS: &[&str] = &[
     "DeleteScene",
     "EditScene",
     "ImportScene",
+    "ImportFigma",
+    "ImportAsset",
     "ConfirmDesignSystem",
 ];
 
@@ -205,7 +207,8 @@ pub const IDEMPOTENCY_KEY_MAX: usize = 128;
 /// added tool whose input has not been connected here.
 pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
     use crate::command::{
-        ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportScene,
+        ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportAsset,
+        ImportFigma, ImportScene,
     };
     macro_rules! schema {
         ($ty:ty) => {
@@ -223,6 +226,8 @@ pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
         "DeleteScene" => schema!(DeleteScene),
         "EditScene" => schema!(EditScene),
         "ImportScene" => schema!(ImportScene),
+        "ImportFigma" => schema!(ImportFigma),
+        "ImportAsset" => schema!(ImportAsset),
         "ConfirmDesignSystem" => schema!(ConfirmDesignSystem),
         "DesignSystemImport" => schema!(crate::design_system::DesignSystemImport),
         "PreviewRequest" => schema!(PreviewRequest),
@@ -304,6 +309,8 @@ pub const TOOLS: &[ToolDescriptor] = &[
     tool("scenes.delete", "scenes", ToolEffect::Write, Scope::Author, "DeleteScene", "CommandOutcome", "Delete a stored scene. Needs ifRevision, the revision read from scenes.get: a stale one refuses revisionMismatch naming the current revision, a missing one revisionRequired. Refuses a scene that is not stored (sceneNotStored). Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
     tool("scenes.edit", "scenes", ToolEffect::Write, Scope::Author, "EditScene", "CommandOutcome", "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does. Needs ifRevision, the revision read from scenes.get: a stale one refuses revisionMismatch naming the current revision and writes nothing, a missing one revisionRequired. The result carries the new revision; a batch that changes nothing returns the revision it found. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
     tool("scenes.import", "scenes", ToolEffect::Write, Scope::Author, "ImportScene", "CommandOutcome", "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
+    tool("scenes.ingest_figma", "scenes", ToolEffect::Write, Scope::Author, "ImportFigma", "CommandOutcome", "Ingest one Figma frame into a new stored scene (18.2, 18.3): Claude, Codex or any agent reads the frame through Figma's own MCP and hands it here. GrapiX holds no Figma token and makes no network call. Give exactly one of: frame (full fidelity: the frame as a typed tree with fills, gradients, strokes, corner radii, opacity, rotation, blend mode, visibility and text with its font family, style, size, spacing and case; read it from get_design_context or the plugin API, positions relative to the root frame) or metadata (structure only: the reply of get_metadata as received). The frame becomes the canvas, nodes become objects at their Figma positions, a frame with paint keeps it as a rectangle behind its children, and every font is declared missing until its file is supplied (never a system font). The outcome's imported effect is the report naming, per node, everything that could not be carried (effects, picture fills, vector outlines, per-corner radii, clipping); the source is retained in the project by content hash. One frame per call. Refuses an existing scene id, and stores nothing on any refusal. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
+    tool("assets.import", "assets", ToolEffect::Write, Scope::Author, "ImportAsset", "CommandOutcome", "File one file into a project (11.43), read from an absolute path on this machine, the way an XPression, Viz or After Effects project keeps its media: a picture (png, webp, jpg, jpeg, svg) into Assets/Images, a video (mp4, mov, avi, webm) into Assets/Videos, audio (wav, mp3) into Assets/Audio, a 3D model (gltf, glb, obj, fbx, stl, ply, dae, usd, usdz) into Assets/Models, or a font (otf, ttf, woff, woff2) into Fonts. The bytes decide the kind, not the name. The same bytes filed again are a no-op, different bytes under an existing name refuse, and anything that is none of those formats refuses. Use it for the pictures and fonts an agent downloaded from Figma, one folder per frame, then run scenes.ingest_figma so picture fills and text find them by name. The outcome's imported effect names the filed path and its content hash. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
     tool("objects.list", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "ObjectList", "Every object, with its full authored property surface."),
     tool("objects.hierarchy", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "HierarchyResolution", "Resolved transforms and refused edges."),
     // materials, assets, fonts (8.4). Read here; their mutations are

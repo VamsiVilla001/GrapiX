@@ -23,8 +23,8 @@ use gx_asset_plane::content_hash;
 use gx_contracts::import::{ImportEntry, ImportReport, ImportTier, Substitution};
 use gx_contracts::provenance::{AssetOrigin, AssetProvenance, ProvenanceTool};
 use gx_contracts::scene::{
-    AssetKind, AssetLibraryItem, ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject,
-    SceneTimeline,
+    AssetKind, AssetLibraryItem, BezierPath, FillRule, ObjectBase, RectObject, SceneCanvas,
+    SceneDocument, SceneObject, SceneTimeline, ShapeObject,
 };
 use gx_contracts::{RationalRate, RefusalSeverity};
 
@@ -45,21 +45,41 @@ pub const IMPORT_TOOL: &str = "GrapiX import";
 /// report's `source_hash` names an asset the graphic owns, and saving the
 /// graphic into a project takes the bytes with it like any other asset.
 pub fn source_asset(source_name: &str, bytes: &[u8]) -> AssetLibraryItem {
+    retained_source(source_name, bytes, SourceKind::Svg)
+}
+
+/// What kind of source an import retains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    Svg,
+    /// The text of a Figma `get_metadata` reply, as the user's agent read it.
+    FigmaMetadata,
+    /// A Figma frame as an agent wrote it into the typed frame shape (canonical JSON).
+    FigmaFrame,
+}
+
+/// The library record for a retained source of any kind (7.2, 18.2).
+pub fn retained_source(source_name: &str, bytes: &[u8], kind: SourceKind) -> AssetLibraryItem {
     let hash = content_hash(bytes);
+    let (asset_kind, mime, extension) = match kind {
+        SourceKind::Svg => (AssetKind::Svg, "image/svg+xml", "svg"),
+        SourceKind::FigmaMetadata => (AssetKind::Unknown, "application/xml", "xml"),
+        SourceKind::FigmaFrame => (AssetKind::Json, "application/json", "json"),
+    };
     // A file name that is not one canonical component would address a path
     // the library does not own; the hash-named fallback never can.
     let file_name = if gx_contracts::platform::is_canonical_filename(source_name) {
         source_name.to_owned()
     } else {
-        format!("{}.svg", &hash.0[..16])
+        format!("{}.{extension}", &hash.0[..16])
     };
     AssetLibraryItem {
         asset_id: format!("import_{}", &hash.0[..16]),
         name: source_name.to_owned(),
-        kind: AssetKind::Svg,
+        kind: asset_kind,
         path: format!("assets/imports/{file_name}"),
         checksum: Some(hash),
-        mime_type: Some("image/svg+xml".into()),
+        mime_type: Some(mime.into()),
         size_bytes: Some(bytes.len() as u64),
         status: None,
         provenance: AssetProvenance {
@@ -146,29 +166,50 @@ pub fn import_svg(
                 });
             }
 
-            // A path collapses to its bounding rectangle here: this pipeline
-            // carries no path data into the scene, so the shape is gone even
-            // though the object remains. That is a demotion and it is named.
+            // A path is a shape (11.114): its data becomes cubic subpaths, the first the
+            // shape's own and the rest compound paths, with the `fill-rule` and a simple
+            // `fill`. Only data that cannot be read at all collapses to its bounding
+            // rectangle, and that demotion is named with the reason.
             "path" => {
-                let mut base = ObjectBase::new(&source_id, &source_name_attr);
-                base.width = element.number("width").unwrap_or(0.0);
-                base.height = element.number("height").unwrap_or(0.0);
-                objects.push(SceneObject::Rect(RectObject { base, radius: 0.0 }));
-                entries.push(ImportEntry {
-                    source_id: source_id.clone(),
-                    source_name: source_name_attr,
-                    tier: ImportTier::Flattened,
-                    object_id: Some(source_id),
-                    substitutions: vec![Substitution {
-                        source_feature: format!(
-                            "svg:path d=\"{}\"",
-                            element.attribute("d").unwrap_or_default()
-                        ),
-                        replaced_with: "the path's bounding rectangle".into(),
-                        reason: "this pipeline does not carry path geometry into the scene".into(),
-                        severity: RefusalSeverity::Warning,
-                    }],
-                });
+                let data = element.attribute("d").unwrap_or_default();
+                match svg_shape(&element, &data, &source_id, &source_name_attr) {
+                    Ok((shape, notes)) => {
+                        objects.push(SceneObject::Shape(shape));
+                        entries.push(ImportEntry {
+                            source_id: source_id.clone(),
+                            source_name: source_name_attr,
+                            tier: ImportTier::Native,
+                            object_id: Some(source_id),
+                            substitutions: notes
+                                .into_iter()
+                                .map(|(feature, replaced_with, reason)| Substitution {
+                                    source_feature: feature,
+                                    replaced_with,
+                                    reason,
+                                    severity: RefusalSeverity::Info,
+                                })
+                                .collect(),
+                        });
+                    }
+                    Err(why) => {
+                        let mut base = ObjectBase::new(&source_id, &source_name_attr);
+                        base.width = element.number("width").unwrap_or(0.0);
+                        base.height = element.number("height").unwrap_or(0.0);
+                        objects.push(SceneObject::Rect(RectObject { base, radius: 0.0 }));
+                        entries.push(ImportEntry {
+                            source_id: source_id.clone(),
+                            source_name: source_name_attr,
+                            tier: ImportTier::Flattened,
+                            object_id: Some(source_id),
+                            substitutions: vec![Substitution {
+                                source_feature: format!("svg:path d=\"{data}\""),
+                                replaced_with: "the path's bounding rectangle".into(),
+                                reason: why,
+                                severity: RefusalSeverity::Warning,
+                            }],
+                        });
+                    }
+                }
             }
 
             // An embedded raster is already pixels. Recorded at the lowest
@@ -214,6 +255,7 @@ pub fn import_svg(
         // Saving it into a linear project refuses by name rather than
         // re-blending it silently.
         working_color_space: gx_contracts::color::WorkingColorSpace::Srgb,
+        color_depth: gx_contracts::color::ColorDepth::NEW_PROJECT,
         id: scene_id.to_owned(),
         name: source_name.to_owned(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -235,6 +277,9 @@ pub fn import_svg(
         materials: Vec::new(),
         controls: Vec::new(),
         text_styles: Vec::new(),
+        path_links: Vec::new(),
+        guides: Vec::new(),
+        scene_label: None,
         objects,
     };
 
@@ -277,7 +322,7 @@ impl std::fmt::Display for ImportFailure {
         match self {
             Self::NotUtf8 => f.write_str("the source is not valid UTF-8, so it is not SVG"),
             Self::Malformed(detail) => {
-                write!(f, "the source is not a whole SVG document: {detail}")
+                write!(f, "the source is not a whole document: {detail}")
             }
             Self::UnexplainedLoss(detail) => {
                 write!(f, "the import produced an unexplained loss: {detail}")
@@ -292,6 +337,99 @@ impl std::error::Error for ImportFailure {}
 struct Element {
     tag: String,
     attributes: Vec<(String, String)>,
+}
+
+/// A shape from an SVG `<path>`: its subpaths, the fill rule and a simple fill, and what was changed on the way
+/// (as `(feature, replaced with, reason)`). `Err` carries why the data could not become a shape at all.
+fn svg_shape(
+    element: &Element,
+    data: &str,
+    id: &str,
+    name: &str,
+) -> Result<(ShapeObject, Vec<(String, String, String)>), String> {
+    use gx_contracts::color::{ColorValue, Rgba};
+    let parsed = gx_contracts::svg_path::parse(data)
+        .map_err(|error| format!("the path data could not be read ({error})"))?;
+    let mut notes: Vec<(String, String, String)> = Vec::new();
+    let usable = |p: &BezierPath| p.vertices.len() >= if p.closed { 3 } else { 2 };
+    let dropped = parsed.subpaths.iter().filter(|p| !usable(p)).count();
+    let mut subpaths: Vec<BezierPath> = parsed.subpaths.into_iter().filter(usable).collect();
+    if subpaths.is_empty() {
+        return Err("the path has no segment to draw".into());
+    }
+    if dropped > 0 {
+        notes.push((
+            "svg:path subpath".into(),
+            "left out".into(),
+            format!("{dropped} subpath(s) with too few points to draw"),
+        ));
+    }
+    for note in parsed.notes {
+        notes.push(("svg:path A".into(), "cubic curves".into(), note));
+    }
+    let path = subpaths.remove(0);
+    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for vertex in std::iter::once(&path).chain(&subpaths).flat_map(|p| &p.vertices) {
+        low = (low.0.min(vertex.x), low.1.min(vertex.y));
+        high = (high.0.max(vertex.x), high.1.max(vertex.y));
+    }
+    let mut base = ObjectBase::new(id, name);
+    base.width = high.0 - low.0;
+    base.height = high.1 - low.1;
+    // A fill that is not a hex colour or `none` is not read: the shape takes the default grey, and the report says so.
+    let mut fill_enabled = true;
+    base.fill = Some(ColorValue::Solid {
+        color: Rgba::srgb(0.5, 0.5, 0.5, 1.0),
+    });
+    if let Some(fill) = element.attribute("fill") {
+        let fill = fill.trim().to_ascii_lowercase();
+        if fill == "none" {
+            fill_enabled = false;
+        } else if let Some((r, g, b)) = hex_colour(&fill) {
+            base.fill = Some(ColorValue::Solid {
+                color: Rgba::srgb(r, g, b, 1.0),
+            });
+        } else {
+            notes.push((
+                format!("svg:path fill=\"{fill}\""),
+                "the default grey".into(),
+                "only hex colours and none are read as a fill".into(),
+            ));
+        }
+    }
+    let fill_rule = match element.attribute("fill-rule").as_deref().map(str::trim) {
+        Some("evenodd") => FillRule::Evenodd,
+        _ => FillRule::Nonzero,
+    };
+    Ok((
+        ShapeObject {
+            base,
+            path,
+            compound_paths: (!subpaths.is_empty()).then_some(subpaths),
+            fill_enabled,
+            stroke_enabled: false,
+            fill_rule,
+            trim_start: None,
+            trim_end: None,
+            trim_offset: None,
+            contour_ids: None,
+        },
+        notes,
+    ))
+}
+
+/// `#rgb` or `#rrggbb` as 0 to 1 channels.
+fn hex_colour(text: &str) -> Option<(f64, f64, f64)> {
+    let digits = text.strip_prefix('#')?;
+    let channel = |s: &str| u8::from_str_radix(s, 16).ok().map(|v| f64::from(v) / 255.0);
+    match digits.len() {
+        3 => {
+            let d: Vec<String> = digits.chars().map(|c| format!("{c}{c}")).collect();
+            Some((channel(&d[0])?, channel(&d[1])?, channel(&d[2])?))
+        }
+        6 => Some((channel(&digits[0..2])?, channel(&digits[2..4])?, channel(&digits[4..6])?)),
+        _ => None,
+    }
 }
 
 impl Element {
@@ -402,7 +540,7 @@ mod tests {
     const EVERY_TIER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg">
         <rect id="background" x="0" y="0" width="1920" height="1080"/>
         <g id="lower-third"/>
-        <path id="swoosh" d="M0 0 L10 10 Z" width="100" height="20"/>
+        <path id="swoosh" d="M0 0 L10" width="100" height="20"/>
         <image id="logo" href="data:image/png;base64,AAAA"/>
     </svg>"#;
 
@@ -443,6 +581,62 @@ mod tests {
             outcome.report.worst_severity(),
             Some(RefusalSeverity::Error)
         );
+    }
+
+    #[test]
+    fn a_path_becomes_a_shape_with_its_holes_fill_rule_and_colour() {
+        // 11.114: a square with a square hole, evenodd, a hex fill, and an arc that is turned into cubics.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
+            <path id="frame" fill="#ff8000" fill-rule="evenodd"
+                  d="M0 0 L100 0 L100 100 L0 100 Z M25 25 L25 75 L75 75 L75 25 Z"/>
+            <path id="dome" fill="none" d="M0 0 A50 50 0 0 1 100 0"/>
+            <path id="odd" fill="url(#g)" d="M0 0 L10 0 L10 10 Z"/>
+        </svg>"##;
+        let outcome = import_svg("paths.svg", svg.as_bytes(), "paths").unwrap();
+        let shape = |id: &str| {
+            outcome
+                .scene
+                .objects
+                .iter()
+                .find_map(|o| match o {
+                    SceneObject::Shape(s) if s.base.id == id => Some(s),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{id} is a shape"))
+        };
+        let frame = shape("frame");
+        assert!(frame.path.closed && frame.path.vertices.len() == 4);
+        assert_eq!(frame.compound_paths.as_ref().map(Vec::len), Some(1));
+        assert_eq!(frame.fill_rule, FillRule::Evenodd);
+        assert_eq!((frame.base.width, frame.base.height), (100.0, 100.0));
+        assert!(frame.fill_enabled);
+        assert!(matches!(&frame.base.fill, Some(gx_contracts::color::ColorValue::Solid { color }) if (color.r - 1.0).abs() < 1e-9));
+        let dome = shape("dome");
+        assert!(!dome.fill_enabled, "fill none");
+        assert!(dome.path.vertices.len() >= 3, "a half turn is at least two cubics");
+        let tiers: Vec<_> = outcome.report.entries.iter().map(|e| (e.source_id.as_str(), e.tier)).collect();
+        assert_eq!(
+            tiers,
+            vec![("frame", ImportTier::Native), ("dome", ImportTier::Native), ("odd", ImportTier::Native)]
+        );
+        // What was changed is said: the arc, and the fill that is not read.
+        let said = |id: &str| outcome.report.entries.iter().find(|e| e.source_id == id).unwrap().substitutions.clone();
+        assert!(said("dome")[0].reason.contains("arcs were turned into cubic curves"));
+        assert!(said("odd")[0].source_feature.contains("url(#g)"));
+        assert!(said("frame").is_empty());
+        outcome.report.validate().unwrap();
+    }
+
+    #[test]
+    fn path_data_that_cannot_be_read_is_flattened_with_the_reason() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><path id="bad" d="M0 0 L5" width="10" height="10"/><path id="empty" d="M5 5" width="1" height="1"/></svg>"#;
+        let outcome = import_svg("bad.svg", svg.as_bytes(), "bad").unwrap();
+        for (id, says) in [("bad", "could not be read"), ("empty", "no segment")] {
+            let entry = outcome.report.entries.iter().find(|e| e.source_id == id).unwrap();
+            assert_eq!(entry.tier, ImportTier::Flattened, "{id}");
+            assert!(entry.substitutions[0].reason.contains(says), "{id}: {}", entry.substitutions[0].reason);
+        }
+        outcome.report.validate().unwrap();
     }
 
     #[test]

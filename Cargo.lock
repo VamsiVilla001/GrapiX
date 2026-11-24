@@ -1890,6 +1890,7 @@ version = "0.1.0"
 dependencies = [
  "allsorts",
  "gx-contracts",
+ "gx-credential",
  "gx-fs",
  "gx-telemetry",
  "serde",
@@ -1919,6 +1920,8 @@ dependencies = [
  "gx-playout",
  "gx-playout-mcp",
  "gx-render-worker",
+ "gx-settings",
+ "gx-workspace-store",
  "parking_lot",
  "serde_json",
  "zip",
@@ -1978,9 +1981,9 @@ version = "0.1.0"
 dependencies = [
  "gx-contracts",
  "gx-control-plane",
+ "gx-credential",
  "gx-mock-engine",
  "gx-telemetry",
- "hmac",
  "interprocess",
  "serde",
  "serde_json",
@@ -1988,6 +1991,17 @@ dependencies = [
  "socket2",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gx-credential"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -2029,6 +2043,7 @@ name = "gx-editor-mcp"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "gx-credential",
  "gx-editor",
  "gx-mcp-server",
  "gx-telemetry",
@@ -2047,8 +2062,10 @@ dependencies = [
  "gx-contracts",
  "gx-editor",
  "gx-project-store",
+ "gx-settings",
  "gx-shell-log",
  "gx-telemetry",
+ "gx-workspace-store",
  "serde",
  "serde_json",
  "tauri",
@@ -2073,6 +2090,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-figma-link"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "gx-fs"
 version = "0.1.0"
 dependencies = [
@@ -2083,8 +2108,12 @@ dependencies = [
 name = "gx-mcp-server"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "gx-contracts",
+ "gx-credential",
  "gx-telemetry",
+ "http",
+ "http-body-util",
  "hyper",
  "hyper-util",
  "rmcp",
@@ -2228,6 +2257,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-settings"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-fs",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "gx-shell-log"
 version = "0.1.0"
 dependencies = [
@@ -2248,6 +2288,16 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gx-workspace-store"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-fs",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

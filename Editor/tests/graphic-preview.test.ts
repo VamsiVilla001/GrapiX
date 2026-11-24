@@ -3,7 +3,7 @@ import type { TimelinePhase } from "@grapix/contracts";
 import { wireFrame } from "../src/command-client";
 import { graphicPreviewFrame } from "../src/graphic-preview";
 
-const scene = (phases: TimelinePhase[] = [], duration = 100) => ({ timeline: { durationFrames: wireFrame(duration), channels: [], phases } });
+const scene = (phases: TimelinePhase[] = [], duration = 100) => ({ timeline: { durationFrames: wireFrame(duration), channels: [], phases, pathChannels: [] } });
 describe("representative graphic preview frame", () => {
   it("prefers the hold/build frame so an animated entrance does not produce an empty first-frame tile", () => {
     expect(graphicPreviewFrame(scene())).toBe(50);

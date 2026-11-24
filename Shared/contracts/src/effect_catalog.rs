@@ -19,9 +19,13 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::effect::{
-    BoxBlur, BrightnessContrast, Curves, DirectionalBlur, Domain, DropShadow, Effect,
-    EffectInstance, Exposure, Fill, GaussianBlur, Glow, GradientRamp, HueSaturation, Invert,
-    IrisWipe, Levels, LinearWipe, Posterize, RadialWipe, Threshold, Tint, Vibrance,
+    Arithmetic, BlackWhite, BoxBlur, BrightnessContrast, BroadcastColors, CcColorNeutralizer,
+    CcColorOffset, CcThreshold, CcThresholdRgb, CcToner, ChangeColor, ChannelMixer, ColorBalance,
+    ColorBalanceHls, ColorDifferenceKey, ColorRange, Curves, DirectionalBlur, Domain, DropShadow,
+    Effect, EffectInstance, Exposure, Extract, Fill, GammaPedestalGain, GaussianBlur, Glow,
+    GradientRamp, HueSaturation, Invert, IrisWipe, LeaveColor, Levels, LinearColorKey, LinearWipe,
+    PhotoFilter, Posterize, RadialWipe, RemoveColorMatting, SelectiveColor, ShiftChannels,
+    SpillSuppressor, Threshold, Tint, Tritone, Unmult, Vibrance, VideoLimiter,
 };
 
 #[path = "effect_catalog_data.rs"]
@@ -62,6 +66,32 @@ pub const PORTED: &[(&str, &str)] = &[
     ("ec.stylize.posterize", "posterize"),
     ("ec.stylize.threshold", "threshold"),
     ("ec.color.vibrance", "vibrance"),
+    ("ec.color.tritone", "tritone"),
+    ("ec.color.channelmixer", "channel-mixer"),
+    ("ec.color.colorbalance", "color-balance"),
+    ("ec.color.gammapedestalgain", "gamma-pedestal-gain"),
+    ("ec.color.colorbalancehls", "color-balance-hls"),
+    ("ec.color.blackwhite", "black-white"),
+    ("ec.color.photofilter", "photo-filter"),
+    ("ec.color.leavecolor", "leave-color"),
+    ("ec.color.videolimiter", "video-limiter"),
+    ("ec.color.broadcast", "broadcast-colors"),
+    ("ec.color.cctoner", "cc-toner"),
+    ("ec.color.cccoloroffset", "cc-color-offset"),
+    ("ec.stylize.ccthreshold", "cc-threshold"),
+    ("ec.stylize.ccthresholdrgb", "cc-threshold-rgb"),
+    ("ec.color.changecolor", "change-color"),
+    ("ec.channel.shiftchannels", "shift-channels"),
+    ("ec.key.linearcolor", "linear-color-key"),
+    ("ec.key.colorrange", "color-range"),
+    ("ec.channel.arithmetic", "arithmetic"),
+    ("ec.key.colordifference", "color-difference-key"),
+    ("ec.color.selectivecolor", "selective-color"),
+    ("ec.channel.removecolormatting", "remove-color-matting"),
+    ("ec.key.extract", "extract"),
+    ("ec.color.cccolorneutralizer", "cc-color-neutralizer"),
+    ("ec.key.unmult", "unmult"),
+    ("ec.key.spill", "spill-suppressor"),
 ];
 
 /// The effect a contract tag names, at its defaults.
@@ -87,6 +117,32 @@ pub fn default_effect(tag: &str) -> Option<Effect> {
         "posterize" => Effect::Posterize(Posterize::default()),
         "threshold" => Effect::Threshold(Threshold::default()),
         "vibrance" => Effect::Vibrance(Vibrance::default()),
+        "tritone" => Effect::Tritone(Tritone::default()),
+        "channel-mixer" => Effect::ChannelMixer(ChannelMixer::default()),
+        "color-balance" => Effect::ColorBalance(ColorBalance::default()),
+        "gamma-pedestal-gain" => Effect::GammaPedestalGain(GammaPedestalGain::default()),
+        "color-balance-hls" => Effect::ColorBalanceHls(ColorBalanceHls::default()),
+        "black-white" => Effect::BlackWhite(BlackWhite::default()),
+        "photo-filter" => Effect::PhotoFilter(PhotoFilter::default()),
+        "leave-color" => Effect::LeaveColor(LeaveColor::default()),
+        "video-limiter" => Effect::VideoLimiter(VideoLimiter::default()),
+        "broadcast-colors" => Effect::BroadcastColors(BroadcastColors::default()),
+        "cc-toner" => Effect::CcToner(CcToner::default()),
+        "cc-color-offset" => Effect::CcColorOffset(CcColorOffset::default()),
+        "cc-threshold" => Effect::CcThreshold(CcThreshold::default()),
+        "cc-threshold-rgb" => Effect::CcThresholdRgb(CcThresholdRgb::default()),
+        "change-color" => Effect::ChangeColor(ChangeColor::default()),
+        "shift-channels" => Effect::ShiftChannels(ShiftChannels::default()),
+        "linear-color-key" => Effect::LinearColorKey(LinearColorKey::default()),
+        "remove-color-matting" => Effect::RemoveColorMatting(RemoveColorMatting::default()),
+        "extract" => Effect::Extract(Extract::default()),
+        "cc-color-neutralizer" => Effect::CcColorNeutralizer(CcColorNeutralizer::default()),
+        "unmult" => Effect::Unmult(Unmult::default()),
+        "spill-suppressor" => Effect::SpillSuppressor(SpillSuppressor::default()),
+        "color-range" => Effect::ColorRange(ColorRange::default()),
+        "arithmetic" => Effect::Arithmetic(Arithmetic::default()),
+        "color-difference-key" => Effect::ColorDifferenceKey(ColorDifferenceKey::default()),
+        "selective-color" => Effect::SelectiveColor(SelectiveColor::default()),
         _ => return None,
     })
 }
@@ -424,12 +480,12 @@ mod tests {
     use crate::effect::validate_effects;
 
     #[test]
-    fn the_surface_lists_all_306_effects_and_exactly_the_20_the_engine_renders() {
+    fn the_surface_lists_all_306_effects_and_exactly_the_42_the_engine_renders() {
         let surface = effect_surface();
         assert_eq!(surface.effects.len(), 306);
         let available: Vec<_> = surface.effects.iter().filter(|e| e.available).collect();
-        assert_eq!(available.len(), 20);
-        assert_eq!(PORTED.len(), 20);
+        assert_eq!(available.len(), 46);
+        assert_eq!(PORTED.len(), 46);
         // Every ported id is in the catalogue once, and every contract effect is offered.
         let mut tags: Vec<&str> = available
             .iter()

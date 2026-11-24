@@ -52,6 +52,12 @@ impl FrameEmitter {
         self.program.publish(program, DropCause::ConsumerBusy);
     }
 
+    /// Publish a Program frame alone (3.24): Preview is decimated under load, and the Preview
+    /// slot keeps its last frame untouched.
+    pub fn emit_program(&mut self, program: Arc<Frame>) {
+        self.program.publish(program, DropCause::ConsumerBusy);
+    }
+
     /// Take the freshest preview frame. It never reaches a live adapter.
     pub fn take_preview(&mut self) -> Option<Arc<Frame>> {
         self.preview.take()
@@ -95,6 +101,20 @@ mod tests {
             height: 1,
             pixels: vec![byte, byte, byte, byte],
         })
+    }
+
+    #[test]
+    fn a_program_frame_alone_leaves_the_previews_last_frame_in_place() {
+        let mut emitter = FrameEmitter::new();
+        emitter.emit(frame(17), frame(7));
+        emitter.emit_program(frame(8));
+        assert_eq!(emitter.take_program().unwrap().pixels, [8, 8, 8, 8]);
+        assert_eq!(
+            emitter.take_preview().unwrap().pixels,
+            [17, 17, 17, 17],
+            "decimated Preview still shows its last delivered frame"
+        );
+        assert_eq!(emitter.preview_drops().consumer_busy, 0);
     }
 
     #[test]

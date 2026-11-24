@@ -159,6 +159,18 @@ pub enum SaveTarget {
     Project { project: String },
     /// Write a scene file.
     File { path: String },
+    /// Save the session as the next numbered version of itself (11.30), and continue in it.
+    ///
+    /// A scene stored in a project is written, with its unsaved edits, as a new stored scene under
+    /// the next free id (`strap` gives `strap_v002`, `strap_v003` gives `strap_v004`, and a number
+    /// already taken is passed over) with the name numbered the same way. The version it came from
+    /// is not written to: it stays exactly as it was last saved. The session then belongs to the
+    /// new scene and starts a fresh history, because the scene it edits has a new identity. A scene
+    /// saved to a file is written beside it as the next numbered file (`strap.json` gives
+    /// `strap_v002.json`), and the session continues in that file with its history. A scene that has
+    /// never been saved has no version to number from and refuses `sessionUnbound`. A failed write
+    /// changes nothing.
+    NextVersion,
 }
 
 /// Which preset phase `ApplyPreset` instantiates.
@@ -294,6 +306,79 @@ commands! {
             pub source_name: String,
             pub svg: String,
         },
+        /// Ingest one Figma frame into a new stored scene (18.2, 18.3). The user's own agent
+        /// reads the frame through Figma's MCP and passes the text of `get_metadata` as
+        /// `metadata`; GrapiX holds no Figma token and makes no network call. The frame becomes
+        /// the canvas (its width and height), its nodes become objects at their Figma positions,
+        /// and the report names everything `get_metadata` does not carry (fills, text content,
+        /// fonts, radii, clipping). The metadata text is retained in the project by content
+        /// hash. Refuses an existing id; one frame per call.
+        ImportFigma = "importFigma" {
+            pub project: String,
+            pub scene_id: String,
+            /// The scene's display name; the Figma frame's name when absent.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub name: Option<String>,
+            /// What to call the retained source, for example the frame's name.
+            pub source_name: String,
+            /// The full-fidelity route: the frame as the agent read it through Figma's MCP
+            /// (fills, strokes, radii, text, fonts, blend modes), in the typed shape of
+            /// [`FigmaNode`]. Exactly one of `frame` and `metadata` is given.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub frame: Option<Box<crate::figma_frame::FigmaNode>>,
+            /// The folder under `Images` the frame's pictures are filed in; the root frame's
+            /// name when absent. A picture fill's `image` is looked up there as `<image>.png`,
+            /// then `<image>.webp`.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub image_folder: Option<String>,
+            /// The structure-only route: the reply of Figma's `get_metadata` for the frame,
+            /// as received. Positions and nesting only, with no paint and no text.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub metadata: Option<String>,
+        },
+        /// File one file into a project (11.43), from a file on this machine: a picture
+        /// (png, webp, jpg, jpeg, svg) into `Assets/Images`, a video (mp4, mov, avi, webm) into
+        /// `Assets/Videos`, audio (wav, mp3) into `Assets/Audio`, a 3D model (gltf, glb, obj, fbx,
+        /// stl, ply, dae, usd, usdz) into `Assets/Models`, or a font (otf, ttf, woff, woff2)
+        /// into `Fonts`. The bytes decide which, not the name. The same bytes filed again are a
+        /// no-op, and different bytes under an existing name refuse. The outcome's imported
+        /// effect names the filed path and its content hash.
+        ImportAsset = "importAsset" {
+            pub project: String,
+            /// One folder name under the class folder (a Figma frame's name, say); empty for
+            /// the class folder itself.
+            #[serde(default)]
+            pub folder: String,
+            /// An absolute path to the file on this machine.
+            pub from: String,
+            /// The file name to file it under; the source file's name when absent.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub name: Option<String>,
+            /// What the file came from (a Figma node, a URL), kept in its record.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub source: Option<String>,
+        },
+        /// Take a session to the state just after one step of its change history (11.82),
+        /// or to before every listed step when `step` is left out. It is what the right
+        /// number of undos or redos gives, done in one replay: every step up to and
+        /// including the named one is applied (one a module-scoped undo had skipped too),
+        /// and every later step is undone and can be redone in its order. The jump is not
+        /// itself a step, and going to where the session already is changes nothing. A
+        /// replay that refuses changes nothing (`historyConflict`); a step the history no
+        /// longer lists refuses `historyStepUnknown`.
+        GoToHistoryStep = "goToHistoryStep" {
+            pub session: SessionKey,
+            /// The step's `id` from [`HistoryView`]; left out for the scene as opened.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub step: Option<u32>,
+        },
     }
 }
 
@@ -374,6 +459,8 @@ commands! {
             pub color_space: crate::color::SourceColorSpace,
         },
         SetSceneName = "setSceneName" { pub name: String },
+        /// Change the Scene ID, the label a person edits (1.13). Nothing that points at the scene changes. An empty label takes it away.
+        SetSceneLabel = "setSceneLabel" { pub label: String },
         /// Change the id of a scene that is not bound to a stored origin.
         SetSceneId = "setSceneId" { pub id: String },
         /// Add prepared fonts and the font assets their faces need (11.13).
@@ -463,6 +550,11 @@ commands! {
             #[ts(optional)]
             pub track_matte: Option<TrackMatte>,
         },
+        /// Turn Preserve Underlying Transparency on or off for one layer (3.28).
+        SetPreserveTransparency = "setPreserveTransparency" {
+            pub object_id: String,
+            pub preserve: bool,
+        },
         /// Set one shape's trim window (3.13): start and end in percent of the
         /// path, offset in percent of a turn. A value left out is its default
         /// (0, 100, 0); all three replace what the shape had.
@@ -529,6 +621,87 @@ commands! {
             #[serde(default, skip_serializing_if = "Option::is_none")]
             #[ts(optional)]
             pub fill_rule: Option<FillRule>,
+        },
+        /// One semantic operation on one path (11.107, the Pen spec's path
+        /// commands): insert, delete or convert vertices, set a handle, move
+        /// vertices, reshape a segment, reverse, restart or close. `target`
+        /// names a shape's subpath or a mask; the result is checked as
+        /// `setShapePath` or `setObjectMasks` checks it.
+        EditPath = "editPath" {
+            pub object_id: String,
+            pub target: crate::path_geometry::PathTarget,
+            pub op: crate::path_geometry::PathOp,
+            /// The frame an edit of an animated path is made at (11.112): a
+            /// move, handle or kind edit sets the key there; an edit of which
+            /// vertices there are (insert, delete, reverse, first vertex,
+            /// close) lands in every key at once. Left out, the path is static.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub frame: Option<u64>,
+            /// For a path that is linked (11.112): the revision the edit was made on. The edit is refused when the
+            /// shared path has been edited since.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub base_revision: Option<u64>,
+        },
+        /// Make `target`'s path the same path as `source`'s (11.112): the numbers of `source` are copied in and the
+        /// two are one linked path from then on, an edit of either changing both. A mask is given an id when it has
+        /// none. Refused when either path is animated or `target` is linked already.
+        LinkPaths = "linkPaths" {
+            pub source: crate::path_link::PathAddress,
+            pub target: crate::path_link::PathAddress,
+        },
+        /// Take one path out of its link (11.112): it keeps the path it has, and is independent from then on.
+        UnlinkPath = "unlinkPath" {
+            pub path: crate::path_link::PathAddress,
+        },
+        /// Put a guide on the canvas (11.44): a line along `axis` at `position` pixels. The lowest free id is given to it.
+        AddGuide = "addGuide" {
+            pub axis: crate::scene::GuideAxis,
+            pub position: f64,
+        },
+        /// Move a guide to another position.
+        MoveGuide = "moveGuide" {
+            pub id: u32,
+            pub position: f64,
+        },
+        /// Take a guide off the canvas.
+        RemoveGuide = "removeGuide" {
+            pub id: u32,
+        },
+        /// Take one subpath out of a compound shape (11.112): the others keep their contour ids, and the path channels and links of
+        /// the shape follow them to their new places; those of the subpath taken out end with it. A shape keeps at least one path.
+        RemoveSubpath = "removeSubpath" {
+            pub shape_id: String,
+            pub subpath: usize,
+        },
+        /// Put a whole path key on a path channel (11.112), creating the
+        /// channel on its first key. A key at a frame that has one replaces it.
+        SetPathKey = "setPathKey" {
+            pub object_id: String,
+            pub target: crate::path_geometry::PathTarget,
+            pub frame: u64,
+            pub path: BezierPath,
+            #[serde(default)]
+            pub easing: crate::animation::SceneEasing,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub bezier: Option<crate::animation::CubicBezier>,
+        },
+        /// Take one path key off a path channel (11.112). The last key's
+        /// removal ends the channel and leaves the path as that key had it.
+        RemovePathKey = "removePathKey" {
+            pub object_id: String,
+            pub target: crate::path_geometry::PathTarget,
+            pub frame: u64,
+        },
+        /// Move a path key to another frame (11.112); a frame that has a key
+        /// already is refused, as `moveKeyframe` refuses it.
+        MovePathKey = "movePathKey" {
+            pub object_id: String,
+            pub target: crate::path_geometry::PathTarget,
+            pub from_frame: u64,
+            pub to_frame: u64,
         },
     }
 }
@@ -628,6 +801,40 @@ pub struct SessionView {
     pub redo_depth: u32,
     pub dirty: bool,
     pub project_dirty: bool,
+}
+
+/// One step of a session's change history (11.82): one edit batch, as the list shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryStep {
+    /// What `GoToHistoryStep` names. It stays the step's own for as long as the step is
+    /// listed, so a list read a moment ago still points at the right step.
+    pub id: u32,
+    /// The part of the app that made the change (11.37).
+    pub module: EditorModule,
+    /// The wire tag of every edit in the batch, in order ([`SceneEdit::NAMES`]).
+    pub edits: Vec<String>,
+    /// What the first edit was about, when it names something a reader recognises: the
+    /// name given to a new or renamed object, a property, a preset or a style id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub about: Option<String>,
+    /// False for a step that is undone and can be redone.
+    pub applied: bool,
+}
+
+/// A session's change history, oldest step first (11.82). The scene is the document as
+/// opened with every applied step replayed in this order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryView {
+    pub session: SessionKey,
+    pub steps: Vec<HistoryStep>,
+    /// Older steps that are no longer listed: past the history limit they are part of the
+    /// scene as opened, and cannot be undone.
+    pub folded: u32,
+    /// The most steps one scene keeps.
+    pub limit: u32,
 }
 
 /// The result of one executed command.
@@ -836,6 +1043,21 @@ fn apply_edit(
             scene.name = name.to_owned();
             EditEffect::None
         }
+        SceneEdit::SetSceneLabel(p) => {
+            if p.label.trim().is_empty() {
+                if scene.scene_label.is_none() {
+                    return Err(Refusal::ObjectFieldUnchanged { field: "sceneLabel".into() });
+                }
+                scene.scene_label = None;
+            } else {
+                let label = crate::ids::parse_scene_label(&p.label)?;
+                if scene.scene_label.as_deref() == Some(label.as_str()) {
+                    return Err(Refusal::ObjectFieldUnchanged { field: "sceneLabel".into() });
+                }
+                scene.scene_label = Some(label);
+            }
+            EditEffect::None
+        }
         SceneEdit::SetSceneId(p) => {
             // A stored scene's id is its address; renaming it in place would
             // orphan the stored file. Duplicate is the way to a new id.
@@ -899,6 +1121,9 @@ fn apply_edit(
         SceneEdit::SetTrackMatte(p) => {
             render_edit::set_track_matte(scene, &p.object_id, p.track_matte.as_ref())?
         }
+        SceneEdit::SetPreserveTransparency(p) => {
+            render_edit::set_preserve_transparency(scene, &p.object_id, p.preserve)?
+        }
         SceneEdit::SetTrim(p) => {
             render_edit::set_trim(scene, &p.object_id, p.start, p.end, p.offset)?
         }
@@ -920,6 +1145,30 @@ fn apply_edit(
             &p.compound_paths,
             p.fill_rule,
         )?,
+        SceneEdit::EditPath(p) => {
+            render_edit::edit_path(scene, &p.object_id, p.target, &p.op, p.frame, p.base_revision)?
+        }
+        SceneEdit::AddGuide(p) => render_edit::add_guide(scene, p.axis, p.position)?,
+        SceneEdit::MoveGuide(p) => render_edit::move_guide(scene, p.id, p.position)?,
+        SceneEdit::RemoveGuide(p) => render_edit::remove_guide(scene, p.id)?,
+        SceneEdit::RemoveSubpath(p) => render_edit::remove_subpath(scene, &p.shape_id, p.subpath)?,
+        SceneEdit::LinkPaths(p) => render_edit::link_paths(scene, &p.source, &p.target)?,
+        SceneEdit::UnlinkPath(p) => render_edit::unlink_path(scene, &p.path)?,
+        SceneEdit::SetPathKey(p) => render_edit::set_path_key(
+            scene,
+            &p.object_id,
+            p.target,
+            p.frame,
+            &p.path,
+            p.easing,
+            p.bezier,
+        )?,
+        SceneEdit::RemovePathKey(p) => {
+            render_edit::remove_path_key(scene, &p.object_id, p.target, p.frame)?
+        }
+        SceneEdit::MovePathKey(p) => {
+            render_edit::move_path_key(scene, &p.object_id, p.target, p.from_frame, p.to_frame)?
+        }
     })
 }
 
@@ -1026,6 +1275,9 @@ pub mod witness {
             EditorCommand::ConfirmDesignSystem(_) => 11,
             EditorCommand::SaveMotionPreset(_) => 12,
             EditorCommand::ImportScene(_) => 13,
+            EditorCommand::ImportFigma(_) => 14,
+            EditorCommand::ImportAsset(_) => 15,
+            EditorCommand::GoToHistoryStep(_) => 16,
         }
     }
 
@@ -1077,6 +1329,18 @@ pub mod witness {
             SceneEdit::SetAnchor(_) => 43,
             SceneEdit::SetEffects(_) => 44,
             SceneEdit::SetShapePath(_) => 45,
+            SceneEdit::EditPath(_) => 46,
+            SceneEdit::SetPreserveTransparency(_) => 47,
+            SceneEdit::SetPathKey(_) => 48,
+            SceneEdit::RemovePathKey(_) => 49,
+            SceneEdit::MovePathKey(_) => 50,
+            SceneEdit::LinkPaths(_) => 51,
+            SceneEdit::UnlinkPath(_) => 52,
+            SceneEdit::RemoveSubpath(_) => 53,
+            SceneEdit::AddGuide(_) => 54,
+            SceneEdit::MoveGuide(_) => 55,
+            SceneEdit::RemoveGuide(_) => 56,
+            SceneEdit::SetSceneLabel(_) => 57,
         }
     }
 
@@ -1090,6 +1354,15 @@ pub mod witness {
         std::fs::create_dir_all(scratch).expect("the witness scratch directory is writable");
         let fixture_path = scratch.join("witness.gpx");
         let saved_path = scratch.join("saved.gpx");
+        // A file for `ImportAsset`: a PNG header of 1 by 1, which is all the importer reads.
+        let picture_path = scratch.join("witness.png");
+        let mut picture = b"\x89PNG\r\n\x1a\n".to_vec();
+        picture.extend_from_slice(&13u32.to_be_bytes());
+        picture.extend_from_slice(b"IHDR");
+        picture.extend_from_slice(&1u32.to_be_bytes());
+        picture.extend_from_slice(&1u32.to_be_bytes());
+        picture.extend_from_slice(&[8, 6, 0, 0, 0]);
+        std::fs::write(&picture_path, picture).expect("the witness picture writes");
         std::fs::write(
             &fixture_path,
             serde_json::to_vec(&fixture_scene()).expect("the witness fixture serialises"),
@@ -1118,6 +1391,16 @@ pub mod witness {
             EditorCommand::Redo(Redo {
                 session,
                 module: None,
+            }),
+            // Back to the scene as opened and forward again to the batch (its id is 1, the
+            // first step of the session), so the batch is applied for what follows.
+            EditorCommand::GoToHistoryStep(GoToHistoryStep {
+                session,
+                step: None,
+            }),
+            EditorCommand::GoToHistoryStep(GoToHistoryStep {
+                session,
+                step: Some(1),
             }),
             EditorCommand::SaveScene(SaveScene {
                 session,
@@ -1160,6 +1443,22 @@ pub mod witness {
                 name: None,
                 source_name: "witness.svg".into(),
                 svg: r#"<svg><rect id="bar" width="10" height="10"/><g id="group"/></svg>"#.into(),
+            }),
+            EditorCommand::ImportAsset(ImportAsset {
+                project: "witness-project".into(),
+                folder: "witness".into(),
+                from: picture_path.display().to_string(),
+                name: None,
+                source: None,
+            }),
+            EditorCommand::ImportFigma(ImportFigma {
+                project: "witness-project".into(),
+                scene_id: "ingested".into(),
+                name: None,
+                source_name: "witness.xml".into(),
+                frame: None,
+                image_folder: None,
+                metadata: Some(r#"<frame id="1:1" name="Frame" x="0" y="0" width="1920" height="1080"><rounded-rectangle id="1:2" name="Plate" x="0" y="0" width="100" height="50"/></frame>"#.into()),
             }),
             EditorCommand::SaveTakePage(SaveTakePage {
                 project: "witness-project".into(),
@@ -1449,6 +1748,9 @@ pub mod witness {
             SceneEdit::SetSceneId(SetSceneId {
                 id: "witness-renamed".into(),
             }),
+            SceneEdit::SetSceneLabel(SetSceneLabel {
+                label: "7".into(),
+            }),
             SceneEdit::SetObjectVisible(SetObjectVisible {
                 object_id: "rect-1".into(),
                 visible: false,
@@ -1604,6 +1906,9 @@ pub mod witness {
                     vertices: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 100.0, y: 0.0 }],
                     in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 2],
                     out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 2],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
                 },
                 compound_paths: None,
             }),
@@ -1618,6 +1923,7 @@ pub mod witness {
             SceneEdit::SetObjectMasks(SetObjectMasks {
                 object_id: "card".into(),
                 masks: vec![crate::scene::Mask {
+id: None,
                     path: BezierPath {
                         closed: true,
                         vertices: vec![
@@ -1627,9 +1933,15 @@ pub mod witness {
                         ],
                         in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
                         out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                        vertex_ids: None,
+                        vertex_kinds: None,
+                        auto_tension: None,
                     },
                     mode: crate::scene::MaskMode::Add,
                     feather: 4.0,
+                    feather_y: None,
+                    falloff: Default::default(),
+                    feather_points: None,
                     expansion: 0.0,
                     opacity: 1.0,
                     inverted: false,
@@ -1716,6 +2028,9 @@ pub mod witness {
                     ],
                     in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
                     out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
                 },
                 compound_paths: vec![BezierPath {
                     closed: true,
@@ -1726,9 +2041,76 @@ pub mod witness {
                     ],
                     in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
                     out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    vertex_ids: None,
+                    vertex_kinds: None,
+                    auto_tension: None,
                 }],
                 fill_rule: Some(FillRule::Evenodd),
             }),
+            SceneEdit::SetPreserveTransparency(SetPreserveTransparency {
+                object_id: "card".into(),
+                preserve: true,
+            }),
+            SceneEdit::EditPath(EditPath {
+                object_id: "shape-1".into(),
+                target: crate::path_geometry::PathTarget::Shape { subpath: 0 },
+                op: crate::path_geometry::PathOp::InsertVertex { segment: 0, t: 0.5 },
+                frame: None,
+                base_revision: None,
+            }),
+            SceneEdit::LinkPaths(LinkPaths {
+                source: crate::path_link::PathAddress {
+                    object_id: "shape-1".into(),
+                    target: crate::path_geometry::PathTarget::Shape { subpath: 0 },
+                },
+                target: crate::path_link::PathAddress {
+                    object_id: "card".into(),
+                    target: crate::path_geometry::PathTarget::Mask { index: 0 },
+                },
+            }),
+            SceneEdit::UnlinkPath(UnlinkPath {
+                path: crate::path_link::PathAddress {
+                    object_id: "card".into(),
+                    target: crate::path_geometry::PathTarget::Mask { index: 0 },
+                },
+            }),
+            SceneEdit::SetPathKey(SetPathKey {
+                object_id: "shape-1".into(),
+                target: crate::path_geometry::PathTarget::Shape { subpath: 0 },
+                frame: 0,
+                path: BezierPath {
+                    closed: false,
+                    vertices: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 20.0, y: 0.0 }, Vec2 { x: 40.0, y: 10.0 }],
+                    in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    vertex_ids: Some(vec![0, 1, 2]),
+                    vertex_kinds: None,
+                    auto_tension: None,
+                },
+                easing: crate::animation::SceneEasing::Linear,
+                bezier: None,
+            }),
+            SceneEdit::MovePathKey(MovePathKey {
+                object_id: "shape-1".into(),
+                target: crate::path_geometry::PathTarget::Shape { subpath: 0 },
+                from_frame: 0,
+                to_frame: 1,
+            }),
+            SceneEdit::RemovePathKey(RemovePathKey {
+                object_id: "shape-1".into(),
+                target: crate::path_geometry::PathTarget::Shape { subpath: 0 },
+                frame: 1,
+            }),
+            SceneEdit::RemoveSubpath(RemoveSubpath {
+                shape_id: "shape-1".into(),
+                subpath: 1,
+            }),
+            SceneEdit::AddGuide(AddGuide {
+                axis: crate::scene::GuideAxis::X,
+                position: 960.0,
+            }),
+            SceneEdit::MoveGuide(MoveGuide { id: 1, position: 480.0 }),
+            SceneEdit::RemoveGuide(RemoveGuide { id: 1 }),
         ]
     }
 
@@ -2117,6 +2499,52 @@ mod tests {
         .into();
         apply_edits(&mut scene, &[edit], &NO_CONTEXT).unwrap();
         assert_eq!(scene.name, "News");
+    }
+
+    #[test]
+    fn renaming_a_scene_id_changes_the_label_and_breaks_no_cue() {
+        use crate::ids::CueTable;
+        let mut scene = scene_with_card();
+        let key = crate::TakeId(scene.id.clone());
+        let mut show = CueTable::default();
+        show.assign("Open", key.clone()).unwrap();
+        let set = |label: &str| -> SceneEdit { SetSceneLabel { label: label.into() }.into() };
+        apply_edits(&mut scene, &[set("12")], &NO_CONTEXT).unwrap();
+        assert_eq!(scene.scene_label.as_deref(), Some("12"));
+        apply_edits(&mut scene, &[set("  Opener-2  ")], &NO_CONTEXT).unwrap();
+        assert_eq!(scene.scene_label.as_deref(), Some("Opener-2"));
+        // The scene key, and so every cue that holds it, is what it was.
+        assert_eq!(scene.id, "scene");
+        assert_eq!(show.scene_of("open").unwrap(), &key);
+        // A label the rules refuse, an unchanged one and an empty one are each told apart.
+        assert!(matches!(
+            apply_edits(&mut scene, &[set("two words")], &NO_CONTEXT),
+            Err(Refusal::SceneLabelInvalid { fault: crate::ids::IdFault::BadCharacter, .. })
+        ));
+        assert_eq!(
+            apply_edits(&mut scene, &[set("Opener-2")], &NO_CONTEXT),
+            Err(Refusal::ObjectFieldUnchanged { field: "sceneLabel".into() })
+        );
+        assert_eq!(scene.scene_label.as_deref(), Some("Opener-2"), "a refused edit leaves the label alone");
+        apply_edits(&mut scene, &[set("  ")], &NO_CONTEXT).unwrap();
+        assert_eq!(scene.scene_label, None);
+        assert_eq!(
+            apply_edits(&mut scene, &[set("")], &NO_CONTEXT),
+            Err(Refusal::ObjectFieldUnchanged { field: "sceneLabel".into() })
+        );
+    }
+
+    #[test]
+    fn a_scene_file_with_a_refused_scene_id_is_refused_by_name() {
+        let mut scene = scene_with_card();
+        scene.scene_label = Some("not ok".into());
+        let refused = crate::drawability::drawability_refusals(&scene);
+        assert!(
+            refused.iter().any(|r| matches!(r.code, Refusal::SceneLabelInvalid { .. }) && r.field.as_deref() == Some("sceneLabel")),
+            "{refused:?}"
+        );
+        scene.scene_label = Some("7".into());
+        assert!(crate::drawability::drawability_refusals(&scene).iter().all(|r| !matches!(r.code, Refusal::SceneLabelInvalid { .. })));
     }
 
     #[test]

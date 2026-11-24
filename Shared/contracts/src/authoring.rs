@@ -297,7 +297,13 @@ pub fn delete_object(
         .timeline
         .channels
         .retain(|channel| !removed_set.contains(channel.object_id.as_str()));
-    let removed_channel_count = channels_before - scene.timeline.channels.len();
+    let path_channels_before = scene.timeline.path_channels.len();
+    scene
+        .timeline
+        .path_channels
+        .retain(|channel| !removed_set.contains(channel.object_id.as_str()));
+    let removed_channel_count =
+        channels_before - scene.timeline.channels.len() + path_channels_before - scene.timeline.path_channels.len();
 
     let cleared_active_camera = scene
         .active_camera_id
@@ -310,6 +316,8 @@ pub fn delete_object(
     scene
         .objects
         .retain(|object| !removed_set.contains(object.base().id.as_str()));
+    // A path the object shared with another is no longer shared (11.112): a link left with one user ends.
+    crate::path_link::prune_path_links(scene);
 
     // Surviving containers must stop claiming children that no longer exist,
     // or the resolver reports a MissingChild diagnostic for an edit that was
@@ -398,8 +406,18 @@ pub fn duplicate_object(
             copied_channels.push(copy);
         }
     }
-    let copied_channel_count = copied_channels.len();
+    // 11.112: animated paths are animation too. A copy is independent of what it was copied from, so path links are not copied.
+    let mut copied_path_channels = Vec::new();
+    for channel in &scene.timeline.path_channels {
+        if let Some(new_id) = remap.get(&channel.object_id) {
+            let mut copy = channel.clone();
+            copy.object_id = new_id.clone();
+            copied_path_channels.push(copy);
+        }
+    }
+    let copied_channel_count = copied_channels.len() + copied_path_channels.len();
     scene.timeline.channels.extend(copied_channels);
+    scene.timeline.path_channels.extend(copied_path_channels);
 
     let created_object_ids: Vec<String> = copies.iter().map(|c| c.base().id.clone()).collect();
     let new_object_id = remap[object_id].clone();
@@ -508,6 +526,7 @@ mod tests {
     fn scene() -> SceneDocument {
         SceneDocument {
             working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
+            color_depth: crate::color::ColorDepth::BEFORE_DEPTH,
             id: "authoring".into(),
             name: "Authoring".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,
@@ -528,6 +547,9 @@ mod tests {
             materials: vec![],
             controls: vec![],
             text_styles: vec![],
+            path_links: Vec::new(),
+            guides: Vec::new(),
+            scene_label: None,
             objects: vec![],
         }
     }

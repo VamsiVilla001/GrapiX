@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod auth;
 pub mod fonts;
 pub mod handoff;
 pub mod import;
@@ -21,15 +22,15 @@ pub use handoff::{
 };
 pub use limits::AssetLimits;
 pub use preflight::{
-    publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient, AssetTransferClientError,
-    AssetTransferMetrics, AssetTransferReply, AssetTransferRequest, AssetTransferServer,
-    ASSET_TRANSFER_CHUNK_BYTES, MAX_ASSET_FRAME_BYTES,
+    is_transport_failure, publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient,
+    AssetTransferClientError, AssetTransferMetrics, AssetTransferReply, AssetTransferRequest,
+    AssetTransferServer, RetryPolicy, ASSET_TRANSFER_CHUNK_BYTES, MAX_ASSET_FRAME_BYTES,
 };
 pub use publish::{
     declared_locality, fetch_bytes, preview_scene, publish_scene, AssetPublishPeer,
-    AssetPublishServer, FetchError, FetchReply, LocalityReply, PreviewError, PreviewImage,
-    PreviewJob, PreviewReply, PreviewRequest, PublishClientError, PublishRefusal, PublishReply,
-    PublishRequest, MAX_PUBLISH_FRAME_BYTES,
+    AssetPublishServer, CalmGate, FetchError, FetchReply, LocalityReply, PreviewError,
+    PreviewImage, PreviewJob, PreviewReply, PreviewRequest, PublishClientError, PublishRefusal,
+    PublishReply, PublishRequest, MAX_CALM_WAIT, MAX_PUBLISH_FRAME_BYTES,
 };
 pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};
 pub use transfer::Transfer;

@@ -20,6 +20,8 @@ fn layer(id: &str, colour: Rgba, space: WorkingColorSpace, width: u32, height: u
         matte: false,
         clip: None,
         track: None,
+        preserve: false,
+        effect_weights: Vec::new(),
         state: LayerState::default(),
     }
 }

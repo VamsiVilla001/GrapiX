@@ -1,0 +1,163 @@
+<title>GrapiX Design Feedback</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one reading column, status first, then tables. Dark broadcast palette from the SKWAD tokens (ink, ember, cocoa). */
+:root{--bg:#f6f2ec;--panel:#ffffff;--line:#ddd3c6;--fg:#2a1b14;--mute:#6e5f55;--accent:#c4451a;--ok:#2d7a4b;--warn:#a46a00;--bad:#b3261e;--chip:#efe7dc;--f-ui:Manrope,system-ui,sans-serif;--f-mono:"JetBrains Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17100d;--panel:#211815;--line:#3a2c26;--fg:#f3ede4;--mute:#a8998d;--accent:#f15a29;--ok:#5fc183;--warn:#e5b04a;--bad:#ef6f66;--chip:#2c211c;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#17100d;--panel:#211815;--line:#3a2c26;--fg:#f3ede4;--mute:#a8998d;--accent:#f15a29;--ok:#5fc183;--warn:#e5b04a;--bad:#ef6f66;--chip:#2c211c;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--f-ui);padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+h1{font-size:28px;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:17px;margin:0 0 10px;letter-spacing:.01em}
+p{margin:0 0 8px;max-width:68ch}
+.lede{color:var(--mute);font-size:16px}
+.stat{display:flex;gap:14px;flex-wrap:wrap}
+.stat div{background:var(--panel);border:1px solid var(--line);padding:10px 14px;min-width:0}
+.stat b{display:block;font:700 22px var(--f-mono);color:var(--accent)}
+.stat span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+.tw{overflow-x:auto;border:1px solid var(--line);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mute);background:var(--chip)}
+tr:last-child td{border-bottom:0}
+code{font-family:var(--f-mono);font-size:12.5px}
+.tag{display:inline-block;font:600 11px var(--f-mono);padding:1px 7px;border:1px solid currentColor}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.mute{color:var(--mute)}
+ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:5px;max-width:78ch}
+.q{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;margin-bottom:8px}
+.q b{display:block;margin-bottom:2px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.two>div{min-width:0}
+</style>
+
+<main>
+<header>
+<p class="mute" style="font:600 12px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mute)">GrapiX by SKWAD · 24 Nov 2026</p>
+<h1>GrapiX Design Feedback</h1>
+<p class="lede">What changed in the Editor, what the external review got right and wrong, what Jev and Laya said, and what is still waiting for your decision.</p>
+</header>
+
+<section class="stat" aria-label="Headline numbers">
+<div><b>55 / 100</b><span>External review, scored against our evidence</span></div>
+<div><b>14</b><span>Wireframe changes proposed</span></div>
+<div><b>14</b><span>Name collisions between the two rename sets</span></div>
+<div><b>5 of 10</b><span>Questions where Jev and Laya agree</span></div>
+</section>
+
+<section>
+<h2>1. What changed this session</h2>
+<div class="tw"><table>
+<tr><th>Change</th><th>Where</th><th>State</th></tr>
+<tr><td>Cast strip removed from the Editor</td><td>Figma B2, wireframes B2 and B3; the records table in B4 is now called Test records</td><td><span class="tag ok">done</span></td></tr>
+<tr><td>Bottom bar cut to Logic and Library</td><td>Figma B2 only</td><td><span class="tag warn">wireframes still show the old bar</span></td></tr>
+<tr><td>Look rows: Font, Colour, Align, Box and fit, Plate (Numbers added for data-bound numbers)</td><td>Figma B2 card, wireframe CARD and note</td><td><span class="tag ok">done</span></td></tr>
+<tr><td>Proposed names preset ("Load proposed names" button)</td><td>Wireframes names table; 11 of 14 renames</td><td><span class="tag warn">Figma not renamed</span></td></tr>
+<tr><td>Look property research</td><td><code>docs/design/research/look-properties-research.md</code></td><td><span class="tag ok">committed</span></td></tr>
+<tr><td>External review verification and Jev/Laya answers</td><td><code>docs/design/review/external-review-verification-2026-11-24.md</code></td><td><span class="tag ok">committed</span></td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>2. The Look card, as researched</h2>
+<div class="tw"><table>
+<tr><th>Tier</th><th>Text part</th><th>Why</th></tr>
+<tr><td>Always visible</td><td>Font (family, style, size) · Colour with opacity · Align · Box and fit (fixed, shrink between min and max) · Plate (fill, padding) · Numbers (only for data-bound numbers: fixed-width digits)</td><td>Variable-length names and score digits are the main on-air risks</td></tr>
+<tr><td>Under More</td><td>Stroke, shadow, gradient · letter spacing, line height, vertical trim · vertical align, anchor · wrap, max lines, truncate · case · fallback font · text direction · variable axes · number and date format · plate radius and stroke</td><td>Fit tuning, Indic and Arabic clipping protection, data fields</td></tr>
+<tr><td>Search only</td><td>Kerning, word spacing, baseline shift · ligatures and stylistic sets · glow, underline, sub and superscript · language tag, line-break rules, hyphenation · missing-glyph behaviour</td><td>Rarely changed; safe defaults</td></tr>
+</table></div>
+<p class="mute" style="margin-top:8px">Shape parts: fill, stroke, corner radius first. Image parts: fit mode, anchor, placeholder when missing first. Sources for Ross XPression, Singular.live and After Effects could not be read, so those cells are marked unverified. Indian-script clipping needs a render test on our own engine.</p>
+</section>
+
+<section>
+<h2>3. The external review, checked against our evidence</h2>
+<div class="two">
+<div>
+<ul>
+<li><b>Moments replace the timeline: disputed.</b> B3 already says keyframes exist one level down. The title "motion without a timeline" invites the misreading. Real gaps: no rule for re-applying a preset over edited curves, and times shown in ms while the engine is frame-exact.</li>
+<li><b>Engine phases:</b> the engine has five (In, Hold, Out, Continue, Update). Our four Moments and the review's Enter, Hold, Update, Exit both leave out Continue.</li>
+<li><b>Workspaces: disputed.</b> The owner decision is toggles plus named saved layouts. The gap is that the Layout dropdown is not drawn. The shipped Editor has 8 menus, not 6 or 10.</li>
+<li><b>Ecosystem diagram:</b> adds DataHub as an application and draws no engine behind Playout. It contradicts invariants 1, 2, 5 and 6.</li>
+</ul>
+</div>
+<div>
+<ul>
+<li><b>Right, and we should change:</b> B11 lists AI clients by model name, but the invariants grant by credential scope. The TAKE guarantee needs a per-field live-update exception.</li>
+<li><b>Confirmed:</b> Scene ID (same model, clearer wording), "Editor controls schema, Playout controls values", and "JavaScript first", which is our own earlier decision.</li>
+<li><b>Playout list:</b> planned: import/export, Stream Deck, acknowledgement and dedup. Out of scope for release 1: multiple outputs, mirrored failover. Missing: groups, bulk IDs, emergency graphics.</li>
+<li><b>Missed entirely:</b> accessibility, performance budgets, error and stale states, keyboard operation, TAKE and CLEAR safety. Its seven ratings are its own opinions, not measurements.</li>
+</ul>
+</div>
+</div>
+</section>
+
+<section>
+<h2>4. Names: your list against the review</h2>
+<div class="tw"><table>
+<tr><th>Concept</th><th>Your list</th><th>External review</th><th>Verdict</th></tr>
+<tr><td>Take, Take ID</td><td>Cue, Cue ID (held)</td><td>Keep</td><td><span class="tag ok">Keep Take</span> CUED already means preloaded</td></tr>
+<tr><td>Layer</td><td>Stack</td><td>Output Layer</td><td><span class="tag ok">Output Layer</span> already in the repo glossary</td></tr>
+<tr><td>Moment</td><td>Phase</td><td>Motion</td><td><span class="tag warn">Phase</span> Motion clashes with the Motion menu and step</td></tr>
+<tr><td>Look</td><td>Style</td><td>Effects</td><td><span class="tag bad">open</span> Style clashes with layer, text and motion styles</td></tr>
+<tr><td>Show rules</td><td>Play Rules</td><td>Show Logic</td><td><span class="tag warn">Play Rules</span> Show Logic merges Editor logic with Playout rules</td></tr>
+<tr><td>Test records</td><td>(Cast removed)</td><td>Data Lab</td><td><span class="tag warn">Test records</span> Data Lab clashes with the Data step</td></tr>
+<tr><td>Virtual output</td><td>Airview</td><td>AirView</td><td><span class="tag warn">hold</span> must not read as on air</td></tr>
+<tr><td>Stage</td><td>—</td><td>Canvas</td><td><span class="tag warn">hold</span></td></tr>
+<tr><td>Sequence, Scene list, Scene data, Replay Lab, Data Hub</td><td>Playline, Scene Bank, Inputs, Replay Lab, Data Hub</td><td>Same</td><td><span class="tag ok">agreed by both</span></td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>5. Jev and Laya on ten design questions</h2>
+<p class="mute">Numbers are model confidences from 0 to 1, not versions. They are second opinions, not verifiers.</p>
+<div class="tw"><table>
+<tr><th>Question</th><th>Jev</th><th>Laya</th><th>Our decision</th></tr>
+<tr><td>Menus</td><td>Ten, 0.82</td><td>Ten, 0.69</td><td>Reconcile with the shipped eight</td></tr>
+<tr><td>Workspaces</td><td>Named workspaces, 0.84</td><td>Named workspaces, 0.62</td><td>Saved layouts, no mode locks a tool (owner decision)</td></tr>
+<tr><td>Schema and values</td><td>Editor schema, 1.0</td><td>Same, 0.79</td><td>Agreed</td></tr>
+<tr><td>Take words</td><td>Keep, 1.0</td><td>Keep, 0.95</td><td>Keep</td></tr>
+<tr><td>Naming principle</td><td>Keep standard terms, 1.0</td><td>Same, 0.61</td><td>Agreed</td></tr>
+<tr><td>Timeline</td><td>Beside Moments, 1.0</td><td>Moments only, 0.39</td><td>Add a Timeline layout preset</td></tr>
+<tr><td>Inspector</td><td>Expandable, 0.70</td><td>Single card, 0.62</td><td>Card plus searchable All properties</td></tr>
+<tr><td>Scene ID</td><td>Internal ID plus label, 0.96</td><td>Our rule, 0.50</td><td>Same model, reword</td></tr>
+<tr><td>Live fields</td><td>Per field, 1.0</td><td>All live, 0.74</td><td>Per field (plan 11.54)</td></tr>
+<tr><td>Scene logic</td><td>JavaScript first, 1.0</td><td>Nodes first, 0.41</td><td>JavaScript first</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>6. Wireframe changes proposed</h2>
+<div class="tw"><table>
+<tr><th>#</th><th>Change</th><th>Screen</th><th>Tag</th></tr>
+<tr><td>1</td><td>First-class Timeline layout preset; B3 says a style writes ordinary keyframes; ask before re-applying a preset over edited curves</td><td>B3, B2</td><td><span class="tag warn">adopt with change</span></td></tr>
+<tr><td>2</td><td>Show five engine phases including Continue</td><td>B3, B2, B9</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>3</td><td>Durations in frames, ms derived</td><td>B3</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>4</td><td>Searchable All properties list and pin under More</td><td>B2</td><td><span class="tag warn">adopt with change</span></td></tr>
+<tr><td>5</td><td>Draw the Layout dropdown and saved layouts</td><td>B2</td><td><span class="tag warn">adopt with change</span></td></tr>
+<tr><td>6</td><td>Reconcile menus with the shipped eight; keep Ctrl K</td><td>menus</td><td><span class="tag warn">adopt with change</span></td></tr>
+<tr><td>7</td><td>Remove unused menu constants from the page script</td><td>script</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>8</td><td>Parts becomes a tree with visibility, lock and group</td><td>B2</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>9</td><td>Scene tabs and a second viewport (later)</td><td>B2</td><td><span class="tag warn">adopt with change</span></td></tr>
+<tr><td>10</td><td>AI clients granted by credential scope, not model name</td><td>B11, B8</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>11</td><td>Scene ID wording: internal key plus editable label; operator hides but cannot add fields</td><td>B2, B10, P2, P3</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>12</td><td>TAKE guarantee in three layers: package version, checked data, permitted live updates; per-field flag in P3</td><td>P1, P3</td><td><span class="tag ok">adopt</span></td></tr>
+<tr><td>13</td><td>Execution-status line, sequence import/export, emergency take with armed clear; park groups and failover</td><td>P1, P4, P7</td><td><span class="tag warn">adopt with change</span></td></tr>
+<tr><td>14</td><td>Names as in section 4; no DataHub application until invariant 1 is amended</td><td>names table, B5, B12</td><td><span class="tag warn">adopt with change</span></td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>7. Waiting for your decision</h2>
+<div class="q"><b>Decided by you: Take becomes Cue, Look becomes Style.</b>Take, Take ID and Calling takes are now Cue, Cue ID and Cue Control. The old "cue" (load into preview) is now Preload and CUED is now Preloaded. Style (how a part looks) and Effects (glow, shadow, wipe edge) are separate. The wireframes use these names (version 15), and the review and Jev/Laya advice to keep Take was overruled.</div>
+<div class="q"><b>Still to do in Figma.</b>Figma uses the old names, and the wireframes still show the old five-item bottom bar. Say when to apply them.</div>
+<div class="q"><b>Data Hub as a fourth application.</b>Needs an owner-approved change to invariant 1 before any ecosystem diagram shows it.</div>
+</section>
+
+<section>
+<h2>8. Limits</h2>
+<ul>
+<li>The review agent worked from our wireframes and repo documents. It did not run or capture the app.</li>
+<li>Jev and Laya were measured earlier as unreliable verifiers; they were used on design questions only.</li>
+<li>No app code, AGENTS.md or invariants were edited.</li>
+</ul>
+</section>
+</main>

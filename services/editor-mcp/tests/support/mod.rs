@@ -26,7 +26,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-pub use client::{post, post_local, HttpReply};
+pub use client::{post, post_anonymous, post_local, HttpReply, TEST_SECRET};
 
 /// The revision this client asks for at `initialize`.
 pub const HANDSHAKE_VERSION: &str = "2025-06-18";
@@ -247,12 +247,17 @@ pub struct HttpProcess {
 
 impl HttpProcess {
     pub fn launch(root: &Path) -> Self {
+        Self::launch_logging_to(root, &std::env::temp_dir().join("gx-test-logs"))
+    }
+
+    /// [`Self::launch`] with the process's log in `logs`, for a test that reads it.
+    pub fn launch_logging_to(root: &Path, logs: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
             // 2.12: a test process logs to a scratch folder, not the operator's log root.
-            .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+            .env("GX_LOG_DIR", logs)
             .arg("--root")
             .arg(root)
-            .args(["--http", "0"])
+            .args(["--http", "0", "--token", TEST_SECRET])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -283,6 +288,12 @@ impl HttpProcess {
             }
         };
         Self { child, addr }
+    }
+
+    /// End the process and wait for it, so its log is written out.
+    pub fn finish(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 
     /// POST one JSON-RPC message to `/mcp` with a matching `Host`.

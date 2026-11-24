@@ -6,6 +6,9 @@ import type { CreateScene } from "./CreateScene";
 import type { DeleteScene } from "./DeleteScene";
 import type { DuplicateScene } from "./DuplicateScene";
 import type { EditScene } from "./EditScene";
+import type { GoToHistoryStep } from "./GoToHistoryStep";
+import type { ImportAsset } from "./ImportAsset";
+import type { ImportFigma } from "./ImportFigma";
 import type { ImportScene } from "./ImportScene";
 import type { OpenScene } from "./OpenScene";
 import type { Redo } from "./Redo";
@@ -18,4 +21,4 @@ import type { Undo } from "./Undo";
  * The one editor command type. Every authoring mutation, from every
  * surface (Tauri, MCP), is a value of this type.
  */
-export type EditorCommand = { "command": "openScene" } & OpenScene | { "command": "closeScene" } & CloseScene | { "command": "editScene" } & EditScene | { "command": "undo" } & Undo | { "command": "redo" } & Redo | { "command": "saveScene" } & SaveScene | { "command": "createProject" } & CreateProject | { "command": "createScene" } & CreateScene | { "command": "duplicateScene" } & DuplicateScene | { "command": "deleteScene" } & DeleteScene | { "command": "saveTakePage" } & SaveTakePage | { "command": "confirmDesignSystem" } & ConfirmDesignSystem | { "command": "saveMotionPreset" } & SaveMotionPreset | { "command": "importScene" } & ImportScene;
+export type EditorCommand = { "command": "openScene" } & OpenScene | { "command": "closeScene" } & CloseScene | { "command": "editScene" } & EditScene | { "command": "undo" } & Undo | { "command": "redo" } & Redo | { "command": "saveScene" } & SaveScene | { "command": "createProject" } & CreateProject | { "command": "createScene" } & CreateScene | { "command": "duplicateScene" } & DuplicateScene | { "command": "deleteScene" } & DeleteScene | { "command": "saveTakePage" } & SaveTakePage | { "command": "confirmDesignSystem" } & ConfirmDesignSystem | { "command": "saveMotionPreset" } & SaveMotionPreset | { "command": "importScene" } & ImportScene | { "command": "importFigma" } & ImportFigma | { "command": "importAsset" } & ImportAsset | { "command": "goToHistoryStep" } & GoToHistoryStep;

@@ -104,6 +104,8 @@ pub struct AssetTransferServer {
     limits: crate::limits::AssetLimits,
     /// Connections held now, against `limits.max_connections`.
     connections: Arc<std::sync::atomic::AtomicUsize>,
+    /// Transfers begun and not finished, shared by every connection (2.24).
+    partials: Partials,
 }
 
 impl AssetTransferServer {
@@ -115,6 +117,7 @@ impl AssetTransferServer {
             metrics: AssetTransferMetrics(Arc::new(AtomicU64::new(0))),
             limits: crate::limits::AssetLimits::default(),
             connections: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            partials: Partials::default(),
         })
     }
 
@@ -153,6 +156,7 @@ impl AssetTransferServer {
                         };
                         let store = Arc::clone(&self.store);
                         let metrics = self.metrics.clone();
+                        let partials = self.partials.clone();
                         let limits = self.limits;
                         thread::spawn(move || {
                             let _permit = permit;
@@ -162,7 +166,7 @@ impl AssetTransferServer {
                                     detail = problem.as_str(),
                                 );
                             }
-                            let _ = handle_connection(stream, store, metrics, &limits);
+                            let _ = handle_connection(stream, store, metrics, partials, &limits);
                         });
                     }
                     Err(error) => {
@@ -175,36 +179,154 @@ impl AssetTransferServer {
     }
 }
 
+/// How a client keeps going when the connection fails under it (2.24).
+///
+/// A failure of the transport (a reset, an end of stream, a refused connect, a deadline) is
+/// retried: the client waits, dials again, and asks the receiver where the transfer stood, so a
+/// transfer resumes from its last whole chunk instead of from the beginning. A refusal, an
+/// unexpected reply or a malformed frame is never retried: another attempt would get the same
+/// answer, and the caller needs to see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    /// Redials after the first failure; 0 tries once.
+    pub retries: u32,
+    /// The wait before the first redial; each later wait doubles.
+    pub first_delay: std::time::Duration,
+    /// No wait is longer than this.
+    pub longest_delay: std::time::Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            retries: 4,
+            first_delay: std::time::Duration::from_millis(100),
+            longest_delay: std::time::Duration::from_secs(2),
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// No retry: one attempt, as a caller that wants to see every failure asks for.
+    pub const fn none() -> Self {
+        Self {
+            retries: 0,
+            first_delay: std::time::Duration::ZERO,
+            longest_delay: std::time::Duration::ZERO,
+        }
+    }
+
+    /// The wait before redial number `retry` (counting from 0): the first delay doubled each
+    /// time, never more than the longest.
+    pub fn delay_before(&self, retry: u32) -> std::time::Duration {
+        let doubled = self
+            .first_delay
+            .checked_mul(1u32.checked_shl(retry).unwrap_or(u32::MAX))
+            .unwrap_or(self.longest_delay);
+        doubled.min(self.longest_delay)
+    }
+}
+
+/// Whether an I/O error is the connection failing (a reset, an abort, a broken pipe, an end of
+/// stream, a deadline, nothing listening) rather than a peer that sent something it should not
+/// have. The two are reported, and retried, differently.
+pub fn is_transport_failure(error: &io::Error) -> bool {
+    use io::ErrorKind::{
+        BrokenPipe, ConnectionAborted, ConnectionRefused, ConnectionReset, NotConnected, TimedOut,
+        UnexpectedEof, WouldBlock,
+    };
+    matches!(
+        error.kind(),
+        ConnectionReset
+            | ConnectionAborted
+            | ConnectionRefused
+            | BrokenPipe
+            | NotConnected
+            | UnexpectedEof
+            | TimedOut
+            | WouldBlock
+    )
+}
+
 /// A connection-scoped client so preflight and every required chunk use exactly
 /// the same wire implementation as the listener (invariant 27).
 pub struct AssetTransferClient {
+    engine: SocketAddr,
     stream: TcpStream,
     transferred_bytes: u64,
     /// Whether this connection's first frame, the one that names the action
     /// (2.13), has been sent.
     opened: bool,
+    retry: RetryPolicy,
 }
 
 impl AssetTransferClient {
     pub fn connect(engine: SocketAddr) -> Result<Self, AssetTransferClientError> {
         Ok(Self {
+            engine,
             stream: TcpStream::connect(engine).map_err(AssetTransferClientError::Connect)?,
             transferred_bytes: 0,
             opened: false,
+            retry: RetryPolicy::default(),
         })
+    }
+
+    /// Retry under `retry` instead of the default.
+    #[must_use]
+    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    /// Run `step`, and when the connection fails under it wait, dial again and run it again, as
+    /// the policy allows. Only a failure of the transport is retried.
+    fn retrying<T>(
+        &mut self,
+        mut step: impl FnMut(&mut Self) -> Result<T, AssetTransferClientError>,
+    ) -> Result<T, AssetTransferClientError> {
+        let mut retry = 0;
+        loop {
+            match step(self) {
+                Err(error) if error.is_transport() && retry < self.retry.retries => {
+                    let wait = self.retry.delay_before(retry);
+                    tracing::warn!(
+                        event = "asset.transfer_retry",
+                        retry = retry + 1,
+                        of = self.retry.retries,
+                        wait_ms = wait.as_millis() as u64,
+                        detail = error.to_string().as_str(),
+                    );
+                    thread::sleep(wait);
+                    retry += 1;
+                    // A new connection is a new first frame: the correlation id and the
+                    // credential ride it again.
+                    // If the dial fails too, that is the next failure, taken on the next turn
+                    // with the stream still the dead one.
+                    if let Ok(stream) = TcpStream::connect(self.engine) {
+                        self.stream = stream;
+                        self.opened = false;
+                    }
+                }
+                other => return other,
+            }
+        }
     }
 
     pub fn preflight(
         &mut self,
         request: PreflightRequest,
     ) -> Result<PreflightResponse, AssetTransferClientError> {
-        match self.request(AssetTransferRequest::Preflight {
-            hashes: request.hashes,
-        })? {
-            AssetTransferReply::Preflight { missing } => Ok(PreflightResponse { missing }),
-            AssetTransferReply::Refused { cause } => Err(AssetTransferClientError::Refused(cause)),
-            reply => Err(AssetTransferClientError::UnexpectedReply { reply }),
-        }
+        self.retrying(|client| {
+            match client.request(AssetTransferRequest::Preflight {
+                hashes: request.hashes.clone(),
+            })? {
+                AssetTransferReply::Preflight { missing } => Ok(PreflightResponse { missing }),
+                AssetTransferReply::Refused { cause } => {
+                    Err(AssetTransferClientError::Refused(cause))
+                }
+                reply => Err(AssetTransferClientError::UnexpectedReply { reply }),
+            }
+        })
     }
 
     pub fn transfer(&mut self, asset: &AssetBytes) -> Result<(), AssetTransferClientError> {
@@ -214,18 +336,42 @@ impl AssetTransferClient {
             u32::try_from(chunks).map_err(|_| AssetTransferClientError::RequestTooLarge {
                 bytes: asset.bytes.len(),
             })?;
-        match self.request(AssetTransferRequest::Begin {
+        // Every attempt asks the receiver where the transfer stands and sends from there, so a
+        // transfer cut part way continues at its last whole chunk.
+        self.retrying(|client| client.transfer_once(asset, total_chunks))
+    }
+
+    fn transfer_once(
+        &mut self,
+        asset: &AssetBytes,
+        total_chunks: u32,
+    ) -> Result<(), AssetTransferClientError> {
+        let resume_from = match self.request(AssetTransferRequest::Begin {
             hash: asset.hash.clone(),
             total_chunks,
         })? {
-            AssetTransferReply::Started { .. } => {}
+            AssetTransferReply::Started { resume_from, .. } => resume_from,
             AssetTransferReply::Refused { cause } => {
                 return Err(AssetTransferClientError::Refused(cause))
             }
             reply => return Err(AssetTransferClientError::UnexpectedReply { reply }),
+        };
+        if resume_from > total_chunks {
+            return Err(AssetTransferClientError::Protocol(format!(
+                "the receiver resumes at chunk {resume_from} of a transfer of {total_chunks}"
+            )));
+        }
+        // The receiver holds it all already (a duplicate upload finished first): nothing to send.
+        if resume_from == total_chunks {
+            return Ok(());
         }
 
-        for (index, bytes) in asset.bytes.chunks(ASSET_TRANSFER_CHUNK_BYTES).enumerate() {
+        for (index, bytes) in asset
+            .bytes
+            .chunks(ASSET_TRANSFER_CHUNK_BYTES)
+            .enumerate()
+            .skip(resume_from as usize)
+        {
             let index =
                 u32::try_from(index).map_err(|_| AssetTransferClientError::RequestTooLarge {
                     bytes: asset.bytes.len(),
@@ -254,7 +400,7 @@ impl AssetTransferClient {
         Err(AssetTransferClientError::UnexpectedReply {
             reply: AssetTransferReply::Started {
                 hash: asset.hash.clone(),
-                resume_from: 0,
+                resume_from: total_chunks,
             },
         })
     }
@@ -286,15 +432,24 @@ impl AssetTransferClient {
     ) -> Result<AssetTransferReply, AssetTransferClientError> {
         // 2.13: the connection's first frame carries the correlation id of the
         // action it belongs to; the listener enters it for the whole connection.
-        let correlation = if std::mem::replace(&mut self.opened, true) {
-            None
-        } else {
+        let first = !std::mem::replace(&mut self.opened, true);
+        let correlation = if first {
             gx_telemetry::corr::current()
+        } else {
+            None
         };
-        write_frame_for(&mut self.stream, &request, correlation.as_deref())
-            .map_err(AssetTransferClientError::Transport)?;
+        // 2.24: the credential rides the first frame; the listener verifies it once for the
+        // connection (the chunks that follow carry nothing).
+        let credential = if first { crate::auth::current() } else { None };
+        write_frame_for(
+            &mut self.stream,
+            &request,
+            correlation.as_deref(),
+            credential.as_deref(),
+        )
+        .map_err(AssetTransferClientError::classify)?;
         read_frame(&mut self.stream)
-            .map_err(AssetTransferClientError::Transport)?
+            .map_err(AssetTransferClientError::classify)?
             .ok_or_else(|| {
                 AssetTransferClientError::Transport(io::Error::from(io::ErrorKind::UnexpectedEof))
             })
@@ -312,13 +467,41 @@ pub fn publish_assets(
 
 /// A client-side failure. Refusals remain values so callers retain the exact
 /// condition the receiver rejected rather than inventing a local substitute.
+///
+/// `Connect` and `Transport` are the connection failing (2.24): nothing was decided, and a retry
+/// may succeed. `Protocol` is the peer answering with something that is not the dialect: a retry
+/// would get the same.
 #[derive(Debug)]
 pub enum AssetTransferClientError {
     Connect(io::Error),
     Transport(io::Error),
-    RequestTooLarge { bytes: usize },
+    /// A frame that is not a frame of the dialect, or a reply the dialect does not allow.
+    Protocol(String),
+    RequestTooLarge {
+        bytes: usize,
+    },
     Refused(Refusal),
-    UnexpectedReply { reply: AssetTransferReply },
+    UnexpectedReply {
+        reply: AssetTransferReply,
+    },
+}
+
+impl AssetTransferClientError {
+    /// Whether the connection failed (so the work may be tried again) rather than the peer
+    /// answering wrongly or by name.
+    pub fn is_transport(&self) -> bool {
+        matches!(self, Self::Connect(_) | Self::Transport(_))
+    }
+
+    /// Name an I/O error from the wire: the connection failing is `Transport`; a frame that
+    /// would not parse, or was too large, is the peer's `Protocol` failure and not the link's.
+    fn classify(error: io::Error) -> Self {
+        if is_transport_failure(&error) {
+            Self::Transport(error)
+        } else {
+            Self::Protocol(error.to_string())
+        }
+    }
 }
 
 impl std::fmt::Display for AssetTransferClientError {
@@ -326,6 +509,7 @@ impl std::fmt::Display for AssetTransferClientError {
         match self {
             Self::Connect(source) => write!(f, "cannot reach the asset plane: {source}"),
             Self::Transport(source) => write!(f, "asset-plane transport failed: {source}"),
+            Self::Protocol(detail) => write!(f, "asset-plane protocol failed: {detail}"),
             Self::RequestTooLarge { bytes } => {
                 write!(f, "asset-plane request frame is {bytes} bytes")
             }
@@ -341,14 +525,40 @@ impl std::error::Error for AssetTransferClientError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Connect(source) | Self::Transport(source) => Some(source),
-            Self::RequestTooLarge { .. } | Self::Refused(_) | Self::UnexpectedReply { .. } => None,
+            Self::Protocol(_)
+            | Self::RequestTooLarge { .. }
+            | Self::Refused(_)
+            | Self::UnexpectedReply { .. } => None,
         }
     }
 }
 
 struct ActiveTransfer {
     transfer: Transfer,
+    total_chunks: u32,
     bytes: Vec<u8>,
+}
+
+/// Most unfinished transfers a receiver keeps for a later connection to resume (2.24). The
+/// oldest is dropped past it: a resume is a convenience, never a reason to hold unbounded bytes
+/// (each is itself bounded by the chunk count a connection may declare, 2.22).
+const MAX_PARTIAL_TRANSFERS: usize = 16;
+
+/// The transfers a receiver has begun and not finished, shared by every connection it serves
+/// (2.24). A transfer belongs to its content hash, not to the connection that began it: a
+/// connection that dies leaves its verified chunks here, and the next one that begins the same
+/// asset resumes after them; two connections uploading the same asset share one transfer, and a
+/// chunk the other already delivered is answered, not refused. Bytes are promoted only after
+/// the whole is verified (invariant 28), exactly as before.
+#[derive(Clone, Default)]
+pub(crate) struct Partials(Arc<Mutex<Vec<ActiveTransfer>>>);
+
+impl Partials {
+    fn lock(&self) -> io::Result<std::sync::MutexGuard<'_, Vec<ActiveTransfer>>> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("asset partial-transfer table poisoned"))
+    }
 }
 
 /// Where a transfer's verified bytes go (5.9): the on-disk [`AssetStore`] for
@@ -382,9 +592,10 @@ fn handle_connection(
     mut stream: TcpStream,
     store: Arc<Mutex<AssetStore>>,
     metrics: AssetTransferMetrics,
+    partials: Partials,
     limits: &crate::limits::AssetLimits,
 ) -> io::Result<()> {
-    serve_transfer(&mut stream, None, &store, &metrics, limits)
+    serve_transfer(&mut stream, None, &store, &metrics, &partials, limits)
 }
 
 /// Serve the transfer dialect on one connection, starting with `first` when a
@@ -395,9 +606,9 @@ pub(crate) fn serve_transfer<A: VerifiedAssets>(
     first: Option<AssetTransferRequest>,
     assets: &A,
     metrics: &AssetTransferMetrics,
+    partials: &Partials,
     limits: &crate::limits::AssetLimits,
 ) -> io::Result<()> {
-    let mut active = None;
     let mut next = first;
     // 2.22: a connection that has not sent its first request has the shorter
     // first-frame deadline; one that has begun may pause for `idle_deadline`.
@@ -423,7 +634,7 @@ pub(crate) fn serve_transfer<A: VerifiedAssets>(
         };
         wait = limits.idle_deadline;
         within_limits(&request, limits, &mut carried)?;
-        let reply = handle_request(request, assets, metrics, &mut active)?;
+        let reply = handle_request(request, assets, metrics, partials)?;
         write_frame(stream, &reply)?;
     }
 }
@@ -521,7 +732,7 @@ fn handle_request<A: VerifiedAssets>(
     request: AssetTransferRequest,
     assets: &A,
     metrics: &AssetTransferMetrics,
-    active: &mut Option<ActiveTransfer>,
+    partials: &Partials,
 ) -> io::Result<AssetTransferReply> {
     match request {
         AssetTransferRequest::Preflight { hashes } => {
@@ -535,15 +746,36 @@ fn handle_request<A: VerifiedAssets>(
             Ok(AssetTransferReply::Preflight { missing })
         }
         AssetTransferRequest::Begin { hash, total_chunks } => {
+            // Held already (a repeat, or a concurrent upload of the same asset finished first):
+            // every chunk is "resumed past", nothing is left to send, and nothing is refused.
             if assets.has(&hash)? {
-                return Ok(AssetTransferReply::Refused {
-                    cause: Refusal::AssetTransferAlreadyComplete { hash },
+                return Ok(AssetTransferReply::Started {
+                    hash,
+                    resume_from: total_chunks,
+                });
+            }
+            let mut held = partials.lock()?;
+            // The same asset begun again, by a connection that died or a second uploader,
+            // continues where the verified chunks stop.
+            if let Some(partial) = held
+                .iter()
+                .find(|p| p.transfer.hash() == &hash && p.total_chunks == total_chunks)
+            {
+                return Ok(AssetTransferReply::Started {
+                    hash,
+                    resume_from: partial.transfer.resume_from(),
                 });
             }
             match Transfer::new(hash.clone(), total_chunks) {
                 Ok(transfer) => {
-                    *active = Some(ActiveTransfer {
+                    // A transfer of a different length under the same name starts over.
+                    held.retain(|p| p.transfer.hash() != &hash);
+                    if held.len() >= MAX_PARTIAL_TRANSFERS {
+                        held.remove(0);
+                    }
+                    held.push(ActiveTransfer {
                         transfer,
+                        total_chunks,
                         bytes: Vec::new(),
                     });
                     Ok(AssetTransferReply::Started {
@@ -555,36 +787,59 @@ fn handle_request<A: VerifiedAssets>(
             }
         }
         AssetTransferRequest::Chunk { hash, index, bytes } => {
-            let complete = {
-                let active_transfer = active.as_mut().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "asset chunk arrived before begin",
-                    )
-                })?;
-                if active_transfer.transfer.hash() != &hash {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "asset chunk named a different transfer",
-                    ));
+            // The table stays locked through verification and promotion, so a duplicate of the
+            // last chunk on another connection finds the asset held, not a transfer in limbo.
+            let mut held = partials.lock()?;
+            let Some(at) = held.iter().position(|p| p.transfer.hash() == &hash) else {
+                // No transfer of it: either another connection finished it (answer as the
+                // finisher was answered) or this chunk never had a Begin.
+                if assets.has(&hash)? {
+                    return Ok(AssetTransferReply::Stored { hash });
                 }
-                if let Err(cause) = active_transfer.transfer.accept_chunk(index) {
-                    return Ok(AssetTransferReply::Refused { cause });
-                }
-                metrics.0.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-                active_transfer.bytes.extend_from_slice(&bytes);
-                active_transfer.transfer.is_complete()
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "asset chunk arrived before begin",
+                ));
             };
-            if !complete {
+            let next = held[at].transfer.resume_from();
+            if index < next {
+                // Delivered already (a retry whose reply was lost, or the other uploader got there
+                // first). The same bytes are acknowledged and counted once; different bytes under
+                // the same index are refused, never taken.
+                let start = index as usize * ASSET_TRANSFER_CHUNK_BYTES;
+                // Every chunk taken so far is a whole one (the short last chunk completes the
+                // transfer), so a repeat of the wrong length is not a repeat.
+                let same = bytes.len() == ASSET_TRANSFER_CHUNK_BYTES
+                    && held[at].bytes.get(start..start + bytes.len()) == Some(bytes.as_slice());
+                return Ok(if same {
+                    AssetTransferReply::ChunkAccepted {
+                        hash,
+                        next_chunk: next,
+                    }
+                } else {
+                    AssetTransferReply::Refused {
+                        cause: Refusal::AssetChunkOutOfOrder {
+                            hash,
+                            expected: next,
+                            received: index,
+                        },
+                    }
+                });
+            }
+            if let Err(cause) = held[at].transfer.accept_chunk(index) {
+                return Ok(AssetTransferReply::Refused { cause });
+            }
+            metrics.0.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            held[at].bytes.extend_from_slice(&bytes);
+            if !held[at].transfer.is_complete() {
                 return Ok(AssetTransferReply::ChunkAccepted {
                     hash,
                     next_chunk: index + 1,
                 });
             }
 
-            let mut completed = active
-                .take()
-                .expect("completed transfer must remain active");
+            // A failed verification leaves nothing behind to resume.
+            let mut completed = held.remove(at);
             let actual = content_hash(&completed.bytes);
             if let Err(cause) = completed.transfer.verify(&actual) {
                 return Ok(AssetTransferReply::Refused { cause });
@@ -598,7 +853,7 @@ fn handle_request<A: VerifiedAssets>(
 }
 
 fn write_frame<W: Write, T: Serialize>(stream: &mut W, value: &T) -> io::Result<()> {
-    write_frame_for(stream, value, None)
+    write_frame_for(stream, value, None, None)
 }
 
 /// [`write_frame`], with the frame's correlation id when it has one.
@@ -606,9 +861,11 @@ fn write_frame_for<W: Write, T: Serialize>(
     stream: &mut W,
     value: &T,
     correlation: Option<&str>,
+    credential: Option<&str>,
 ) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
     let bytes = crate::publish::with_correlation(&bytes, correlation);
+    let bytes = crate::auth::with_credential(&bytes, credential);
     if bytes.len() > MAX_ASSET_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -688,9 +945,9 @@ mod tests {
     fn the_transfer_server_asks_the_bind_policy_before_it_opens_a_socket() {
         let directory = temporary_directory();
         for (ip, port, because) in [
-            ("0.0.0.0", 0, "verifies no credential"),
-            ("192.168.1.50", 0, "verifies no credential"),
-            ("::", 0, "verifies no credential"),
+            ("0.0.0.0", 0, "requires a token"),
+            ("192.168.1.50", 0, "requires a token"),
+            ("::", 0, "requires a token"),
             ("127.0.0.1", 4100, "port 4100 is reserved"),
         ] {
             let addr = SocketAddr::new(ip.parse().unwrap(), port);
@@ -1015,7 +1272,8 @@ mod tests {
         let mut plain = Vec::new();
         write_frame(&mut plain, &request).expect("a plain frame writes");
         let mut tagged = Vec::new();
-        write_frame_for(&mut tagged, &request, Some("ed-1a-2")).expect("a tagged frame writes");
+        write_frame_for(&mut tagged, &request, Some("ed-1a-2"), None)
+            .expect("a tagged frame writes");
         assert!(String::from_utf8_lossy(&tagged).contains(r#""corr":"ed-1a-2""#));
         assert!(!String::from_utf8_lossy(&plain).contains("corr"));
         let read: Option<AssetTransferRequest> =

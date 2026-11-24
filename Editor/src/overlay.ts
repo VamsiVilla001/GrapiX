@@ -6,6 +6,8 @@
 //! contract and emits SVG primitives in scene coordinates.
 
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import type { PathEditSketch } from "./path-edit";
+import type { PenSketch } from "./pen-tool";
 
 export interface OverlayPoint {
   readonly x: number;
@@ -23,12 +25,43 @@ export interface OverlayGuide {
   readonly axis: "x" | "y";
   readonly position: number;
   readonly label?: string;
+  /** An explicit guide the author put on the canvas (11.44), always drawn, as opposed to a snap line shown while a point is held. */
+  readonly fixed?: boolean;
+}
+
+/** One mask of the selected layer as the viewport draws it (11.117): its boundary, and the band its feather softens. */
+export interface MaskSketch {
+  /** The SVG path data of the boundary, in canvas coordinates. */
+  readonly d: string;
+  /** The feather across the edge in canvas pixels, 0 for a hard edge. */
+  readonly feather: number;
+  /** An open path is drawn dashed: it does not clip until it is closed. */
+  readonly open: boolean;
+  readonly mode: string;
+  readonly index: number;
+  /** The mask the path tools are editing. */
+  readonly active: boolean;
+  /** The feather points of a variable feather (11.108): where each is on the canvas and how far its feather reaches (negative: inward). */
+  readonly featherPoints?: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
 }
 
 export interface OverlayState {
   readonly selectedIds: readonly string[];
+  /** The masks of the selected layer: boundaries and feather bands (11.117). */
+  readonly masks?: readonly MaskSketch[];
+  /** Mark where each selected object's pivot is (the Pivot tool is in use). */
+  readonly pivots?: boolean;
+  /** The path the Pen tool is drawing (11.104). */
+  readonly pen?: PenSketch;
+  /** The path of the selected shape as the Edit path tools show it (11.107): its vertices, and the handles of the selected ones. */
+  readonly pathEdit?: PathEditSketch;
+  /** Canvas pixels to a screen pixel (1 when the picture is shown at its own size; 0.25 when zoomed in four times), so
+   *  handles and markers keep one size on the screen at any zoom (11.105). */
+  readonly unit?: number;
   readonly marquee?: OverlayBounds;
   readonly guides?: readonly OverlayGuide[];
+  /** Whether the scene's explicit guides are drawn (the Show switch); on when absent. */
+  readonly showGuides?: boolean;
 }
 
 export type OverlayPrimitive =
@@ -39,16 +72,52 @@ export type OverlayPrimitive =
       readonly position: HandlePosition;
       readonly point: OverlayPoint;
     }
+  | { readonly kind: "pivot"; readonly objectId: string; readonly point: OverlayPoint }
+  | { readonly kind: "pen"; readonly sketch: PenSketch }
+  | { readonly kind: "pathEdit"; readonly sketch: PathEditSketch }
+  | { readonly kind: "masks"; readonly sketches: readonly MaskSketch[] }
   | { readonly kind: "guide"; readonly guide: OverlayGuide }
   | { readonly kind: "marquee"; readonly bounds: OverlayBounds };
 
 export interface ViewportOverlayModel {
   readonly width: number;
   readonly height: number;
+  /** Canvas pixels to a screen pixel; handles and markers are drawn this much larger or smaller. */
+  readonly unit: number;
   readonly primitives: readonly OverlayPrimitive[];
 }
 
+/** Kinds that draw nothing of their own and so have no pivot to mark. */
+const NO_BOX_KINDS = new Set(["layer", "group", "light", "camera", "marker"]);
+
 const HANDLE_POSITIONS: readonly HandlePosition[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
+/** The box an object occupies in its own space, before position, rotation and scale: a box type's width and height from
+ *  its top left, a shape's path bounds (a path is placed by its own coordinates). Nothing for a kind with no box. */
+export function localBox(object: SceneObject): { left: number; top: number; width: number; height: number } | undefined {
+  switch (object.type) {
+    case "rect":
+    case "ellipse":
+    case "image":
+    case "text":
+      return object.width > 0 && object.height > 0 ? { left: 0, top: 0, width: object.width, height: object.height } : undefined;
+    case "shape": {
+      const paths = [object.path, ...(object.compoundPaths ?? [])];
+      const points = paths.flatMap((path) => path.vertices);
+      if (points.length === 0) return undefined;
+      const left = Math.min(...points.map((p) => p.x));
+      const top = Math.min(...points.map((p) => p.y));
+      return {
+        left,
+        top,
+        width: Math.max(...points.map((p) => p.x)) - left,
+        height: Math.max(...points.map((p) => p.y)) - top,
+      };
+    }
+    default:
+      return undefined;
+  }
+}
 
 /** Axis-aligned screen bounds of an authored object after XY scale/rotation. */
 export function objectOverlayBounds(object: SceneObject): OverlayBounds {
@@ -59,8 +128,9 @@ export function objectOverlayBounds(object: SceneObject): OverlayBounds {
   // mesh geometry remains centred on its 3D origin.
   const anchorX = object.type === "mesh" ? object.width / 2 : (object.anchor?.x ?? 0);
   const anchorY = object.type === "mesh" ? object.height / 2 : (object.anchor?.y ?? 0);
+  const box = localBox(object) ?? { left: 0, top: 0, width: object.width, height: object.height };
   const corners = [
-    [0, 0], [object.width, 0], [0, object.height], [object.width, object.height],
+    [box.left, box.top], [box.left + box.width, box.top], [box.left, box.top + box.height], [box.left + box.width, box.top + box.height],
   ].map(([x = 0, y = 0]) => {
     const scaledX = (x - anchorX) * object.scaleX;
     const scaledY = (y - anchorY) * object.scaleY;
@@ -104,21 +174,35 @@ export function buildViewportOverlay(
     if (!object) continue;
     const bounds = objectOverlayBounds(object);
     primitives.push({ kind: "selection", objectId, bounds, locked: object.locked });
-    if (!object.locked) {
+    // Where the object turns and grows about: its position, which is where its pivot is set down.
+    if (state.pivots === true && !NO_BOX_KINDS.has(object.type)) {
+      primitives.push({ kind: "pivot", objectId, point: { x: object.x, y: object.y } });
+    }
+    // While a path is edited its own points are the thing to grab: the box handles would sit in the way.
+    if (!object.locked && state.pathEdit === undefined) {
       for (const position of HANDLE_POSITIONS) {
         primitives.push({ kind: "handle", objectId, position, point: handlePoint(bounds, position) });
       }
     }
   }
 
+  if (state.showGuides !== false) {
+    for (const guide of document.guides ?? []) {
+      primitives.push({ kind: "guide", guide: { axis: guide.axis, position: guide.position, label: `Guide ${guide.id}`, fixed: true } });
+    }
+  }
   for (const guide of state.guides ?? []) {
     primitives.push({ kind: "guide", guide });
   }
+  if (state.masks !== undefined && state.masks.length > 0) primitives.push({ kind: "masks", sketches: state.masks });
+  if (state.pen !== undefined && state.pen.vertices.length > 0) primitives.push({ kind: "pen", sketch: state.pen });
+  if (state.pathEdit !== undefined && state.pathEdit.vertices.length > 0) primitives.push({ kind: "pathEdit", sketch: state.pathEdit });
   if (state.marquee !== undefined) {
     primitives.push({ kind: "marquee", bounds: normalizeBounds(state.marquee) });
   }
 
-  return { width: document.canvas.width, height: document.canvas.height, primitives };
+  const unit = state.unit !== undefined && Number.isFinite(state.unit) && state.unit > 0 ? state.unit : 1;
+  return { width: document.canvas.width, height: document.canvas.height, unit, primitives };
 }
 
 /** A drag may run in any direction; the model always stores positive extents. */
@@ -156,6 +240,9 @@ export function objectsInMarquee(document: SceneDocument, marquee: OverlayBounds
     .map((object) => object.id);
 }
 
+/** The least width and height, in canvas pixels, an object is picked over. */
+export const MIN_PICK = 10;
+
 /** Topmost visible drawable object at a scene-coordinate point. */
 export function hitTestOverlay(document: SceneDocument, point: OverlayPoint): string | undefined {
   return document.objects
@@ -163,11 +250,14 @@ export function hitTestOverlay(document: SceneDocument, point: OverlayPoint): st
     .filter(({ object }) => {
       if (!canSelect(object)) return false;
       const bounds = objectOverlayBounds(object);
+      // A straight line has no width or no height; it is picked within a few pixels, like any thin thing.
+      const padX = Math.max(0, (MIN_PICK - bounds.width) / 2);
+      const padY = Math.max(0, (MIN_PICK - bounds.height) / 2);
       return (
-        point.x >= bounds.x &&
-        point.x <= bounds.x + bounds.width &&
-        point.y >= bounds.y &&
-        point.y <= bounds.y + bounds.height
+        point.x >= bounds.x - padX &&
+        point.x <= bounds.x + bounds.width + padX &&
+        point.y >= bounds.y - padY &&
+        point.y <= bounds.y + bounds.height + padY
       );
     })
     .sort(
@@ -242,20 +332,107 @@ export function renderViewportOverlay(
         svg.append(
           svgElement(document, "rect", {
             class: "overlay-handle",
-            x: String(primitive.point.x - 5),
-            y: String(primitive.point.y - 5),
-            width: "10",
-            height: "10",
+            x: String(primitive.point.x - 5 * model.unit),
+            y: String(primitive.point.y - 5 * model.unit),
+            width: String(10 * model.unit),
+            height: String(10 * model.unit),
             "data-object-id": primitive.objectId,
             "data-handle": primitive.position,
           }),
         );
         break;
+      case "pen": {
+        const { sketch } = primitive;
+        const group = svgElement(document, "g", { class: "overlay-pen-group" });
+        if (sketch.rubber !== undefined) group.append(svgElement(document, "path", { class: "overlay-pen-rubber", d: sketch.rubber }));
+        if (sketch.d !== "") group.append(svgElement(document, "path", { class: "overlay-pen", d: sketch.d }));
+        for (const h of sketch.handles) {
+          group.append(
+            svgElement(document, "line", { class: "overlay-pen-handle", x1: String(h.x1), y1: String(h.y1), x2: String(h.x2), y2: String(h.y2) }),
+            svgElement(document, "circle", { class: "overlay-pen-handle-end", cx: String(h.x2), cy: String(h.y2), r: String(4 * model.unit) }),
+          );
+        }
+        for (const v of sketch.vertices) {
+          const size = (v.first ? 14 : 10) * model.unit;
+          group.append(
+            svgElement(document, "rect", {
+              class: `overlay-pen-vertex${v.first ? " is-first" : ""}${v.first && sketch.closing ? " is-closing" : ""}`,
+              x: String(v.x - size / 2),
+              y: String(v.y - size / 2),
+              width: String(size),
+              height: String(size),
+            }),
+          );
+        }
+        svg.append(group);
+        break;
+      }
+      case "masks": {
+        const group = svgElement(document, "g", { class: "overlay-masks" });
+        for (const mask of primitive.sketches) {
+          if (mask.d === "") continue;
+          // The feather first, under the boundary: a band as wide as the feather, centred on the edge.
+          if (mask.feather > 0 && !mask.open) {
+            group.append(svgElement(document, "path", { class: "overlay-mask-feather", d: mask.d, "stroke-width": String(mask.feather), "data-mask-index": String(mask.index) }));
+          }
+          group.append(
+            svgElement(document, "path", {
+              class: `overlay-mask mode-${mask.mode}${mask.open ? " is-open" : ""}${mask.active ? " is-active" : ""}`,
+              d: mask.d,
+              "data-mask-index": String(mask.index),
+            }),
+          );
+          for (const point of mask.featherPoints ?? []) {
+            group.append(
+              svgElement(document, "circle", { class: `overlay-feather-reach${point.radius < 0 ? " is-inward" : ""}`, cx: String(point.x), cy: String(point.y), r: String(Math.abs(point.radius)) }),
+              svgElement(document, "circle", { class: "overlay-feather-point", cx: String(point.x), cy: String(point.y), r: String(4 * model.unit), "data-mask-index": String(mask.index) }),
+            );
+          }
+        }
+        svg.append(group);
+        break;
+      }
+      case "pathEdit": {
+        const { sketch } = primitive;
+        const group = svgElement(document, "g", { class: "overlay-path-group" });
+        if (sketch.d !== "") group.append(svgElement(document, "path", { class: "overlay-path", d: sketch.d }));
+        for (const h of sketch.handles) {
+          group.append(
+            svgElement(document, "line", { class: "overlay-path-handle", x1: String(h.x1), y1: String(h.y1), x2: String(h.x2), y2: String(h.y2) }),
+            svgElement(document, "circle", { class: "overlay-path-handle-end", cx: String(h.x2), cy: String(h.y2), r: String(4 * model.unit) }),
+          );
+        }
+        for (const v of sketch.vertices) {
+          const size = 9 * model.unit;
+          group.append(
+            svgElement(document, "rect", {
+              class: `overlay-path-vertex${v.selected ? " is-selected" : ""}`,
+              x: String(v.x - size / 2),
+              y: String(v.y - size / 2),
+              width: String(size),
+              height: String(size),
+            }),
+          );
+        }
+        svg.append(group);
+        break;
+      }
+      case "pivot": {
+        const { x, y } = primitive.point;
+        const group = svgElement(document, "g", { class: "overlay-pivot", "data-object-id": primitive.objectId });
+        group.append(
+          svgElement(document, "circle", { cx: String(x), cy: String(y), r: String(9 * model.unit) }),
+          svgElement(document, "line", { x1: String(x - 16 * model.unit), y1: String(y), x2: String(x + 16 * model.unit), y2: String(y) }),
+          svgElement(document, "line", { x1: String(x), y1: String(y - 16 * model.unit), x2: String(x), y2: String(y + 16 * model.unit) }),
+        );
+        svg.append(group);
+        break;
+      }
       case "guide": {
         const vertical = primitive.guide.axis === "x";
         svg.append(
           svgElement(document, "line", {
-            class: "overlay-guide",
+            class: primitive.guide.fixed === true ? "overlay-guide overlay-guide-fixed" : "overlay-guide",
             x1: String(vertical ? primitive.guide.position : 0),
             y1: String(vertical ? 0 : primitive.guide.position),
             x2: String(vertical ? primitive.guide.position : model.width),

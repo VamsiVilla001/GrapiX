@@ -38,6 +38,7 @@
       "enum": [
         "image",
         "video",
+        "audio",
         "svg",
         "font",
         "model",

@@ -17,10 +17,10 @@ function container(kind: "group" | "layer", paint: Partial<Pick<ObjectBase, "fil
 }
 
 function scene(objects: SceneObject[]): SceneDocument {
-  return { id: "containers", name: "Containers", version: 3, workingColorSpace: "srgb",
+  return { id: "containers", name: "Containers", version: 3, workingColorSpace: "srgb", colorDepth: "32",
     canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
-    timeline: { durationFrames: 100n, channels: [], phases: [] }, dataContext: {},
-    assets: [], fonts: [], materials: [], controls: [], textStyles: [], objects };
+    timeline: { durationFrames: 100n, channels: [], phases: [], pathChannels: [] }, dataContext: {},
+    assets: [], fonts: [], materials: [], controls: [], textStyles: [], pathLinks: [], guides: [], objects };
 }
 
 describe("container paint in Properties", () => {

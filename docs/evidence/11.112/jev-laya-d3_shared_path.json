@@ -1,0 +1,131 @@
+{
+ "input": {
+  "state": {
+   "decision": "How GrapiX should let a shape and a mask (or two masks) share one path, so that editing it changes both, while a plain copy stays independent.",
+   "what_exists_today": "A shape owns its BezierPath (ShapeObject.path and compound_paths); a mask owns its own BezierPath (Mask.path). Copying a path between a shape and a mask (11.118) makes an independent copy in one batch; nothing links them. Path edits are one editPath edit addressing a shape subpath or a mask index, applied to the object that owns the path. Animated paths now have path channels keyed by (object id, target). Every vertex has a stable id. The scene is a JSON document with a schema version and a content hash; old scenes must stay valid.",
+   "requirements_from_the_specs": "Pen spec v2 sections 4 and 13: a path that a shape and a mask use is one shared path with a revision; a copy is independent unless the author links it (copy on write); an edit names the revision it was made on so a stale edit is refused. BezierPath is adapted by an additive contract change, not replaced and not duplicated.",
+   "options": {
+    "A": "A scene-level list of path records {id, revision, path}. A shape subpath or a mask may hold a pathRef (record id) instead of an inline path. Every renderer and every edit resolves the reference first. A linked edit changes the record and bumps its revision; editPath carries baseRevision and a stale one is refused by name. Unlinking copies the record back inline.",
+    "B": "No sharing: copy only. A link is not offered; the spec's linked copy is declared out of scope.",
+    "C": "A link between exactly one shape subpath and one mask stored on the mask (Mask.linkedShape) that is resolved at prepare; no revision, last writer wins."
+   }
+  },
+  "questions": {
+   "best_representation": {
+    "type": "choice",
+    "instructions": "Which representation should GrapiX adopt for a path shared between a shape and a mask?",
+    "criteria": {
+     "A": "Option A: scene-level path records with a revision, referenced by shapes and masks.",
+     "B": "Option B: no sharing, copy only.",
+     "C": "Option C: a one-to-one shape and mask link stored on the mask, last writer wins."
+    }
+   },
+   "revision_check": {
+    "type": "noul",
+    "instructions": "Must an edit of a shared path name the revision it was made on, and be refused by name when the path has changed since, so two editors or an old undo cannot silently overwrite each other?",
+    "criteria": {
+     "true": "Yes: the edit carries the revision and a stale one is refused.",
+     "false": "No: the last writer wins."
+    }
+   },
+   "copy_stays_independent": {
+    "type": "noul",
+    "instructions": "Must a plain copy of a path between a shape and a mask stay independent (an edit of one never changes the other), with linking an explicit separate act?",
+    "criteria": {
+     "true": "Yes: copy is independent; linking is explicit.",
+     "false": "No: a copy is always linked."
+    }
+   },
+   "old_scenes_unchanged": {
+    "type": "noul",
+    "instructions": "Must a scene with no shared paths serialise exactly as before (the new field absent), so old scenes, their content hashes and their goldens stay valid?",
+    "criteria": {
+     "true": "Yes: additive and absent when unused.",
+     "false": "No: every scene gains the new field."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "best_representation": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "revision_check": {
+    "type": "noul",
+    "noul": 0.96
+   },
+   "copy_stays_independent": {
+    "type": "noul",
+    "noul": 0.97
+   },
+   "old_scenes_unchanged": {
+    "type": "noul",
+    "noul": 0.83
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1937,
+   "output_tokens": 0,
+   "state_tokens": 413,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "best_representation": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.0476,
+     "B": 0.5629,
+     "C": 0.3896
+    },
+    "confidence": 0.2394,
+    "answer_confidence": 0.5629,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "revision_check": {
+    "type": "noul",
+    "noul": 0.9753,
+    "confidence": 0.9753,
+    "answer_confidence": 0.9753,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "copy_stays_independent": {
+    "type": "noul",
+    "noul": 0.9496,
+    "confidence": 0.9496,
+    "answer_confidence": 0.9496,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "old_scenes_unchanged": {
+    "type": "noul",
+    "noul": 0.9463,
+    "confidence": 0.9463,
+    "answer_confidence": 0.9463,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}
