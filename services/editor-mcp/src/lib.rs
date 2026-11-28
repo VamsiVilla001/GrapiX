@@ -686,9 +686,10 @@ mod tests {
         ));
 
         let create_scene = CommandTool::<CreateScene>::new(projects.clone());
-        create_scene
+        let created = create_scene
             .handle(serde_json::json!({ "project": "news", "sceneId": "lower-third", "name": "Lower Third" }))
             .unwrap();
+        assert_eq!(created["effects"][0]["sceneLabel"], "1");
         assert_eq!(
             projects.read_scene("news", "lower-third").unwrap().name,
             "Lower Third"

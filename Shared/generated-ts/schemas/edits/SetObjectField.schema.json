@@ -227,8 +227,319 @@
             "value"
           ],
           "type": "object"
+        },
+        {
+          "description": "The text choices of the Properties dock (11.132): held values that are never keyframed. Text objects only. Whether the engine\ndraws a value is not decided here: `text_choices` asks the drawability check, and a graphic that uses a value the engine\ncannot draw yet is refused by name when it is previewed or published, exactly as when it is loaded.",
+          "properties": {
+            "name": {
+              "const": "textCase",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextCase"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "align",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextAlign"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "verticalAlign",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/VerticalAlign"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "layout",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextLayout"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Horizontal lines, or upright columns running right to left or left to right (11.51).",
+          "properties": {
+            "name": {
+              "const": "writingMode",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/WritingMode"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "autoFit",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextAutoFit"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "maxLines",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "overflow",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextOverflow"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "kerning",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "decoration",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextDecoration"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "paragraphSpacing",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "First-line indent in scene units (11.51): the first line of every paragraph starts this far in. Not negative.",
+          "properties": {
+            "name": {
+              "const": "textIndent",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "wordSpacing",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Hide when empty (11.153, `ObjectBase.hide_when_empty`): the element is not drawn while one of its text or image bindings resolves to a\nmissing, null or blank value. Turning it on is refused by name on an element with no such binding; turning it off always works.",
+          "properties": {
+            "name": {
+              "const": "hideWhenEmpty",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
         }
       ]
+    },
+    "TextAlign": {
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ],
+      "type": "string"
+    },
+    "TextAutoFit": {
+      "description": "What to do when shaped text does not fit its box. Never silently clipped.",
+      "enum": [
+        "none",
+        "shrink",
+        "fit"
+      ],
+      "type": "string"
+    },
+    "TextCase": {
+      "description": "Case applied when the text is drawn, not when it is typed: the authored\ncharacters stay as they are, so a data binding can replace the text and\nthe case still applies, and switching it off returns the author's own\ncapitalisation.",
+      "enum": [
+        "original",
+        "upper",
+        "lower",
+        "title",
+        "small-caps"
+      ],
+      "type": "string"
+    },
+    "TextDecoration": {
+      "description": "Underline and strikethrough: drawn from the font's metrics rather than\nshaped, so they are object state and not part of the font definition.",
+      "properties": {
+        "strikethrough": {
+          "default": false,
+          "type": "boolean"
+        },
+        "underline": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "TextLayout": {
+      "description": "Point text grows from its origin; paragraph text wraps inside the base box.",
+      "enum": [
+        "point",
+        "paragraph"
+      ],
+      "type": "string"
+    },
+    "TextOverflow": {
+      "enum": [
+        "visible",
+        "hidden",
+        "clip"
+      ],
+      "type": "string"
+    },
+    "VerticalAlign": {
+      "enum": [
+        "top",
+        "middle",
+        "bottom"
+      ],
+      "type": "string"
+    },
+    "WritingMode": {
+      "description": "CSS `writing-mode` values, which is what the shaper (3.6) consumes.",
+      "enum": [
+        "horizontal-tb",
+        "vertical-rl",
+        "vertical-lr"
+      ],
+      "type": "string"
     }
   },
   "additionalProperties": false,

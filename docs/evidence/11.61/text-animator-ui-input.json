@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "How the Editor lets a designer author a per-character text animator (row 11.61) on codex's released contract: textObject.textAnimator = {selector{start,end,offset,amount,shape,basis,smoothness,easeHigh,easeLow,randomizeOrder}, x, y, scale, rotation, opacity?}; the edit setTextAnimator {objectIds, animator|null} (null removes it and its keys); keyable scalars textAnimator.selector.start/end/offset and textAnimator.x/y/scale/rotation/opacity through the existing editProperty path.",
+  "facts": "Figma B3d v2 draws 'Text animator (per character) · 4 keyed rows' as a header folded under the paragraph rows. Number rows in Properties have a keyframe diamond and arrows; the text choices (Case, Align, Font...) are dropdown fields. Broadcast titles use per-character reveals (a range moving across the text while characters fade, move or scale in).",
+  "constraints": "One undoable command per gesture; the person and agents read the same rows; nothing is offered the contract refuses (range outside 0..1, negative scale, opacity outside 0..1)."
+ },
+ "questions": {
+  "section": {
+   "type": "choice",
+   "instructions": "Where does the animator live in Properties?",
+   "criteria": {
+    "A": "A 'Text animator' section after the text rows, present only for text elements: an Add text animator button while there is none; once there is one, its rows and a Remove button.",
+    "B": "Only in the timeline: a track menu adds an animator.",
+    "C": "A separate Animator panel in the dock."
+   }
+  },
+  "default": {
+   "type": "choice",
+   "instructions": "What does Add text animator create?",
+   "criteria": {
+    "A": "A neutral animator: the whole text selected, no offset, no move, scale 1, no rotation, no opacity change. Nothing changes on screen until the designer changes a row or keys one.",
+    "B": "A ready-made fade by character: opacity 0 on a range that starts as a sliver at the left.",
+    "C": "Ask which effect first in a dialog."
+   }
+  },
+  "rows": {
+   "type": "choice",
+   "instructions": "Which rows does the section show?",
+   "criteria": {
+    "A": "Range: Start, End, Offset (percent, each with the keyframe diamond), Shape, Basis (dropdowns), Randomize order (checkbox). Change per character: Move X, Move Y, Scale, Rotation, Opacity (each with the diamond).",
+    "B": "Only Offset and Opacity, the two a title designer uses most.",
+    "C": "All the contract's fields including Amount, Smoothness and the two Ease values."
+   }
+  }
+ }
+}

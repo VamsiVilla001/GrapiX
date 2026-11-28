@@ -1,0 +1,63 @@
+{
+ "state": {
+  "decision": "How the strict CSV table reader (first slice of Panchayati task 121, the local CSV data source for the Data panel, Figma B4) should treat the choices a CSV file leaves open (claude-grapix-f1, 25 Nov 2026; asked BEFORE the build).",
+  "facts": "The Data panel (Figma B4) lists a source 'Players.csv, file, 48 rows' and a Test records table over its rows, whose names include Devanagari (the Hindi 'Arjun'), so text must survive exactly. The owner's rules: a refusal is named and says why (invariant 17); nothing is guessed or silently substituted (invariant 18, and 'never infer': an untagged colour space is a defect, not sRGB); a value outside a field's type is refused by name. A CSV file is whatever Excel, Google Sheets, a newsroom system or a hand editor wrote: the same bytes can be comma-separated (most), semicolon-separated (Excel in many European and some Indian locales writes ';'), or tab-separated; UTF-8 with or without a byte order mark (Excel 'CSV UTF-8' writes a BOM), UTF-16 ('Unicode Text'), or a legacy Windows code page (Excel's plain 'CSV' on Windows); a cell may be quoted, hold the delimiter, a doubled quote or a line break; lines end in CRLF, LF or, rarely, CR; the last line may or may not end with a line break; a file may end with blank lines, or have a blank line in the middle (an editing slip), or rows with more or fewer cells than the header. Types (text, number, yes or no, image, colour) are NOT in a CSV: the graphic's own fields declare them (row 11.54), and the Data panel's 'fields found' come from the graphic, not from guessing at the cells. The reader is shared (Shared/contracts, no dependencies), so the Data Hub connectors (19.4) and the run-order exchange (6.9, also CSV) can reuse it. A 48-row players list is typical; a feed of tens of thousands of rows is possible.",
+  "built": "Nothing yet."
+ },
+ "questions": {
+  "delimiter": {
+   "type": "choice",
+   "instructions": "How should the reader choose the delimiter?",
+   "criteria": {
+    "A": "The caller states it (comma by default, or semicolon, or tab). The reader never guesses; when the file does not parse as stated and the header line plainly uses another delimiter, the refusal says which one it looks like.",
+    "B": "The reader detects it from the first lines and uses what it finds.",
+    "C": "Only comma is supported."
+   }
+  },
+  "encoding": {
+   "type": "choice",
+   "instructions": "Which encodings should the reader accept?",
+   "criteria": {
+    "A": "UTF-8 only, with a leading byte order mark removed. Bytes that are not valid UTF-8 (UTF-16, a Windows code page) are refused by name, saying what they look like and to save the file as CSV UTF-8, and nothing is decoded by guessing.",
+    "B": "Detect UTF-16 and common code pages and convert them.",
+    "C": "Accept any bytes and replace what is not valid UTF-8 with a replacement character."
+   }
+  },
+  "blank": {
+   "type": "choice",
+   "instructions": "What should the reader do with blank lines?",
+   "criteria": {
+    "A": "Blank lines at the very end of the file are ignored; a blank line anywhere else is refused by name with its line number, because it is probably an editing slip and silently dropping it would drop a row someone expected.",
+    "B": "Skip every blank line wherever it is.",
+    "C": "Treat a blank line as a row with one empty cell."
+   }
+  },
+  "shape": {
+   "type": "choice",
+   "instructions": "What should the reader do with a header problem or a row that has more or fewer cells than the header?",
+   "criteria": {
+    "A": "Refuse by name with the line number and what was expected and found: an empty or repeated column name (names are the binding keys), a row longer or shorter than the header. Never pad, truncate or rename.",
+    "B": "Pad short rows with empty cells, drop extra cells, and rename repeated headers with a suffix.",
+    "C": "Refuse a ragged row but quietly rename empty or repeated headers."
+   }
+  },
+  "limits": {
+   "type": "choice",
+   "instructions": "What should the reader do about very large files?",
+   "criteria": {
+    "A": "Refuse by name above stated limits (file size, rows, columns, bytes in a cell), saying which limit and by how much; never read part of a file as if it were all of it.",
+    "B": "Read as much as fits and ignore the rest.",
+    "C": "No limits."
+   }
+  },
+  "cells": {
+   "type": "choice",
+   "instructions": "What should a cell be?",
+   "criteria": {
+    "A": "Exactly the text in the file after unquoting: no trimming, no case change, no Unicode normalisation, no number or date parsing, so a Devanagari name or a leading zero comes back as written. Types come from the graphic's own fields.",
+    "B": "Trim spaces and guess a type (number, yes or no, date) for each cell.",
+    "C": "Trim spaces only."
+   }
+  }
+ }
+}

@@ -1,0 +1,14 @@
+1 index regex loose CAUGHT
+2 index regex prefix only CAUGHT
+3 label from 0 CAUGHT
+4 row count off by one CAUGHT
+5 no dash section CAUGHT
+6 dash keys unsorted CAUGHT
+7 applies to entries missing CAUGHT
+8 label from 0 CAUGHT
+9 base value always 0 CAUGHT
+10 base wrong index CAUGHT
+11 preview ignores entries CAUGHT
+12 preview past the pattern CAUGHT
+13 preview drops offset CAUGHT
+13 of 13 caught

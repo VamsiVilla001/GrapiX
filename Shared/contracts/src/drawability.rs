@@ -22,8 +22,8 @@ use std::collections::{HashMap, HashSet};
 use crate::color::ColorValue;
 use crate::material::{FitMode, MaterialKind};
 use crate::scene::{
-    AssetKind, AssetLibraryItem, BezierPath, ImageObject, SceneDocument, SceneObject, TextAlign,
-    TextAutoFit, TextCase, TextLayout, TextObject, TextOverflow, VerticalAlign, WritingMode,
+    AssetKind, AssetLibraryItem, BezierPath, ImageObject, SceneDocument, SceneObject,
+    TextLayout, TextObject, WritingMode,
 };
 use crate::{Refusal, StructuredRefusal};
 
@@ -521,6 +521,13 @@ impl Found {
 }
 
 fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut Found) {
+    if let Some(detail) = text.text_animator.as_ref().and_then(|animator| animator.validate().err()) {
+        found.push(
+            property(text.base.id.as_str(), "textAnimator", "11.61"),
+            at("textAnimator"),
+            serde_json::json!(detail),
+        );
+    }
     let id = text.base.id.as_str();
     let bounded = |value: f64| value.is_finite() && value.abs() <= f64::from(f32::MAX);
     let size_valid = bounded(text.size) && text.size > 0.0;
@@ -541,6 +548,15 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
             );
         }
     }
+    if let Some(shift) = text.baseline_shift {
+        if !bounded(shift) {
+            found.push(
+                property(id, "baselineShift", "11.132"),
+                at("baselineShift"),
+                serde_json::json!(shift.to_string()),
+            );
+        }
+    }
     if !bounded(text.letter_spacing) {
         found.push(
             property(id, "letterSpacing", "3.13"),
@@ -549,61 +565,39 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
         );
     }
     for (name, field, set, owner) in [
+        // Vertical writing (11.51) is set upright in columns; what has no meaning down a column refuses by name.
         (
-            "autoFit",
-            "autoFit",
-            text.auto_fit != TextAutoFit::None,
-            "11.51",
-        ),
-        (
-            "writingMode",
-            "writingMode",
-            text.writing_mode != WritingMode::HorizontalTb,
-            "11.51",
-        ),
-        (
+            "verticalAlign (in vertical writing)",
             "verticalAlign",
-            "verticalAlign",
-            text.vertical_align != VerticalAlign::Top,
+            text.writing_mode != WritingMode::HorizontalTb && text.vertical_align != crate::scene::VerticalAlign::Top,
             "11.51",
         ),
         (
+            "underline or strikethrough (in vertical writing)",
             "decoration",
-            "decoration",
-            text.decoration.underline || text.decoration.strikethrough,
+            text.writing_mode != WritingMode::HorizontalTb && (text.decoration.underline || text.decoration.strikethrough),
             "11.51",
         ),
         (
-            "overflow",
-            "overflow",
-            text.overflow != TextOverflow::Visible,
-            "11.51",
-        ),
-        (
-            "textCase",
-            "textCase",
-            text.text_case == TextCase::SmallCaps,
+            "baselineShift (in vertical writing)",
+            "baselineShift",
+            text.writing_mode != WritingMode::HorizontalTb && text.baseline_shift.is_some_and(|shift| shift != 0.0),
             "11.51",
         ),
         (
             "wordSpacing",
             "wordSpacing",
-            text.word_spacing != 0.0,
+            !bounded(text.word_spacing),
             "11.51",
         ),
         (
             "paragraphSpacing",
             "paragraphSpacing",
-            text.paragraph_spacing != 0.0,
+            !bounded(text.paragraph_spacing) || text.paragraph_spacing < 0.0,
             "11.51",
         ),
-        ("textIndent", "textIndent", text.text_indent != 0.0, "11.51"),
-        (
-            "point text align",
-            "align",
-            text.layout == TextLayout::Point && text.align != TextAlign::Left,
-            "11.51",
-        ),
+        ("maxLines", "maxLines", text.max_lines == Some(0), "11.51"),
+        ("textIndent", "textIndent", !bounded(text.text_indent) || text.text_indent < 0.0, "11.51"),
     ] {
         if set {
             let given = serde_json::to_value(text)
@@ -1151,25 +1145,30 @@ mod tests {
     fn every_text_property_the_path_ignores_refuses_by_name() {
         #[allow(clippy::type_complexity)]
         let cases: Vec<(&str, Box<dyn Fn(&mut TextObject)>)> = vec![
-            ("autoFit", Box::new(|t| t.auto_fit = TextAutoFit::Shrink)),
             (
-                "writingMode",
-                Box::new(|t| t.writing_mode = WritingMode::VerticalRl),
+                "verticalAlign (in vertical writing)",
+                Box::new(|t| {
+                    t.writing_mode = WritingMode::VerticalRl;
+                    t.vertical_align = crate::scene::VerticalAlign::Middle;
+                }),
             ),
             (
-                "verticalAlign",
-                Box::new(|t| t.vertical_align = VerticalAlign::Middle),
+                "underline or strikethrough (in vertical writing)",
+                Box::new(|t| {
+                    t.writing_mode = WritingMode::VerticalLr;
+                    t.decoration.underline = true;
+                }),
             ),
-            ("decoration", Box::new(|t| t.decoration.underline = true)),
-            ("overflow", Box::new(|t| t.overflow = TextOverflow::Clip)),
-            ("textCase", Box::new(|t| t.text_case = TextCase::SmallCaps)),
-            ("wordSpacing", Box::new(|t| t.word_spacing = 4.0)),
-            ("paragraphSpacing", Box::new(|t| t.paragraph_spacing = 4.0)),
-            ("textIndent", Box::new(|t| t.text_indent = 12.0)),
             (
-                "point text align",
-                Box::new(|t| t.align = TextAlign::Center),
+                "baselineShift (in vertical writing)",
+                Box::new(|t| {
+                    t.writing_mode = WritingMode::VerticalRl;
+                    t.baseline_shift = Some(3.0);
+                }),
             ),
+            ("wordSpacing", Box::new(|t| t.word_spacing = f64::MAX)),
+            ("paragraphSpacing", Box::new(|t| t.paragraph_spacing = -4.0)),
+            ("textIndent", Box::new(|t| t.text_indent = -4.0)),
         ];
         for (name, set) in cases {
             let mut object = text("t");
@@ -1543,8 +1542,8 @@ mod tests {
     #[test]
     fn every_undrawable_property_is_reported_with_its_field() {
         let mut object = text("t");
-        object.decoration.underline = true;
-        object.word_spacing = 4.0;
+        object.text_indent = -12.0;
+        object.word_spacing = f64::MAX;
         object.base.opacity = 2.0;
         let found = drawability_refusals(&document(vec![rect("r"), SceneObject::Text(object)]));
         let fields: Vec<_> = found
@@ -1555,8 +1554,8 @@ mod tests {
             fields,
             [
                 "objects[1].opacity",
-                "objects[1].decoration",
-                "objects[1].wordSpacing"
+                "objects[1].wordSpacing",
+                "objects[1].textIndent"
             ]
         );
         assert_eq!(found[0].given, serde_json::json!(2.0));

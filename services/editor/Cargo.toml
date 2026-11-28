@@ -20,4 +20,5 @@ gx-fs = { workspace = true }
 gx-write-semantics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+png = "0.17"
 sha2 = { workspace = true }

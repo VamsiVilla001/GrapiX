@@ -218,8 +218,7 @@ pub struct Envelope<T> {
     pub operator: Option<String>,
     /// Where on Program this command is aimed (12.10): the channel and the layer. Absent is
     /// the Program channel's main layer, so a client that predates the field is unchanged.
-    /// Only the Program channel exists, and only its main layer is drawn until the engine
-    /// composes layers; anything else is refused by name before the engine sees it.
+    /// Only the Program channel and layers in the supported range pass transport validation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub target: Option<OutputTarget>,
@@ -229,53 +228,72 @@ pub struct Envelope<T> {
 /// The one output channel this engine has.
 pub const PROGRAM_CHANNEL: &str = "program";
 /// The layer a command with no target is aimed at.
-pub const MAIN_LAYER: &str = "main";
+pub const MAIN_LAYER: i32 = 0;
+pub const MIN_PROGRAM_LAYER: i32 = -99_999;
+pub const MAX_PROGRAM_LAYER: i32 = 99_999;
 
 /// A channel and a layer on it (12.10, decision Q8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OutputTarget {
     pub channel: String,
-    pub layer: String,
+    #[serde(deserialize_with = "deserialize_program_layer")]
+    pub layer: i32,
+}
+
+// Older senders could name the main layer explicitly. Keep reading that spelling.
+fn deserialize_program_layer<'de, D: serde::Deserializer<'de>>(data: D) -> Result<i32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    enum LegacyLayer {
+        Main,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum WireLayer {
+        Number(i32),
+        Legacy(LegacyLayer),
+    }
+
+    match WireLayer::deserialize(data)? {
+        WireLayer::Number(layer) => Ok(layer),
+        WireLayer::Legacy(LegacyLayer::Main) => Ok(MAIN_LAYER),
+    }
 }
 
 impl OutputTarget {
     /// The main layer of the Program channel: what no target means.
     pub fn main() -> Self {
-        Self {
-            channel: PROGRAM_CHANNEL.to_owned(),
-            layer: MAIN_LAYER.to_owned(),
-        }
+        Self::program(MAIN_LAYER)
     }
 
     /// The Program channel's layer `layer`.
-    pub fn program(layer: &str) -> Self {
+    pub fn program(layer: i32) -> Self {
         Self {
             channel: PROGRAM_CHANNEL.to_owned(),
-            layer: layer.to_owned(),
+            layer,
         }
     }
 
-    /// The refusal this target earns, if any: not the Program channel, or not a layer the
-    /// engine draws. The text is shown, never trusted: it is cut short and escaped, so a
-    /// hostile name cannot put a line break or a long string in a log.
+    /// Validate the Program channel and its layer range before handing the request to a peer.
+    /// Truncate and escape an unsupported channel before including it in the refusal.
     pub fn refusal(&self, request: &str) -> Option<Refusal> {
-        let shown = |text: &str| -> String {
-            text.chars()
-                .take(32)
-                .flat_map(char::escape_default)
-                .collect()
-        };
         if self.channel != PROGRAM_CHANNEL {
             return Some(Refusal::ChannelNotSupported {
                 request: request.to_owned(),
-                channel: shown(&self.channel),
+                channel: self
+                    .channel
+                    .chars()
+                    .take(32)
+                    .flat_map(char::escape_default)
+                    .collect(),
             });
         }
-        if self.layer != MAIN_LAYER {
+        if !(MIN_PROGRAM_LAYER..=MAX_PROGRAM_LAYER).contains(&self.layer) {
             return Some(Refusal::LayerNotSupported {
                 request: request.to_owned(),
-                layer: shown(&self.layer),
+                layer: self.layer.to_string(),
             });
         }
         None
@@ -350,6 +368,7 @@ mod tests {
             }),
             ClientRequest::Clear(ClearRequest {
                 at: TakeAt::NextOpportunity,
+                expected: None,
             }),
             ClientRequest::Phase(PhaseRequest {
                 phase: "in".into(),
@@ -448,6 +467,7 @@ mod tests {
         use crate::intent::{ClearRequest, TakeAt};
         let clear = ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         });
         assert!(clear.is_program_command());
         for request in [
@@ -494,6 +514,7 @@ mod tests {
             Sequence(7),
             ClientRequest::Clear(ClearRequest {
                 at: TakeAt::NextOpportunity,
+                expected: None,
             }),
         );
         let json = serde_json::to_string(&e).unwrap();

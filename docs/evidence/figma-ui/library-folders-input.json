@@ -1,0 +1,53 @@
+{
+ "state": {
+  "decision": "Wiring the Library's virtual folders and Import folder into the Editor's Library panel (Figma B13, plan row 11.122), asked BEFORE coding (claude, 26 Nov 2026).",
+  "facts": "The backend is built and released by codex. Commands: cmd_library_folders returns folders [{id,name,parentId?,assetCount}], assetFolders {assetId: folderId} and unfiledCount; assetCount is DIRECT children only, nested folders report their own. create(name, parentId?) returns the new id; rename; move(folderId, parentId or null); delete REFUSES a folder that has subfolders or assets (nothing can be lost); asset_move(assetId, folderId or null; null unfiles). Import folder is two steps: plan(directory) returns {rootName, folders, files[{relativePath, checksum, duplicate}], skipped, planFingerprint} and writes nothing; apply(directory, planFingerprint) rebuilds the plan, refuses if it differs, and returns the number of new assets; files whose content hash is already in the library are reported as duplicates and keep their placement. The Library panel today is a UiNode tree drawn for a person and an agent alike (one description, invariant 27): a Folders list with All assets, tabs, filter chips (All, This scene, Unused, Missing) with counts, a grid of cards, a selected-asset card. Figma B13 shows the Folders list with All assets 142, nested folders, Unfiled, an Import folder dialog. Owner rules: a control that does nothing is dimmed naming the row; a value shown must be one the app holds; the Editor already uses window.prompt for names (window.confirm does not work in the shell); the dock panel is narrow (about 270 px).",
+  "proposed": "Folders list: All assets (count of all), then the folders nested with indentation and their direct count, then Unfiled (unfiledCount). Selecting one filters the cards. Buttons: + New folder (asks a name; inside the selected folder when one is selected), Rename and Delete on the selected folder, Import folder. The selected-asset card gets a Move to list (Unfiled and every folder). Import folder: pick a directory, show the plan in the panel (n files, d already in the library, skipped files named, the folders it will make) with Import n files and Cancel; nothing is written until Import."
+ },
+ "questions": {
+  "folder_scope": {
+   "type": "choice",
+   "instructions": "When a folder is selected, which assets do the cards show?",
+   "criteria": {
+    "A": "Only the assets directly in it, so the number beside the folder equals the cards shown.",
+    "B": "The assets in it and in all its subfolders, so the number beside it does not equal the cards shown.",
+    "C": "Only the assets directly in it, but print the count of everything below it."
+   }
+  },
+  "chip_counts": {
+   "type": "choice",
+   "instructions": "What do the filter chip counts (All, This scene, Unused, Missing) count while a folder is selected?",
+   "criteria": {
+    "A": "Only the assets in the selected folder scope, so the chips and the cards agree.",
+    "B": "Always the whole library, so the chips and the cards can disagree."
+   }
+  },
+  "moving": {
+   "type": "choice",
+   "instructions": "How does a designer put an asset into a folder?",
+   "criteria": {
+    "A": "A Move to list in the selected-asset card, one entry per folder and Unfiled: it works by keyboard and an agent reads the same entries.",
+    "B": "Dragging a card onto a folder only.",
+    "C": "Nothing yet: folders can be made but assets cannot be placed."
+   }
+  },
+  "delete": {
+   "type": "choice",
+   "instructions": "What does Delete folder do?",
+   "criteria": {
+    "A": "Runs it and shows the backend's refusal when the folder is not empty (nothing can be lost, so no confirm step).",
+    "B": "Asks for a confirmation first, then deletes, moving any assets to Unfiled.",
+    "C": "Is left out."
+   }
+  },
+  "import_flow": {
+   "type": "choice",
+   "instructions": "How does Import folder behave?",
+   "criteria": {
+    "A": "Pick a directory, show the plan (files, duplicates, skipped, folders to be made) in the panel with Import n files and Cancel; nothing is written until Import.",
+    "B": "Pick a directory and import at once, then report.",
+    "C": "Stays dimmed."
+   }
+  }
+ }
+}

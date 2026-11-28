@@ -74,6 +74,7 @@ fn program_commands() -> Vec<ClientRequest> {
         take(),
         ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }),
         ClientRequest::Phase(PhaseRequest {
             phase: "hold".into(),
@@ -123,6 +124,7 @@ fn a_signed_in_operator_may_send_each_program_command() {
     assert!(on_program(&engine));
     let cleared = client.handle(ClientRequest::Clear(ClearRequest {
         at: TakeAt::NextOpportunity,
+        expected: None,
     }));
     assert!(matches!(cleared, EngineReply::Cleared(_)), "{cleared:?}");
 }

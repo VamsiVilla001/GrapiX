@@ -1,0 +1,42 @@
+1 empty list allowed -> CAUGHT by a_stored_library_is_checked_when_the_project_is_opened; a_style_holds_one_to_thirty_two_effects
+2 32 effects refused -> CAUGHT by a_style_holds_one_to_thirty_two_effects
+3 mask limit never refused -> CAUGHT by an_effect_limited_to_a_mask_is_refused_by_name_because_a_mask_belongs_to_one_object
+4 empty mask list refused -> CAUGHT by an_effect_limited_to_a_mask_is_refused_by_name_because_a_mask_belongs_to_one_object
+5 201st style allowed -> CAUGHT by a_library_holds_at_most_two_hundred_styles
+6 own name clashes with itself -> CAUGHT by a_name_is_unique_ignoring_case_and_refused_by_name; a_stored_library_is_checked_when_the_project_is_opened
+7 names are case sensitive -> CAUGHT by a_name_is_unique_ignoring_case_and_refused_by_name
+8 name length in bytes -> CAUGHT by a_name_is_one_to_sixty_four_characters_without_control_characters
+9 id reused after delete -> CAUGHT by a_library_nobody_used_is_not_written_but_one_that_was_is_kept_empty; an_id_is_not_reused_after_a_delete
+10 untouched is either -> CAUGHT by a_library_nobody_used_is_not_written_but_one_that_was_is_kept_empty
+11 stored effects not checked -> CAUGHT by a_stored_library_is_checked_when_the_project_is_opened
+12 set_effects skips the check -> CAUGHT by replacing_the_effects_of_a_style_is_refused_whole_and_leaves_it_as_it_was
+13 delete does nothing -> CAUGHT by a_library_holds_at_most_two_hundred_styles
+14 engine validation skipped -> CAUGHT by replacing_the_effects_of_a_style_is_refused_whole_and_leaves_it_as_it_was; the_effects_must_be_ones_the_engine_accepts
+15 stored names not checked -> CAUGHT by a_stored_library_is_checked_when_the_project_is_opened
+16 project does not check styles on open -> SURVIVED
+17 untouched styles are written -> SURVIVED
+
+SUMMARY
+ 1 empty list allowed                       CAUGHT by a_stored_library_is_checked_when_the_project_is_opened; a_style_holds_one_to_thirty_two_effects
+ 2 32 effects refused                       CAUGHT by a_style_holds_one_to_thirty_two_effects
+ 3 mask limit never refused                 CAUGHT by an_effect_limited_to_a_mask_is_refused_by_name_because_a_mask_belongs_to_one_object
+ 4 empty mask list refused                  CAUGHT by an_effect_limited_to_a_mask_is_refused_by_name_because_a_mask_belongs_to_one_object
+ 5 201st style allowed                      CAUGHT by a_library_holds_at_most_two_hundred_styles
+ 6 own name clashes with itself             CAUGHT by a_name_is_unique_ignoring_case_and_refused_by_name; a_stored_library_is_checked_when_the_project_is_opened
+ 7 names are case sensitive                 CAUGHT by a_name_is_unique_ignoring_case_and_refused_by_name
+ 8 name length in bytes                     CAUGHT by a_name_is_one_to_sixty_four_characters_without_control_characters
+ 9 id reused after delete                   CAUGHT by a_library_nobody_used_is_not_written_but_one_that_was_is_kept_empty; an_id_is_not_reused_after_a_delete
+10 untouched is either                      CAUGHT by a_library_nobody_used_is_not_written_but_one_that_was_is_kept_empty
+11 stored effects not checked               CAUGHT by a_stored_library_is_checked_when_the_project_is_opened
+12 set_effects skips the check              CAUGHT by replacing_the_effects_of_a_style_is_refused_whole_and_leaves_it_as_it_was
+13 delete does nothing                      CAUGHT by a_library_holds_at_most_two_hundred_styles
+14 engine validation skipped                CAUGHT by replacing_the_effects_of_a_style_is_refused_whole_and_leaves_it_as_it_was; the_effects_must_be_ones_the_engine_accepts
+15 stored names not checked                 CAUGHT by a_stored_library_is_checked_when_the_project_is_opened
+16 project does not check styles on open    SURVIVED
+17 untouched styles are written             SURVIVED
+15 of 17 caught
+
+--- Rerun after two tests were added in Shared/contracts/src/project.rs (a_project_nobody_kept_a_library_item_in_is_written_without_any_and_reads_back_the_same, opening_a_project_checks_the_library_items_it_stores) ---
+16 project does not check styles on open    CAUGHT by opening_a_project_checks_the_library_items_it_stores
+17 untouched styles are written             CAUGHT by a_project_nobody_kept_a_library_item_in_is_written_without_any_and_reads_back_the_same
+=> 17 of 17 caught.

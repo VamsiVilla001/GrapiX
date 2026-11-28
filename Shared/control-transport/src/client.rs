@@ -16,8 +16,8 @@ use gx_contracts::{Epoch, Refusal};
 use gx_control_plane::bind::{connect_endpoint, ControlReadHalf, ControlWriteHalf, Endpoint};
 use gx_control_plane::capability::EngineCapability;
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
-use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope};
-use gx_control_plane::peer::EnginePeer;
+use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope, MAIN_LAYER};
+use gx_control_plane::peer::{EnginePeer, Handled};
 use gx_control_plane::sequence::{MessageId, Sequence};
 use gx_control_plane::status::ProgramState;
 
@@ -282,6 +282,16 @@ impl EnginePeer for Client {
             Err(refusal) => EngineReply::Refused(refusal),
         }
     }
+    /// Send one request aimed at `layer` of the Program channel (12.10), without changing the target this client keeps for the
+    /// requests that follow. Layer zero is sent with no target at all, the form every receiver reads, so a main-layer command
+    /// stays readable by a receiver older than numeric layers; any other layer travels as an explicit numeric target.
+    fn handle_on_layer(&mut self, request: ClientRequest, layer: i32) -> Handled {
+        let kept = self.target.take();
+        self.target = (layer != MAIN_LAYER).then(|| gx_control_plane::message::OutputTarget::program(layer));
+        let reply = self.handle(request);
+        self.target = kept;
+        Handled::Reply(reply)
+    }
     fn drain_events(&mut self) -> Vec<EngineEvent> {
         let mut held = self.events.lock().expect("event mutex poisoned");
         std::mem::take(&mut *held)
@@ -359,6 +369,7 @@ mod operator_tests {
     fn the_operator_rides_a_program_command_and_nothing_else() {
         let clear = ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         });
         assert_eq!(operator_for(&clear, Some("Ada")), Some("Ada".to_owned()));
         assert_eq!(operator_for(&clear, None), None);

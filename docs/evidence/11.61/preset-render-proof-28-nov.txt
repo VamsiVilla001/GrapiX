@@ -1,0 +1,62 @@
+Row 11.61, EffectCraft's text-animator presets: the contract edit, the rendered frames and the selector fix they found. 28 Nov 2026, claude-backend.
+All cargo runs in a private target (D:\Project KK\cargo-target-claude-backend), in the shared worktree, uncommitted.
+
+1. What was built
+   Shared/contracts/src/text_animator_presets.rs (new), SceneEdit::ApplyTextAnimatorPreset { objectId, presetId, atFrame } in command.rs,
+   per-preset `unavailable` in effect_catalog.rs, one history label in Editor/src/history-list.ts, codegen export.
+   Applied (animator replaced, keys from atFrame, one undo entry, EditEffect::PresetApplied { durationFrames }):
+     typewriter        range start 0 -> 1 over 2.0 s, linear, smoothness 0, opacity 0
+     fadeUpCharacters  ramp up, ease high and low 0.5, offset -1 -> 1 over 1.5 s, eased, Move Y 40, opacity 0
+     trackingIn        whole text, tracking 0.4 em (in pixels of the text it lands on) -> 0 over 1.6 s, opacity 0 -> 1 over 0.8 s, eased
+     dropInLines       lines, ramp up, ease high 0.8, offset -1 -> 1 over 1.4 s, eased, Move Y -120, rotation -8, opacity 0
+   Refused by name (ScenePropertyNotDrawable, owner 11.61), listed with the reason:
+     bounceInWords  a second animator on the same text
+     scramble       a character offset and a wiggly selector
+     blurIn         a blur on each glyph
+     jitter         a wiggly selector
+
+2. The rendered proof
+   services/render-engine/worker/tests/colour_reference.rs:
+   applied_text_animator_presets_start_hidden_finish_as_the_plain_text_and_repeat_byte_for_byte
+   Each of the four is applied with text_animator_presets::apply to the caption of tests/reference-scenes/colour-ramp-50.json
+   ("GrapiX\nreference", Inter, 320x180, 50 fps), saved, reopened and rendered. For each:
+     frame 0            the same bytes as the caption switched off (CPU); within 1 code of it on hardware
+     the middle frame   neither frame 0 nor the last frame
+     the last key       the plain caption with no animator, within 1 code (CPU and hardware)
+     30 frames later    the same bytes as the last key (it holds)
+     the middle again   the same bytes as the first render of it (CPU and hardware)
+   Lengths asserted: 100, 75, 80 and 70 frames at 50 fps.
+
+3. What the proof found
+   Before the fix below, trackingIn failed at frame 0 on the CPU path, on DX12 and on Vulkan: 85 pixels in the box
+   x 187..197, y 80..91 (the last "e" of "reference") were [255, 255, 255, 0] where the hidden caption gives [0, 0, 0, 0].
+   Cause: TextRangeSelector::weight measured the two edge distances of a Square range as fractions of the text, and `1 - centre`
+   rounds. With the default whole range the last unit came out at 1 - 2^-53 for 241 of the lengths 1 to 512 (5, 10, 11, 13, 15...;
+   the caption has 15 glyphs), so a glyph at animator opacity 0 kept an alpha of 1e-16: nothing drawn, its colour left in the frame.
+   EffectCraft's range_value (crates/text/src/selectors.rs) rounds the same way, so the port was faithful.
+   Fix (Shared/contracts/src/text_animator.rs): the distances are measured in units (index + 0.5, start * count, end * count), which is
+   exact for a whole range; the same function otherwise. Two new tests: every length 1 to 512 at smoothness 1, 0.5 and 0 gives
+   exactly 1 for every unit; a soft edge still selects by cover ([1, 0.5, 0, 0] for 4 units and a range of 0 to 0.375, hard [1, 1, 0, 0]).
+   The 241 failing lengths were counted with the old formula in a Python one-liner, not by running the old Rust against the new test.
+   The Editor holds no copy of this maths.
+   Not changed, noted: an alpha that small is written out as full colour at alpha 0 by the output encode. That is the compositor's
+   behaviour (rows 3.15 / 3.21), outside this claim.
+
+4. What was run, and what it gave (28 Nov 2026)
+   cargo test -p gx-contracts                                             493 passed, 0 failed (482 before; 9 preset tests, 2 selector tests)
+   npm run codegen                                                        340 contract types
+   npm run typecheck                                                      exit 0
+   npm run check:boundaries                                               OK
+   npm run codegen:check                                                  OK (607 files current)
+   cargo test -p gx-render-worker --test colour_reference                 13 passed, 0 failed (CPU)
+   GX_TEST_SCALAR_GPU=dx12   the same                                     13 passed, 0 failed (129 s)
+   GX_TEST_SCALAR_GPU=vulkan the same                                     13 passed, 0 failed (6 s)
+   cargo test -p gx-render-worker --lib                                   288 passed, 0 failed, 56 ignored
+   codegen, typecheck, boundaries and codegen:check were run before the selector fix; the fix changes no type, so they were not re-run.
+   Not run: the whole gate (npm run check), conformance, a mutation run on the new tests.
+
+5. Still open in 11.61
+   The GPU drawing text from per-glyph instance data without per-frame re-shaping, with its own byte-identical proof.
+   The four refused presets, each waiting on an engine feature of its own.
+   "The existing stagger presets are expressed through them": the Editor's Stagger (row 11.77) moves selected keys of several
+   elements and is not a text animator; what is expressed through animators here is EffectCraft's text-animator preset set, four of eight.

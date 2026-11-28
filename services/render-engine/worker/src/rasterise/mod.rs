@@ -23,7 +23,9 @@ use crate::rasterizer::Frame;
 pub(crate) use lyon::{prepare_masks, transform};
 pub use paint::{PathGradient, PathPaint};
 pub use vello::VelloCpuRasteriser;
-pub(crate) use vello::{coverage_window, window_origin, window_transform};
+pub(crate) use vello::{cell_transform, coverage_window, plan_coverage, window_origin, window_transform, SHEET_SIDE};
+#[cfg(test)]
+pub(crate) use vello::rasterise_with;
 
 /// The outline geometry types the drawing backends share (3.17).
 pub use vello_cpu::kurbo::BezPath;
@@ -115,8 +117,14 @@ pub struct PreparedPath {
     object_id: String,
     paint: PathPaint,
     outline: BezPath,
+    clip: Option<BezPath>,
     fill_rule: OutlineFill,
     bounds: RasterBounds,
+    /// 11.61: one of the many paths of one object that each carry a paint of
+    /// their own: a glyph cluster under a text animator. Both backends draw
+    /// the coverage of such paths into shared sheets, one cell each (see
+    /// `vello::plan_coverage`); every other path is drawn alone.
+    instance: bool,
 }
 
 impl PreparedPath {
@@ -138,9 +146,24 @@ impl PreparedPath {
             object_id,
             paint,
             outline,
+            clip: None,
             fill_rule,
             bounds,
+            instance: false,
         }
+    }
+
+    /// This path as one of an object's per-instance paths (11.61).
+    #[cfg(test)]
+    pub(crate) fn instanced(mut self) -> Self {
+        self.instance = true;
+        self
+    }
+
+    /// Whether the path's coverage shares a sheet with its object's other
+    /// instance paths (11.61).
+    pub(crate) fn instance(&self) -> bool {
+        self.instance
     }
 
     /// The owning scene object's stable id.
@@ -158,6 +181,10 @@ impl PreparedPath {
     /// The outline in scene coordinates, filled under [`Self::fill_rule`].
     pub fn outline(&self) -> &BezPath {
         &self.outline
+    }
+
+    pub(crate) fn clip(&self) -> Option<&BezPath> {
+        self.clip.as_ref()
     }
 
     /// The fill rule the outline is filled with.

@@ -1,0 +1,195 @@
+{
+ "input": {
+  "state": {
+   "decision": "How a local CSV file becomes a data source of a graphic project (task 121 slices 2 and 3, row 11.153, Figma B4 'Players.csv, file, 48 rows'). Asked BEFORE the service reader and the persistence are built (claude-grapix-f1, 25 Nov 2026).",
+   "facts": "Slice 1 is built: a strict reader from CSV bytes to a text table or a named fault with its line (delimiter stated by the caller; UTF-8 only; blank lines only at the end; ragged rows, empty or repeated column names, stray or unterminated quotes refused; stated limits 16 MiB, 100,000 rows, 256 columns, 64 KiB a cell; cells exact). A GrapiX project is a named .gpx folder like an XPression .xpf, holding scenes, Footage and Assets (Assets/Images, Videos, Audio, Models, Fonts); importing an asset COPIES the file into the project as a stream beside the destination and renames it into place after a hash check, and a different file at the same name is refused by name, so a project is portable and a scene never depends on a path outside it. Plan row 19.1 (ADR-0005, not yet written) will fix revision pinning of data and a failure policy per field (refuse, hold last good, or warn); 19.2 defines the typed DataSource, DataTable, DataRecord and DataField contract with a source revision, timestamp and staleness state, and says a schema change is a named event, never silent; 19.4 later reads CSV, Excel, JSON and XML from a file with a file watch, and detects and names schema drift. Row 11.54: each template field declares its own type, range and length, so the types of a source's columns come from the graphic's fields, not from the CSV. A producer typically exports a players list from a spreadsheet, then edits and re-exports it several times before and during an event; the same file name is re-exported over the old one. A graphic published to Playout carries revision-pinned data (a take must be reproducible).",
+   "built": "Only the strict reader (Shared/contracts/src/csv_table.rs). No source, no storage, no service reader yet."
+  },
+  "questions": {
+   "storage": {
+    "type": "choice",
+    "instructions": "Where does the data of a CSV file source live once it is added to a project?",
+    "criteria": {
+     "A": "A copy in the project (for example Data/Players.csv, filed like an asset: streamed, hash-checked, a different file at the same name refused by name), read from the copy; the original path is kept only as a label and a place to offer 'Update from file'. A project stays portable and a take stays reproducible.",
+     "B": "A reference: the project stores the original path and reads the file from there every time.",
+     "C": "Both at once: read the original live and keep a snapshot copy only as a fallback."
+    }
+   },
+   "update": {
+    "type": "choice",
+    "instructions": "What should happen when the producer re-exports the file and the original on disk differs from the project's copy?",
+    "criteria": {
+     "A": "Nothing automatic. The source says 'Changed on disk'; an explicit 'Update from file' reads the new file, shows what changed (rows, and columns added or removed by name) and the copy is replaced only when the user accepts. A column that disappeared and has bound fields is named as such. The old copy is kept as the previous revision until accepted.",
+     "B": "Replace the copy silently each time the original changes.",
+     "C": "Replace the copy automatically but show a notice afterwards."
+    }
+   },
+   "drift": {
+    "type": "choice",
+    "instructions": "How should a changed set of column names be reported when a file is updated?",
+    "criteria": {
+     "A": "As a named schema change: columns added, columns removed, and a different order, each by exact name. A rename is never guessed (it is one removed and one added). It is a named event and never applied silently.",
+     "B": "Match columns by position and treat a different name at the same position as a rename.",
+     "C": "Match by fuzzy name similarity and carry bindings over."
+    }
+   },
+   "identity": {
+    "type": "choice",
+    "instructions": "How is a record (a row) identified for the Test records table and for the Publish screen's Test row?",
+    "criteria": {
+     "A": "By its row number in the file (1-based, counting data rows, the header excluded), always shown with the row's own text; a later slice may let the user name a key column, and a key column with an empty or repeated value is then refused by name.",
+     "B": "By its first column, assumed unique.",
+     "C": "By a generated random id stored beside the row."
+    }
+   },
+   "access": {
+    "type": "choice",
+    "instructions": "Which files may the service read as a CSV source?",
+    "criteria": {
+     "A": "Only the path the operator picked in the Editor's own file picker (the shell hands the path to the service); the service reads a regular file only, checks its size against the limit BEFORE reading it, refuses a directory, a device or a missing file by name, and the MCP and control plane never pass a path (an AI client cannot point the service at a file).",
+     "B": "Any path from any caller, including MCP tools.",
+     "C": "Only files already inside the project folder."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "storage": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "update": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.98,
+    "probabilities": {
+     "A": 0.99,
+     "B": 0,
+     "C": 0.01
+    }
+   },
+   "drift": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "identity": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.96,
+    "probabilities": {
+     "A": 0.97,
+     "B": 0.02,
+     "C": 0.01
+    }
+   },
+   "access": {
+    "type": "choice",
+    "choice": "C",
+    "confidence": 0.34,
+    "probabilities": {
+     "A": 0.37,
+     "B": 0.07,
+     "C": 0.56
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 3142,
+   "output_tokens": 0,
+   "state_tokens": 524,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "storage": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2293,
+     "B": 0.2938,
+     "C": 0.4769
+    },
+    "confidence": 0.0436,
+    "answer_confidence": 0.4769,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "update": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.619,
+     "B": 0.2116,
+     "C": 0.1694
+    },
+    "confidence": 0.1568,
+    "answer_confidence": 0.619,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "drift": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.3796,
+     "B": 0.2842,
+     "C": 0.3362
+    },
+    "confidence": 0.0063,
+    "answer_confidence": 0.3796,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "identity": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3207,
+     "B": 0.3575,
+     "C": 0.3217
+    },
+    "confidence": 0.0012,
+    "answer_confidence": 0.3575,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "access": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3438,
+     "B": 0.2268,
+     "C": 0.4294
+    },
+    "confidence": 0.0292,
+    "answer_confidence": 0.4294,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

@@ -1889,6 +1889,8 @@ name = "gx-asset-plane"
 version = "0.1.0"
 dependencies = [
  "allsorts",
+ "brotli",
+ "flate2",
  "gx-contracts",
  "gx-credential",
  "gx-fs",
@@ -2033,6 +2035,7 @@ dependencies = [
  "gx-fs",
  "gx-project-store",
  "gx-write-semantics",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2207,6 +2210,7 @@ dependencies = [
  "gx-control-plane",
  "gx-control-transport",
  "gx-mock-engine",
+ "gx-playout",
  "gx-shell-log",
  "gx-telemetry",
  "serde",

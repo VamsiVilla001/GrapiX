@@ -17,7 +17,7 @@ describe("one scene container, multiple graphics", () => {
     expect(panel.label).toBe("Scene: Match broadcast");
     expect(panel.description).toBe("2 scene(s) · independent layers and timelines");
     expect(findNode(panel, "scene-manager/list")!.children!.map(item => item.id)).toEqual(["scene/lower-third", "scene/score"]);
-    expect(findNode(panel, "scene/score")!.actions!.map(a => a.name)).toEqual(["open", "duplicate", "publish", "delete"]);
+    expect(findNode(panel, "scene/score")!.actions!.map(a => a.name)).toEqual(["open", "rename", "changeId", "duplicate", "publish", "delete"]);
     expect(JSON.stringify(agentView(panel))).not.toMatch(/design.system|conformance|unstamped/i);
   });
 
@@ -33,7 +33,7 @@ describe("one scene container, multiple graphics", () => {
     const reason = "scene file is unreadable: unknown field /legacy";
     const item = findNode(panelFor([graphic({ sceneId: "legacy", unavailableReason: reason })]), "scene/legacy")!;
     expect(item.description).toContain(reason);
-    for (const action of ["open", "duplicate", "publish"]) expect(item.actions!.find(a => a.name === action)!.unavailable).toBe(reason);
+    for (const action of ["open", "rename", "changeId", "duplicate", "publish"]) expect(item.actions!.find(a => a.name === action)!.unavailable).toBe(reason);
     expect(item.actions!.find(a => a.name === "delete")!.unavailable).toBeUndefined();
   });
 
@@ -107,7 +107,7 @@ describe("the list view (11.72)", () => {
   it("keeps the full sentence and every action on the row, so agents lose nothing", () => {
     const row = findNode(list, "scene/a")!;
     expect(row.description).toBe(graphicStatus(scenes[0]!));
-    expect(row.actions!.map((a) => a.name)).toEqual(["open", "duplicate", "publish", "delete"]);
+    expect(row.actions!.map((a) => a.name)).toEqual(["open", "rename", "changeId", "duplicate", "publish", "delete"]);
     expect(list.description).toContain("4 scene(s)");
   });
 

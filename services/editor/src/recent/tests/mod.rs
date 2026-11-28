@@ -107,3 +107,76 @@ fn on_windows_case_and_separators_do_not_make_a_second_entry() {
     assert_eq!(recent.list().len(), 1);
     std::fs::remove_dir_all(root).expect("clean up");
 }
+
+fn small_png(width: u32, shade: u8) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, 1);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&vec![shade; width as usize])
+            .unwrap();
+    }
+    bytes
+}
+
+#[test]
+fn thumbnails_are_scoped_to_recent_projects_and_survive_reopening() {
+    let root = scratch("thumbnails");
+    let list = root.join("recent.json");
+    let recent = RecentProjects::at(&list);
+    let a = gpx(&root, "A");
+    let b = gpx(&root, "B");
+    let (a_id, b_id) = (a.to_str().unwrap(), b.to_str().unwrap());
+    let first = small_png(2, 10);
+    let second = small_png(2, 20);
+    assert!(recent.store_thumbnail(a_id, &first).is_err());
+    recent.record(&a, "A", 1).unwrap();
+    recent.record(&b, "B", 2).unwrap();
+    assert_eq!(recent.thumbnail(a_id), None);
+    recent.store_thumbnail(a_id, &first).unwrap();
+    recent.store_thumbnail(b_id, &second).unwrap();
+    recent.record(&a, "A", 3).unwrap();
+    let reopened = RecentProjects::at(&list);
+    assert_eq!(reopened.list()[0].opened_ms, 3);
+    assert_eq!(reopened.thumbnail(a_id), Some(first));
+    assert_eq!(reopened.thumbnail(b_id), Some(second));
+    reopened.forget(a_id).unwrap();
+    assert!(!reopened.thumbnail_path(a_id).exists());
+    assert_eq!(reopened.thumbnail(a_id), None);
+    std::fs::remove_file(reopened.thumbnail_path(b_id)).unwrap();
+    std::fs::remove_dir(list.with_extension("thumbnails")).unwrap();
+    std::fs::remove_file(list).unwrap();
+    std::fs::remove_file(root.join("recent.json.lock")).unwrap();
+    std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn invalid_preview_does_not_replace_a_valid_thumbnail() {
+    let root = scratch("thumbnail-bound");
+    let list = root.join("recent.json");
+    let recent = RecentProjects::at(&list);
+    let a = gpx(&root, "A");
+    let a_id = a.to_str().unwrap();
+    recent.record(&a, "A", 1).unwrap();
+    let png = small_png(2, 51);
+    recent.store_thumbnail(a_id, &png).unwrap();
+    for invalid in [
+        b"not a PNG".to_vec(),
+        png[..24].to_vec(),
+        small_png(MAX_THUMBNAIL_DIMENSION + 1, 0),
+        vec![0; MAX_THUMBNAIL_BYTES + 1],
+    ] {
+        assert!(recent.store_thumbnail(a_id, &invalid).is_err());
+    }
+    assert_eq!(recent.thumbnail(a_id), Some(png));
+    std::fs::write(recent.thumbnail_path(a_id), b"corrupt cache").unwrap();
+    assert_eq!(recent.thumbnail(a_id), None);
+    recent.forget(a_id).unwrap();
+    std::fs::remove_dir(list.with_extension("thumbnails")).unwrap();
+    std::fs::remove_file(list).unwrap();
+    std::fs::remove_file(root.join("recent.json.lock")).unwrap();
+    std::fs::remove_dir(root).unwrap();
+}

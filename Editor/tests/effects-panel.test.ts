@@ -17,6 +17,7 @@ import {
   effectsBrowserPanel,
   freshEffectId,
   isRefused,
+  isTextAnimatorPreset,
   listingFor,
   moveEffect,
   optionLabel,
@@ -26,6 +27,7 @@ import {
   removeEffect,
   setEnabled,
   setParameter,
+  textAnimatorPresetEdit,
   toggleGroup,
   type Stack,
 } from "../src/effects-panel";
@@ -86,6 +88,17 @@ const TYPEWRITER: PresetListing = {
   unavailable: "needs text animators",
 } as unknown as PresetListing;
 
+/** A text animator preset the engine draws (11.61 slice P): no `unavailable`. */
+const FADE_UP: PresetListing = {
+  id: "ec.textanimator.fadeUpCharacters",
+  name: "Fade up characters",
+  category: "Text animators",
+  description: "Characters rise and fade in.",
+  source: "EffectCraft",
+  effects: [],
+  unavailable: null,
+} as unknown as PresetListing;
+
 const SURFACE: EffectSurface = {
   attribution: "Effect catalogue from EffectCraft",
   effects: [GLOW, FILL, SHADOW, WARP],
@@ -102,6 +115,37 @@ const ok = (value: Stack | { refused: string }): Stack => {
   if (isRefused(value)) throw new Error(value.refused);
   return value;
 };
+
+describe("no effect and no preset is ever left out of the browser (invariant 86)", () => {
+  // The whole EffectCraft catalogue is 306 effects in many categories, not the four of SURFACE above: a cap, a page size or a category
+  // filter that quietly dropped some would still pass a four-effect test.
+  const categories = ["Blur", "Channel", "Color", "Distort", "Generate", "Key", "Perspective", "Stylize", "Transition", "Utility"];
+  const many: EffectSurface = {
+    attribution: "Effect catalogue from EffectCraft",
+    effects: Array.from({ length: 306 }, (_, i) => ({
+      ...(i % 7 === 0 ? GLOW : WARP),
+      id: `ec.${categories[i % categories.length]!.toLowerCase()}.effect${i}`,
+      name: `Effect ${i}`,
+      category: categories[i % categories.length]!,
+    })) as unknown as EffectListing[],
+    presets: Array.from({ length: 8 }, (_, i) => ({ ...(i % 2 === 0 ? LOOK : TYPEWRITER), id: `ec.preset.p${i}`, name: `Preset ${i}` })) as unknown as PresetListing[],
+  };
+
+  it("lists every catalogued effect and preset when nothing is hidden", () => {
+    const panel = effectsBrowserPanel({ surface: many, query: "", showUnported: true });
+    const missing = many.effects.filter((e) => findNode(panel, `effect/${e.id}`) === undefined).map((e) => e.id);
+    expect(missing).toEqual([]);
+    const missingPresets = many.presets.filter((p) => findNode(panel, `preset/${p.id}`) === undefined).map((p) => p.id);
+    expect(missingPresets).toEqual([]);
+  });
+
+  it("finds each effect by its name, so a search never loses one", () => {
+    for (const effect of many.effects.filter((_, i) => i % 23 === 0)) {
+      const panel = effectsBrowserPanel({ surface: many, query: effect.name, showUnported: true });
+      expect(findNode(panel, `effect/${effect.id}`), effect.id).toBeDefined();
+    }
+  });
+});
 
 describe("the browser lists the surface and never pretends", () => {
   it("counts what the engine renders against what is catalogued", () => {
@@ -170,6 +214,39 @@ describe("stack edits", () => {
     expect(stack[1]).toMatchObject({ radius: 18, intensity: 0.8 });
     const refused = addPreset([], TYPEWRITER);
     expect(isRefused(refused) && refused.refused).toBe("Typewriter: needs text animators");
+  });
+
+  it("applies a text animator preset as one edit at the playhead, and refuses by name what it cannot", () => {
+    expect(isTextAnimatorPreset(FADE_UP)).toBe(true);
+    expect(isTextAnimatorPreset(LOOK)).toBe(false);
+    const text = { id: "title", name: "Title", type: "text" };
+    expect(textAnimatorPresetEdit(text, FADE_UP, 12)).toEqual({
+      edit: "applyTextAnimatorPreset",
+      objectId: "title",
+      presetId: "ec.textanimator.fadeUpCharacters",
+      atFrame: 12,
+    });
+    const notText = textAnimatorPresetEdit({ id: "box", name: "Box", type: "rect" }, FADE_UP, 0);
+    expect(isRefused(notText) && notText.refused).toBe("Fade up characters animates text: select a text object (Box is rect)");
+    const waiting = textAnimatorPresetEdit(text, TYPEWRITER, 0);
+    expect(isRefused(waiting) && waiting.refused).toBe("Typewriter: needs text animators");
+    for (const frame of [-1, 1.5, Number.NaN]) expect(isRefused(textAnimatorPresetEdit(text, FADE_UP, frame)), String(frame)).toBe(true);
+    // It is not an effect stack edit: addPreset says so.
+    const stacked = addPreset([], FADE_UP);
+    expect(isRefused(stacked) && stacked.refused).toMatch(/is a text animator: it is applied to a text/);
+  });
+
+  it("dims a text animator preset on a target that is not a text, and not on a text", () => {
+    const surface: EffectSurface = { ...SURFACE, presets: [LOOK, FADE_UP] };
+    const why = (targetType: string | undefined) =>
+      agentView(findNode(effectsBrowserPanel({ surface, query: "", showUnported: false, ...(targetType === undefined ? {} : { targetType }) }), "preset/ec.textanimator.fadeUpCharacters")!).actions[0]!
+        .unavailableReason;
+    expect(why("rect")).toBe("a text animator is applied to a text object: select one");
+    expect(why("text")).toBeUndefined();
+    expect(why(undefined)).toBeUndefined();
+    // An ordinary preset is not held to a text.
+    const look = effectsBrowserPanel({ surface, query: "", showUnported: false, targetType: "rect" });
+    expect(agentView(findNode(look, "preset/gx.look.soft-glow")!).actions[0]!.unavailableReason).toBeUndefined();
   });
 
   it("removes, duplicates below itself, and toggles", () => {

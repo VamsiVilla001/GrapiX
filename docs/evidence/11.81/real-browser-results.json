@@ -1,0 +1,175 @@
+[
+ {
+  "name": "the dialog is open and the viewport is the desktop one",
+  "ok": true,
+  "detail": 1418
+ },
+ {
+  "name": "the nav lists General, Shortcuts and AI and MCP access; General is selected; only the AI entry is dimmed",
+  "ok": true,
+  "detail": [
+   [
+    "General",
+    "true",
+    false
+   ],
+   [
+    "Shortcuts",
+    "false",
+    false
+   ],
+   [
+    "AI and MCP access",
+    "false",
+    true
+   ]
+  ]
+ },
+ {
+  "name": "the dialog is as wide as the design's (up to 1160) and fits the window",
+  "ok": true,
+  "detail": {
+   "w": 1160,
+   "top": 49,
+   "bottom": 753,
+   "h": 802
+  }
+ },
+ {
+  "name": "General holds the two sections and every setting of the contract",
+  "ok": true,
+  "detail": {
+   "commands": 30,
+   "keys": 34,
+   "fields": 20
+  }
+ },
+ {
+  "name": "General shows the lead and both reset buttons",
+  "ok": true
+ },
+ {
+  "name": "Shortcuts is shown and General is hidden",
+  "ok": true
+ },
+ {
+  "name": "the lead and the reset buttons belong to General and are hidden with it",
+  "ok": true
+ },
+ {
+  "name": "one row per command of the Editor's table",
+  "ok": true,
+  "detail": {
+   "commands": 30,
+   "keys": 34,
+   "fields": 20
+  }
+ },
+ {
+  "name": "the line under the table counts the commands and keys and says no key is shared",
+  "ok": true,
+  "detail": "30 commands, 34 keys. No two commands share a key."
+ },
+ {
+  "name": "no clash chip is drawn for the Editor's own table",
+  "ok": true
+ },
+ {
+  "name": "typing 'ctrl s' finds Save on Ctrl S and not Ctrl Shift S",
+  "ok": true,
+  "detail": [
+   [
+    "file.save",
+    "Save",
+    [
+     "Ctrl S"
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "a search that matches nothing says so",
+  "ok": true
+ },
+ {
+  "name": "a command with two keys shows both on one row (the Pen: G and P)",
+  "ok": true,
+  "detail": [
+   [
+    "G",
+    "P"
+   ]
+  ]
+ },
+ {
+  "name": "clearing the search brings every command back",
+  "ok": true
+ },
+ {
+  "name": "nothing on the page can be edited: the search is the only control in the Shortcuts panel",
+  "ok": true
+ },
+ {
+  "name": "the long table scrolls inside the page and the Close button stays on screen",
+  "ok": true,
+  "detail": {
+   "scrolls": true,
+   "closeBottom": 730,
+   "h": 802
+  }
+ },
+ {
+  "name": "ArrowDown on the Shortcuts tab selects AI and MCP access and moves focus to it",
+  "ok": true
+ },
+ {
+  "name": "tabindex follows the selection (only the shown tab is in the tab order)",
+  "ok": true
+ },
+ {
+  "name": "the AI page says it is not built, names row 8.14, and states the rule that no role can cue or clear",
+  "ok": true,
+  "detail": "Not built yet (row 8.14).Access is by role and credential, never by the name of the AI provider, and no role can cue, take out, clear or change what is on air: "
+ },
+ {
+  "name": "and draws no role table, token field or audit button",
+  "ok": true
+ },
+ {
+  "name": "the waiting entry is dimmer than a built one",
+  "ok": true,
+  "detail": [
+   "rgb(211, 206, 198)",
+   "rgb(149, 144, 138)"
+  ]
+ },
+ {
+  "name": "the dialog is the same height on every page, so it does not jump",
+  "ok": true,
+  "detail": {
+   "hGeneral": 704,
+   "hShortcuts": 704,
+   "hAi": 704
+  }
+ },
+ {
+  "name": "Home returns to General, whose lead and reset buttons come back",
+  "ok": true
+ },
+ {
+  "name": "at 1000 by 700 the dialog stays inside the window and Close stays on screen",
+  "ok": true,
+  "detail": {
+   "dialogRight": 984,
+   "dialogBottom": 667,
+   "closeBottom": 644,
+   "w": 1000,
+   "h": 700
+  }
+ },
+ {
+  "name": "no script error, console error or failed request",
+  "ok": true,
+  "detail": []
+ }
+]

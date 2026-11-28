@@ -1,0 +1,25 @@
+1 neutral scale 0 CAUGHT
+2 neutral has opacity CAUGHT
+3 neutral range half CAUGHT
+4 opacity default 0 CAUGHT
+5 range start as number CAUGHT
+6 add on all texts CAUGHT
+7 remove on all texts CAUGHT
+8 remove keeps animator CAUGHT
+9 shape ignored CAUGHT
+10 basis default keeps basis CAUGHT
+11 randomize always true CAUGHT
+12 one edit for all texts CAUGHT
+13 refusal for none missing CAUGHT
+14 add allowed with all having CAUGHT
+15 mixed never CAUGHT
+16 other kinds ignored CAUGHT
+17 shape id loose CAUGHT
+18 value-less choice accepted CAUGHT
+19 animator dropdown missing CAUGHT
+20 draft drops animator CAUGHT
+21 draft selector flat CAUGHT
+22 animator label plain CAUGHT
+23 animator base missing CAUGHT
+24 rows always shown CAUGHT
+24 of 24 caught

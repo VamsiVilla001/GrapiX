@@ -14,12 +14,15 @@
 // `planMove` detects it up front so the refusal can be shown before anything
 // is written, and the same rule still guards the write underneath.
 
-import type { CubicBezier, SceneEasing, SceneEdit } from "@grapix/contracts";
+import type { CubicBezier, SceneEasing, SceneEdit, SceneKeyframe } from "@grapix/contracts";
+
+import { propertyLabel } from "../keyframe-editor";
 import { wireFrame } from "../command-client";
 import { targetOfField } from "../path-anim";
+import { colourOfField } from "../colour-anim";
 import { keyId, parseKeyId, type TimelineModel, type TimelineTrack } from "./model";
 import { countInSpan } from "./key-index";
-import { EASY_EASE_INFLUENCE, segmentControlPoints, type EasyEaseKind } from "./easing";
+import { EASY_EASE_INFLUENCE, easeAt, segmentControlPoints, type EasyEaseKind } from "./easing";
 
 /** A gesture's ordered edits are one Rust history entry. */
 export interface Gesture {
@@ -99,8 +102,23 @@ export function keysInSpan(
 // Gestures
 // ---------------------------------------------------------------------------
 
-/// A path key written again with another easing: the same path at the same frame (11.112).
+/// Whether a track's keys are not numbers (a path, 11.112; a solid colour, 11.132): they take their own edits.
+function special(track: TimelineTrack): boolean {
+  return track.pathKeys !== undefined || track.colourKeys !== undefined;
+}
+
+/// A path or colour key written again with another easing: the same path or colour at the same frame.
 function pathKeyRewrite(track: TimelineTrack, frame: number, easing: SceneEasing, bezier?: CubicBezier): SceneEdit {
+  if (track.colourKeys !== undefined) {
+    const colourKey = track.colourKeys.find((candidate) => Number(candidate.frame) === frame)!;
+    const { bezier: _old, ...rest } = colourKey;
+    return {
+      edit: "updateColourKey",
+      objectId: track.objectId,
+      property: track.colourProperty!,
+      keyframe: { ...rest, easing, ...(easing === "custom-bezier" && bezier !== undefined ? { bezier } : {}) },
+    } as SceneEdit;
+  }
   const key = track.pathKeys!.find((candidate) => Number(candidate.frame) === frame)!;
   return {
     edit: "setPathKey",
@@ -125,20 +143,46 @@ export function planMove(
 ): EditPlan {
   if (selected.length === 0) return { refused: "no keys are selected" };
   if (delta === 0) return { refused: "the keys did not move" };
+  return planShift(
+    model,
+    selected,
+    () => delta,
+    selected.length === 1
+      ? `Move key ${delta > 0 ? "+" : ""}${delta} frames`
+      : `Move ${selected.length} keys ${delta > 0 ? "+" : ""}${delta} frames`,
+  );
+}
+
+/// Move every selected key by the number of frames `deltaOf` gives it (11.77: a stagger moves each object's keys by its own step).
+///
+/// The same rules as one move, applied to the whole gesture at once: the timeline's edges, a landing frame held by an unselected key,
+/// and the order of the writes. A key whose delta is 0 stays where it is and is not written. `deltaOf` must give every key of one
+/// channel the same delta, so the order of the writes below is right for each channel.
+export function planShift(
+  model: TimelineModel,
+  selected: readonly string[],
+  deltaOf: (key: { objectId: string; property: string; frame: number }) => number,
+  label: string,
+): EditPlan {
+  if (selected.length === 0) return { refused: "no keys are selected" };
 
   const parsed = selected.map(parseKeyId).filter((key) => key !== undefined);
   if (parsed.length !== selected.length) return { refused: "a selected key is unreadable" };
 
+  // A key whose delta is 0 stays where it is: it is neither checked nor written.
+  const moved = parsed.filter((key) => deltaOf(key!) !== 0);
+  if (moved.length === 0) return { refused: "the keys did not move" };
+
   // Where every key ends up, and what each channel will hold afterwards.
   const moving = new Map<string, Set<number>>();
-  for (const key of parsed) {
+  for (const key of moved) {
     const channel = `${key!.objectId}/${key!.property}`;
     if (!moving.has(channel)) moving.set(channel, new Set());
     moving.get(channel)!.add(key!.frame);
   }
 
-  for (const key of parsed) {
-    const target = key!.frame + delta;
+  for (const key of moved) {
+    const target = key!.frame + deltaOf(key!);
     if (target < 0) {
       return { refused: `frame ${target} is before the start of the timeline` };
     }
@@ -166,29 +210,37 @@ export function planMove(
 
   // Move in an order that never transiently collides: rightward moves start
   // from the rightmost key, leftward from the leftmost. Without this, sliding
-  // a run of keys one frame right would refuse on its own neighbour.
-  const ordered = [...parsed].sort((left, right) =>
-    delta > 0 ? right!.frame - left!.frame : left!.frame - right!.frame,
-  );
+  // a run of keys one frame right would refuse on its own neighbour. Keys that
+  // move right are written first, then those that move left; a channel has one
+  // direction, so this holds for every channel.
+  const ordered = [...moved].sort((left, right) => {
+    const leftDelta = deltaOf(left!);
+    const rightDelta = deltaOf(right!);
+    if (leftDelta > 0 !== rightDelta > 0) return leftDelta > 0 ? -1 : 1;
+    return leftDelta > 0 ? right!.frame - left!.frame : left!.frame - right!.frame;
+  });
 
   return {
     edits: ordered.map((key) => {
+      const to = key!.frame + deltaOf(key!);
       // 11.112: a path key moves with its own edit.
       const target = targetOfField(key!.property);
+      // 11.132: a colour key moves with its own edit.
+      const colour = colourOfField(key!.property);
+      if (colour !== undefined) {
+        return { edit: "moveColourKey", objectId: key!.objectId, property: colour, fromFrame: wireFrame(key!.frame), toFrame: wireFrame(to) } as SceneEdit;
+      }
       return target === undefined
         ? ({
             edit: "moveKeyframe",
             objectId: key!.objectId,
             property: key!.property,
             fromFrame: wireFrame(key!.frame),
-            toFrame: wireFrame(key!.frame + delta),
+            toFrame: wireFrame(to),
           } as SceneEdit)
-        : ({ edit: "movePathKey", objectId: key!.objectId, target, fromFrame: wireFrame(key!.frame), toFrame: wireFrame(key!.frame + delta) } as SceneEdit);
+        : ({ edit: "movePathKey", objectId: key!.objectId, target, fromFrame: wireFrame(key!.frame), toFrame: wireFrame(to) } as SceneEdit);
     }),
-    label:
-      selected.length === 1
-        ? `Move key ${delta > 0 ? "+" : ""}${delta} frames`
-        : `Move ${selected.length} keys ${delta > 0 ? "+" : ""}${delta} frames`,
+    label,
   };
 }
 
@@ -201,12 +253,44 @@ export function planDelete(selected: readonly string[]): EditPlan {
   return {
     edits: parsed.map((key) => {
       const target = targetOfField(key!.property);
+      const colour = colourOfField(key!.property);
+      if (colour !== undefined) return { edit: "removeColourKey", objectId: key!.objectId, property: colour, frame: wireFrame(key!.frame) } as SceneEdit;
       return target === undefined
         ? ({ edit: "removeKeyframe", objectId: key!.objectId, property: key!.property, frame: wireFrame(key!.frame) } as SceneEdit)
         : ({ edit: "removePathKey", objectId: key!.objectId, target, frame: wireFrame(key!.frame) } as SceneEdit);
     }),
     label: selected.length === 1 ? "Delete key" : `Delete ${selected.length} keys`,
   };
+}
+
+/// The range a property's value must stay in, where it has one (opacity 0 to 1; a size not negative).
+const F32_MAX = 3.4028234663852886e38;
+const PROPERTY_RANGE: Readonly<Record<string, { readonly min: number; readonly max: number; readonly exclusiveMin?: boolean }>> = {
+  opacity: { min: 0, max: 1 },
+  width: { min: 0, max: Number.POSITIVE_INFINITY },
+  height: { min: 0, max: Number.POSITIVE_INFINITY },
+  size: { min: 0, max: Number.POSITIVE_INFINITY, exclusiveMin: true },
+  lineHeight: { min: 0, max: Number.POSITIVE_INFINITY, exclusiveMin: true },
+  radius: { min: 0, max: Number.POSITIVE_INFINITY },
+  strokeWidth: { min: 0, max: Number.POSITIVE_INFINITY },
+  trimStart: { min: 0, max: 100 },
+  trimEnd: { min: 0, max: 100 },
+  baselineShift: { min: -F32_MAX, max: F32_MAX },
+};
+
+/// Elastic swings past its end keys by about a third of their distance. Where that would leave a property's range the contract
+/// refuses it at the key (same 4,096 samples as the Rust), so the author hears it here, naming the property and the frames.
+function elasticRangeRefusal(property: string, from: SceneKeyframe, to: SceneKeyframe): string | undefined {
+  const range = PROPERTY_RANGE[property];
+  if (range === undefined || from.value === to.value) return undefined;
+  for (let step = 1; step < 4096; step += 1) {
+    const value = from.value + (to.value - from.value) * easeAt("elastic", undefined, step / 4096);
+    if (!Number.isFinite(value) || value < range.min || value > range.max
+      || (range.exclusiveMin && value === range.min)) {
+      return `Elastic overshoots ${propertyLabel(property)} past its limits between frames ${Number(from.frame)} and ${Number(to.frame)}; use keys with room to overshoot, or another ease.`;
+    }
+  }
+  return undefined;
 }
 
 /// Assign an easing to every selected key (11.23).
@@ -237,8 +321,13 @@ export function planSetEasing(
     if (!source) {
       return { refused: `no key on ${key.objectId}.${key.property} at frame ${key.frame}` };
     }
+    if (easing === "elastic" && track !== undefined && !special(track)) {
+      const next = track.sourceKeys[track.sourceKeys.indexOf(source) + 1];
+      const refusal = next === undefined ? undefined : elasticRangeRefusal(key.property, source, next);
+      if (refusal !== undefined) return { refused: refusal };
+    }
     edits.push(
-      track !== undefined && track.pathKeys !== undefined
+      track !== undefined && special(track)
         ? pathKeyRewrite(track, key.frame, easing, easing === "custom-bezier" ? bezier : undefined)
         : {
             edit: "updateKeyframe",
@@ -331,7 +420,7 @@ export function planEasyEase(
   return {
     edits: [...segments.values()].map((segment) => {
       const track = model.tracks.find((candidate) => candidate.objectId === segment.objectId && candidate.property === segment.property);
-      if (track !== undefined && track.pathKeys !== undefined) return pathKeyRewrite(track, segment.frame, "custom-bezier", segment.bezier);
+      if (track !== undefined && special(track)) return pathKeyRewrite(track, segment.frame, "custom-bezier", segment.bezier);
       return {
         edit: "updateKeyframe",
         objectId: segment.objectId,
@@ -364,7 +453,7 @@ export function planSetSegmentBezier(
   );
   const source = track?.sourceKeys.find((candidate) => Number(candidate.frame) === segment);
   if (!source) return { refused: `no key on ${objectId}.${property} at frame ${segment}` };
-  if (track !== undefined && track.pathKeys !== undefined) {
+  if (track !== undefined && special(track)) {
     return { edits: [pathKeyRewrite(track, segment, "custom-bezier", bezier)], label: "Edit curve" };
   }
   return {
@@ -407,7 +496,7 @@ export function planCopy(model: TimelineModel, selected: readonly string[]): Cli
     );
     const source = track?.sourceKeys.find((candidate) => Number(candidate.frame) === key!.frame);
     // 11.112: a path key is a whole path, not a number; copying keys carries numbers only.
-    if (!source || track?.pathKeys !== undefined) continue;
+    if (!source || (track !== undefined && special(track))) continue;
     copied.push({
       objectId: key!.objectId,
       property: key!.property,

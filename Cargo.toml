@@ -104,3 +104,12 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.kurbo]
 opt-level = 3
+
+# Font conversion (WOFF/WOFF2 encoders) and the decoders that verify it run optimised in debug builds too:
+# Brotli at quality 11 on a one megabyte font takes seconds unoptimised, and a font import should not wait on that.
+[profile.dev.package.brotli]
+opt-level = 3
+[profile.dev.package.brotli-decompressor]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3

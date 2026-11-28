@@ -1,0 +1,81 @@
+--- a/Editor/web/main.ts
++++ b/Editor/web/main.ts
+@@ -137,6 +137,7 @@
+ import { isFirstSave, saveRoute, versionLabel, type SaveState } from "../src/save-model";
+ import { APP_MENUS, actionOf, menuTitle } from "../src/app-menu";
+ import {
++  SHORTCUTS,
+   commandById,
+   decideKey,
+   refusalLine,
+@@ -145,6 +146,7 @@
+   type KeyFocus,
+ } from "../src/command-registry";
+ import { MACHINE_FIELDS, toValue, USER_FIELDS, usageLine, type FieldSpec } from "../src/settings-form";
++import { createSettingsWindow } from "../src/settings-window-view";
+ import { renderAppMenus, type PanelEntry } from "../src/app-menu-view";
+ import { presetBlocker, presetBrowserPanel } from "../src/motion-preset-browser";
+ import { SceneViewport } from "../src/viewport";
+@@ -7699,9 +7701,34 @@
+ 
+ type SettingValues = Record<string, string | number | boolean>;
+ 
++/** The Settings window's nav and pages (11.81, Figma E4). General is drawn into `settingsWindow.general` by `renderSettings` below, as it always was;
++ *  Shortcuts and the page that waits for row 8.14 are drawn by the view (src/settings-window-view.ts). The two resets belong to General. */
++const settingsWindow = createSettingsWindow(document, ui.settingsBody, {
++  shortcuts: SHORTCUTS,
++  labelOf: (command) => commandById(command)?.label,
++  onShow: (page) => {
++    ui.settingsResetUser.hidden = page !== "general";
++    ui.settingsResetMachine.hidden = page !== "general";
++  },
++});
++
++/** What the General page says first (it was a paragraph of the dialog; it belongs to the page it explains). */
++function settingsLead(): HTMLElement {
++  const lead = document.createElement("p");
++  lead.className = "settings-lead";
++  const bold = (words: string): HTMLElement => {
++    const strong = document.createElement("strong");
++    strong.textContent = words;
++    return strong;
++  };
++  lead.append("Changes are saved as you make them. ", bold("Yours"), " follows you to another computer; ", bold("This computer"), " stays here. What changes how a graphic looks is not here: that belongs to the project.");
++  return lead;
++}
++
+ async function renderSettings(): Promise<void> {
+   const settings = await readSettings();
+-  ui.settingsBody.replaceChildren();
++  const general = settingsWindow.general;
++  general.replaceChildren(settingsLead());
+   if (!settings) {
+     ui.settingsError.textContent = "Settings could not be read. The reason is in the Activity log.";
+     return;
+@@ -7733,7 +7760,7 @@
+       row.append(label, control, help);
+       section.append(row);
+     }
+-    ui.settingsBody.append(section);
++    general.append(section);
+   }
+ }
+ 
+--- a/Editor/web/index.html
++++ b/Editor/web/index.html
+@@ -7,6 +7,7 @@
+     <link rel="icon" type="image/png" href="favicon.png" />
+     <link rel="stylesheet" href="skwad.css" />
+     <link rel="stylesheet" href="style.css" />
++    <link rel="stylesheet" href="settings-window.css" />
+   </head>
+   <body>
+     <!-- Visible by default, and hidden by `main.js` only once the shell is
+@@ -747,7 +748,6 @@
+     <dialog id="settings-dialog" aria-labelledby="settings-title">
+       <form id="settings-form" method="dialog">
+         <h2 id="settings-title">Settings</h2>
+-        <p class="settings-lead">Changes are saved as you make them. <strong>Yours</strong> follows you to another computer; <strong>This computer</strong> stays here. What changes how a graphic looks is not here: that belongs to the project.</p>
+         <div id="settings-body"></div>
+         <p id="settings-error" class="start-error" role="alert"></p>
+         <div class="dialog-actions">

@@ -1,0 +1,45 @@
+{
+ "state": {
+  "decision": "The Library (Figma B13, node 55:3018) and Data (Figma B4, node 54:2574) panels in the Editor, asked BEFORE coding (claude, 25 Nov 2026).",
+  "facts": "Both Figma frames are whole screens in the Data and Library layouts: B13 = Folders list (All assets 142, BGIS 2026, nested folders, Unfiled), tabs Colours / Text styles / Layer styles / Backgrounds / Fonts / Assets, filter chips (ALL, THIS SCENE, UNUSED, MISSING), a grid of asset cards with a chip each (n SCENES, UNUSED, MISSING), a selected-asset card (Path, Size, Status, Fingerprint, Used by, Replace file, Relink, Reveal in folder) and an Import folder dialog. B4 = a Data list (sources with health and update time, Fields found with types), the stage, a Test records table (48 records checked against the layout: FITS, OVERFLOWS 64 PX, EMPTY ROLE HIDDEN, NON-LATIN OK), and Fields the operator fills with Checks and What the operator sees. The owner decided on 24 Nov that only the Design layout ships and that modules combine as toggles, not exclusive screens. What the Editor already has: an Assets dock panel (project assets with name, kind, path, content hash, size, availability, provenance; import files; replace; relink; previews by hash), Fonts and Text styles panels, a Data bindings panel with sample-data JSON and a Fields list, a Template controls panel (the fields the operator fills) and a Take page panel (what the operator sees). What it does not have, and codex was asked for on 25 Nov (tasks 119 to 123): virtual folders and Import folder; project-wide asset usage (the Editor can see only the open scene, or read every stored scene itself); colour, layer-style and background library items; CSV or any other data source, records and a current record; testing records against the layout; data staleness (needs the Data Hub decision 19.14). Rules the owner set: a control that does nothing is not drawn as if it worked (dim it and name the row, as the menus do); a value shown must be one the app holds; no step chips, no Fix next issue.",
+  "proposed": "Library: the Assets dock panel is rebuilt in place as the Library panel (no new full-screen module): a Folders column with All assets and its count, a tab strip, the filter chips, the grid of cards and the selected-asset card, laid out to the panel's width (the folders column folds into a select when narrow). Tabs: Assets works; Fonts and Text styles bring forward the existing panels; Colours, Layer styles and Backgrounds are dimmed naming row 11.122. Folder tree, Import folder and the folder drag are dimmed naming 11.122 (only All assets is listed). Chips: THIS SCENE counts the open scene, UNUSED and n SCENES come from the Editor reading the project's stored scenes itself now (cached by scene revision) and switch to codex's command when it exists; MISSING from the asset's own availability. Reveal in folder is dimmed unless the shell has it. Data: a Data dock panel in the delivery group (beside Template controls and Take page): + Add data… offers Sample data (works; opens the existing sample-data editor) and CSV file, Published sheet and Live feed dimmed naming their rows; a Sources list with the one source this graphic has (its sample data, health Idle, no update time) and Fields found from that data with their types; the Test records table and the Checks (overflow, feed stale) are NOT drawn until the backends exist, and nothing says FITS that was not measured."
+ },
+ "questions": {
+  "placement": {
+   "type": "choice",
+   "instructions": "Where should the Library and Data screens live?",
+   "criteria": {
+    "A": "As the existing Assets panel rebuilt in place and a new Data panel in the delivery group; no new full-screen module (as proposed).",
+    "B": "As full-screen modules opened from a new More bar, with the Design layout hidden while one is open.",
+    "C": "Not now: wait for the Library and Data layouts to ship."
+   }
+  },
+  "unbacked": {
+   "type": "choice",
+   "instructions": "How should the parts nothing backs yet be shown (folder tree, Import folder, Colours, Layer styles, Backgrounds, CSV, Published sheet, Live feed)?",
+   "criteria": {
+    "A": "Dimmed, not clickable, each naming the row that owns it (as proposed).",
+    "B": "Left out until they work.",
+    "C": "Drawn as working controls that show a message saying not built."
+   }
+  },
+  "usage": {
+   "type": "choice",
+   "instructions": "Where do n SCENES and UNUSED come from until codex's project-wide usage command exists?",
+   "criteria": {
+    "A": "The Editor reads the project's stored scenes itself and caches by revision, then switches to the command (as proposed).",
+    "B": "Only the open scene's usage is shown (THIS SCENE) and the other chips wait for the command.",
+    "C": "A guess from the asset's name or import time."
+   }
+  },
+  "test_records": {
+   "type": "choice",
+   "instructions": "The Test records table and its FITS and OVERFLOWS results need a text-fit backend that does not exist.",
+   "criteria": {
+    "A": "Not drawn until the backend exists; no result is shown that was not measured (as proposed).",
+    "B": "Drawn with a character-count estimate of fit, labelled estimate.",
+    "C": "Drawn with the design's sample rows as placeholders."
+   }
+  }
+ }
+}

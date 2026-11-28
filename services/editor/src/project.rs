@@ -99,6 +99,30 @@ impl From<EditorError> for Refusal {
     }
 }
 
+/// Metadata for one scene's project-owned CSV copy.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectCsv {
+    pub file_name: String,
+    pub content_hash: ContentHash,
+    pub delimiter: gx_contracts::csv_table::Delimiter,
+    pub columns: Vec<String>,
+    pub row_count: usize,
+}
+
+pub struct CsvImport {
+    source: ProjectCsv,
+    pub columns: gx_contracts::csv_table::ColumnChange,
+    previous: Option<ProjectCsv>,
+    bytes: Vec<u8>,
+}
+
+impl CsvImport {
+    pub fn replaces_source(&self) -> bool {
+        self.previous.is_some()
+    }
+}
+
 /// Projects on disk, and the scenes inside them.
 ///
 /// Rooted explicitly rather than at the platform data root, so a test and a
@@ -235,8 +259,11 @@ impl Projects {
     }
 
     fn write_document(&self, project: &str, settings: ProjectSettings) -> Result<(), EditorError> {
-        let bytes = serde_json::to_vec_pretty(&ProjectDocument::new(project, settings))
-            .map_err(EditorError::Serialize)?;
+        self.write_project_document(project, &ProjectDocument::new(project, settings))
+    }
+
+    fn write_project_document(&self, project: &str, document: &ProjectDocument) -> Result<(), EditorError> {
+        let bytes = serde_json::to_vec_pretty(document).map_err(EditorError::Serialize)?;
         gx_fs::write_atomic(&self.gpx_path(project), &bytes).map_err(EditorError::Write)
     }
 
@@ -538,6 +565,117 @@ impl Projects {
     /// unreadable refuses by name instead of reading as absent, because that
     /// would compose every scene in it in the wrong space.
     pub fn settings(&self, project: &str) -> Result<ProjectSettings, EditorError> {
+        Ok(self.project_document(project)?.settings)
+    }
+
+    pub fn library_folders(
+        &self,
+        project: &str,
+    ) -> Result<gx_contracts::project::library_folders::LibraryFolders, EditorError> {
+        Ok(self.project_document(project)?.library_folders)
+    }
+
+    /// Apply one Library metadata edit under the project lock and publish it atomically.
+    pub fn update_library_folders<T>(
+        &self,
+        project: &str,
+        update: impl FnOnce(&mut gx_contracts::project::library_folders::LibraryFolders) -> Result<T, String>,
+    ) -> Result<T, EditorError> {
+        self.require_project(project)?;
+        let path = self.project_directory(project).join(".library-folders.lock");
+        let _lock = gx_fs::FileLock::exclusive(&path)
+            .map_err(|source| EditorError::Io { path, source })?;
+        let mut document = self.project_document(project)?;
+        let invalid = |detail| Refusal::ProjectSettingsInvalid { project: project.into(), detail };
+        let result = update(&mut document.library_folders).map_err(invalid)?;
+        document.schema_version = gx_contracts::project::PROJECT_SCHEMA_VERSION;
+        document.check(project).map_err(invalid)?;
+        self.write_project_document(project, &document)?;
+        Ok(result)
+    }
+
+    /// The named colours of a project's Library (11.122).
+    pub fn library_colours(
+        &self,
+        project: &str,
+    ) -> Result<gx_contracts::project::library_colours::LibraryColours, EditorError> {
+        Ok(self.project_document(project)?.library_colours)
+    }
+
+    /// Apply one Library colour edit under the project lock and publish it atomically. It takes the SAME lock as
+    /// [`Self::update_library_folders`]: both read the whole project document and write it back, so two locks would let a
+    /// folder edit and a colour edit lose each other's write.
+    pub fn update_library_colours<T>(
+        &self,
+        project: &str,
+        update: impl FnOnce(&mut gx_contracts::project::library_colours::LibraryColours) -> Result<T, String>,
+    ) -> Result<T, EditorError> {
+        self.require_project(project)?;
+        let path = self.project_directory(project).join(".library-folders.lock");
+        let _lock = gx_fs::FileLock::exclusive(&path)
+            .map_err(|source| EditorError::Io { path, source })?;
+        let mut document = self.project_document(project)?;
+        let invalid = |detail| Refusal::ProjectSettingsInvalid { project: project.into(), detail };
+        let result = update(&mut document.library_colours).map_err(invalid)?;
+        document.schema_version = gx_contracts::project::PROJECT_SCHEMA_VERSION;
+        document.check(project).map_err(invalid)?;
+        self.write_project_document(project, &document)?;
+        Ok(result)
+    }
+
+    /// The named effect stacks of a project's Library (11.122).
+    pub fn library_layer_styles(
+        &self,
+        project: &str,
+    ) -> Result<gx_contracts::project::library_layer_styles::LibraryLayerStyles, EditorError> {
+        Ok(self.project_document(project)?.library_layer_styles)
+    }
+
+    /// Apply one Library layer style edit under the project lock and publish it atomically. Same lock as the folder and colour edits:
+    /// all three read the whole project document and write it back.
+    pub fn update_library_layer_styles<T>(
+        &self,
+        project: &str,
+        update: impl FnOnce(&mut gx_contracts::project::library_layer_styles::LibraryLayerStyles) -> Result<T, String>,
+    ) -> Result<T, EditorError> {
+        self.require_project(project)?;
+        let path = self.project_directory(project).join(".library-folders.lock");
+        let _lock = gx_fs::FileLock::exclusive(&path)
+            .map_err(|source| EditorError::Io { path, source })?;
+        let mut document = self.project_document(project)?;
+        let invalid = |detail| Refusal::ProjectSettingsInvalid { project: project.into(), detail };
+        let result = update(&mut document.library_layer_styles).map_err(invalid)?;
+        document.schema_version = gx_contracts::project::PROJECT_SCHEMA_VERSION;
+        document.check(project).map_err(invalid)?;
+        self.write_project_document(project, &document)?;
+        Ok(result)
+    }
+
+    pub fn library_folder_view(
+        &self,
+        project: &str,
+    ) -> Result<gx_contracts::project::library_folders::LibraryFolderView, EditorError> {
+        let library = self.library_folders(project)?;
+        let assets = self.project_assets(project)?;
+        Ok(library.view(assets.iter().map(|asset| asset.asset_id.as_str())))
+    }
+
+    pub fn move_library_asset(
+        &self,
+        project: &str,
+        asset_id: &str,
+        folder_id: Option<&str>,
+    ) -> Result<(), EditorError> {
+        let known = self.project_assets(project)?.iter().any(|asset| asset.asset_id == asset_id);
+        self.update_library_folders(project, |library| {
+            if !known && !(folder_id.is_none() && library.asset_folders.contains_key(asset_id)) {
+                return Err(format!("unknown project Library asset {asset_id:?}"));
+            }
+            library.move_asset(asset_id, folder_id)
+        })
+    }
+
+    fn project_document(&self, project: &str) -> Result<ProjectDocument, EditorError> {
         self.require_project(project)?;
         let invalid = |detail: String| -> EditorError {
             Refusal::ProjectSettingsInvalid {
@@ -553,16 +691,18 @@ impl Projects {
                 let document: ProjectDocument =
                     serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
                 document.check(project).map_err(invalid)?;
-                return Ok(document.settings);
+                return Ok(document);
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(source) => return Err(EditorError::Io { path, source }),
         }
         let legacy = self.legacy_settings_path(project);
         match std::fs::read(&legacy) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string())),
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(|settings| ProjectDocument::new(project, settings))
+                .map_err(|error| invalid(error.to_string())),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ProjectSettings::before_3_15())
+                Ok(ProjectDocument::new(project, ProjectSettings::before_3_15()))
             }
             Err(source) => Err(EditorError::Io {
                 path: legacy,
@@ -882,8 +1022,96 @@ impl Projects {
         require_component(&scene.id, |id| Refusal::SceneIdInvalid { id })?;
         self.require_working_space(project, scene)?;
         let bytes = serde_json::to_vec_pretty(scene).map_err(EditorError::Serialize)?;
-        gx_fs::write_atomic(&self.scene_path(project, &scene.id), &bytes)
-            .map_err(EditorError::Write)
+        let path = self.scene_path(project, &scene.id);
+        if !path.try_exists().map_err(|source| EditorError::Io { path: path.clone(), source })? {
+            // A reused scene ID must not inherit the deleted scene's source.
+            let manifest = self.csv_manifest_path(project, &scene.id)?;
+            match std::fs::remove_file(&manifest) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => return Err(EditorError::Io { path: manifest, source }),
+            }
+        }
+        gx_fs::write_atomic(&path, &bytes).map_err(EditorError::Write)
+    }
+
+    fn csv_manifest_path(&self, project: &str, scene: &str) -> Result<PathBuf, EditorError> {
+        self.require_project(project)?;
+        require_component(scene, |id| Refusal::SceneIdInvalid { id })?;
+        Ok(self.project_directory(project).join("Data").join("Sources").join(format!("{scene}.csv.json")))
+    }
+
+    pub fn csv_source(&self, project: &str, scene: &str) -> Result<Option<ProjectCsv>, EditorError> {
+        let path = self.csv_manifest_path(project, scene)?;
+        match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|source| EditorError::Parse { path, source }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(EditorError::Io { path, source }),
+        }
+    }
+
+    /// Read and validate a proposed update without changing the current source.
+    pub fn prepare_csv_import(
+        &self,
+        project: &str,
+        scene: &str,
+        path: &Path,
+        delimiter: gx_contracts::csv_table::Delimiter,
+    ) -> Result<CsvImport, EditorError> {
+        let previous = self.csv_source(project, scene)?;
+        let (read, bytes) = crate::csv_source::read_csv_snapshot(path, delimiter, &Default::default())
+            .map_err(|error| csv_data_error(path, error))?;
+        let columns = gx_contracts::csv_table::column_change(
+            previous.as_ref().map_or(&[], |source| source.columns.as_slice()),
+            &read.table.columns,
+        );
+        Ok(CsvImport {
+            source: ProjectCsv {
+                file_name: read.file_name,
+                content_hash: read.content_hash,
+                delimiter,
+                columns: read.table.columns,
+                row_count: read.table.rows.len(),
+            },
+            columns,
+            previous,
+            bytes,
+        })
+    }
+
+    pub fn accept_csv_import(&self, project: &str, scene: &str, import: CsvImport) -> Result<ProjectCsv, EditorError> {
+        let manifest = self.csv_manifest_path(project, scene)?;
+        let _lock = self.lock_scenes(project)?;
+        self.read_scene(project, scene)?;
+        if self.csv_source(project, scene)? != import.previous {
+            return Err(csv_data_error(&manifest, "the CSV source changed; select the update again"));
+        }
+        let directory = manifest.parent().expect("CSV manifest has a parent");
+        std::fs::create_dir_all(directory).map_err(|source| EditorError::Io {
+            path: directory.to_owned(),
+            source,
+        })?;
+        let copy = self.csv_copy_path(project, &import.source.content_hash)?;
+        gx_fs::write_atomic(&copy, &import.bytes).map_err(EditorError::Write)?;
+        let record = serde_json::to_vec_pretty(&import.source).map_err(EditorError::Serialize)?;
+        gx_fs::write_atomic(&manifest, &record).map_err(EditorError::Write)?;
+        Ok(import.source)
+    }
+
+    fn csv_copy_path(&self, project: &str, hash: &ContentHash) -> Result<PathBuf, EditorError> {
+        require_hash(hash)?;
+        Ok(self.project_directory(project).join("Data").join(format!("{}.csv", hash.0)))
+    }
+
+    pub fn read_csv_table(&self, project: &str, scene: &str) -> Result<Option<gx_contracts::csv_table::TextTable>, EditorError> {
+        let Some(source) = self.csv_source(project, scene)? else { return Ok(None); };
+        let path = self.csv_copy_path(project, &source.content_hash)?;
+        let read = crate::csv_source::read_csv_file(&path, source.delimiter, &Default::default())
+            .map_err(|error| csv_data_error(&path, error))?;
+        if read.content_hash != source.content_hash {
+            return Err(csv_data_error(&path, "the project CSV no longer matches its imported copy"));
+        }
+        Ok(Some(read.table))
     }
 
     /// Read a scene back, through the same closed reader the engine uses.
@@ -963,6 +1191,25 @@ impl Projects {
         Ok(ids)
     }
 
+    /// Read the next free Scene ID with the project's scene write lock held.
+    pub(crate) fn next_scene_label(&self, project: &str) -> Result<String, EditorError> {
+        let mut labels = Vec::new();
+        for scene_id in self.list_scenes(project)? {
+            let path = self.scene_path(project, &scene_id);
+            let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
+            // Read just the label. A damaged scene without a readable label
+            // does not prevent other scenes in the project being created.
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if let Some(label) = value.get("sceneLabel").and_then(serde_json::Value::as_str) {
+                    labels.push(label.to_owned());
+                }
+            }
+        }
+        Ok(gx_contracts::ids::next_scene_label(
+            labels.iter().map(String::as_str),
+        ))
+    }
+
     /// Delete a scene. Absent is reported, never treated as success.
     pub fn delete_scene(&self, project: &str, scene_id: &str) -> Result<(), EditorError> {
         self.require_project(project)?;
@@ -1037,6 +1284,13 @@ fn copy_project_tree(
 /// work under a name they did not choose.
 /// A content address is 64 lowercase hex digits; anything else could name a
 /// path outside the project's asset folder.
+fn csv_data_error(path: &Path, error: impl std::fmt::Display) -> EditorError {
+    EditorError::Io {
+        path: path.to_owned(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()),
+    }
+}
+
 fn require_hash(hash: &ContentHash) -> Result<(), EditorError> {
     if hash.0.len() == 64
         && hash
@@ -1168,6 +1422,43 @@ mod tests {
             scene_label: None,
             objects: Vec::new(),
         }
+    }
+
+    #[test]
+    fn csv_import_keeps_the_validated_copy_and_rejects_stale_updates() {
+        use gx_contracts::csv_table::Delimiter::Comma;
+        let root = scratch("project-csv");
+        let projects = Projects::at_root(&root);
+        projects.create_project("News").unwrap();
+        projects.write_scene("News", &scene("title")).unwrap();
+        assert!(projects.read_csv_table("News", "title").unwrap().is_none());
+        let external = root.join("records.csv");
+        let mut csv = String::from("name,role\n");
+        for row in 1..=48 {
+            csv.push_str(if row == 48 { ",Anchor\n" } else { "001,Anchor\n" });
+        }
+        std::fs::write(&external, csv).unwrap();
+        let initial = projects.prepare_csv_import("News", "title", &external, Comma).unwrap();
+        std::fs::write(&external, "role\nGuest\n").unwrap();
+        projects.accept_csv_import("News", "title", initial).unwrap();
+        let pending = projects.prepare_csv_import("News", "title", &external, Comma).unwrap();
+        let stale = projects.prepare_csv_import("News", "title", &external, Comma).unwrap();
+        assert_eq!(pending.columns.removed, ["name"]);
+        std::fs::remove_file(external).unwrap();
+        let table = projects.read_csv_table("News", "title").unwrap().unwrap();
+        let records = crate::fit::csv_records(table);
+        assert_eq!(records.len(), 48);
+        assert_eq!(records[0].id, "1");
+        assert_eq!(records[0].values["name"], "001");
+        assert_eq!(records[47].id, "48");
+        assert_eq!(records[47].values["name"], "");
+        projects.accept_csv_import("News", "title", pending).unwrap();
+        assert!(projects.accept_csv_import("News", "title", stale).is_err());
+        assert_eq!(projects.read_csv_table("News", "title").unwrap().unwrap().rows, [vec!["Guest"]]);
+        projects.delete_scene("News", "title").unwrap();
+        projects.write_scene("News", &scene("title")).unwrap();
+        assert!(projects.read_csv_table("News", "title").unwrap().is_none());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1472,7 +1763,8 @@ mod tests {
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&file).unwrap(),
             serde_json::json!({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
+                "libraryFolders": {"folders": [], "assetFolders": {}, "nextFolderSequence": 0},
                 "name": "show",
                 "settings": { "workingColorSpace": "srgb", "colorDepth": "16" }
             })
@@ -1639,6 +1931,95 @@ mod tests {
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
+    #[test]
+    fn library_folders_upgrade_and_round_trip_through_the_gpx() {
+        let root = scratch("gpx-library");
+        let projects = Projects::at_root(root.clone());
+        projects.create_project("show").unwrap();
+        std::fs::write(
+            projects.gpx_path("show"),
+            br#"{"schemaVersion":1,"name":"show","settings":{"workingColorSpace":"srgb"}}"#,
+        ).unwrap();
+        assert!(projects.library_folders("show").unwrap().folders.is_empty());
+        projects.update_library_folders("show", |library| {
+            library.create("titles", "Titles", None)?;
+            library.create("openers", "Openers", Some("titles"))?;
+            library.move_asset("opening-graphic", Some("openers"))
+        }).unwrap();
+        let bytes = std::fs::read(projects.gpx_path("show")).unwrap();
+        let document: ProjectDocument = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(document.schema_version, 2);
+        assert_eq!(document.settings.working_color_space, WorkingColorSpace::Srgb);
+        let (reopened, name) = Projects::open_gpx(&projects.gpx_path("show")).unwrap();
+        assert_eq!(reopened.library_folders(&name).unwrap(), document.library_folders);
+        assert!(reopened.update_library_folders(&name, |library| library.delete("openers")).is_err());
+        assert_eq!(std::fs::read(projects.gpx_path("show")).unwrap(), bytes);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn library_colours_round_trip_through_the_gpx_beside_the_folders_and_an_older_project_reads_without_them() {
+        use gx_contracts::color::{Rgba, SourceColorSpace};
+        let root = scratch("gpx-colours");
+        let projects = Projects::at_root(root.clone());
+        projects.create_project("show").unwrap();
+        std::fs::write(
+            projects.gpx_path("show"),
+            br#"{"schemaVersion":2,"name":"show","settings":{"workingColorSpace":"srgb"}}"#,
+        ).unwrap();
+        assert!(projects.library_colours("show").unwrap().colours.is_empty());
+        let red = Rgba::new(1.0, 0.0, 0.0, 1.0, SourceColorSpace::Srgb);
+        let id = projects.update_library_colours("show", |library| library.create_named("Team red", red)).unwrap();
+        // A folder edit afterwards does not lose the colour, and a colour edit does not lose the folder.
+        projects.update_library_folders("show", |library| library.create("titles", "Titles", None)).unwrap();
+        projects.update_library_colours("show", |library| library.rename(&id, "Home red")).unwrap();
+        let (reopened, name) = Projects::open_gpx(&projects.gpx_path("show")).unwrap();
+        let colours = reopened.library_colours(&name).unwrap();
+        assert_eq!((colours.colours.len(), colours.colours[0].name.as_str(), colours.colours[0].color), (1, "Home red", red));
+        assert_eq!(reopened.library_folders(&name).unwrap().folders.len(), 1);
+        // A refused edit writes nothing.
+        let bytes = std::fs::read(projects.gpx_path("show")).unwrap();
+        assert!(reopened.update_library_colours(&name, |library| library.create_named("home RED", red)).is_err());
+        assert!(reopened.update_library_colours(&name, |library| library.delete("colour-9")).is_err());
+        assert_eq!(std::fs::read(projects.gpx_path("show")).unwrap(), bytes);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn library_layer_styles_round_trip_through_the_gpx_beside_the_folders_and_colours_and_an_older_project_reads_without_them() {
+        use gx_contracts::color::{Rgba, SourceColorSpace};
+        use gx_contracts::effect::{DropShadow, Effect, EffectInstance, Glow};
+        let root = scratch("gpx-layer-styles");
+        let projects = Projects::at_root(root.clone());
+        std::fs::create_dir_all(projects.project_directory("show")).unwrap();
+        std::fs::write(
+            projects.gpx_path("show"),
+            br#"{"schemaVersion":2,"name":"show","settings":{"workingColorSpace":"srgb"}}"#,
+        ).unwrap();
+        assert!(projects.library_layer_styles("show").unwrap().styles.is_empty());
+        let shadow = EffectInstance::new("drop-shadow", Effect::DropShadow(DropShadow::default()));
+        let glow = EffectInstance::new("glow", Effect::Glow(Glow::default()));
+        let id = projects.update_library_layer_styles("show", |library| library.create_named("Soft shadow", vec![shadow.clone()])).unwrap();
+        // A colour or folder edit afterwards does not lose the style, and a style edit does not lose them.
+        let red = Rgba::new(1.0, 0.0, 0.0, 1.0, SourceColorSpace::Srgb);
+        projects.update_library_colours("show", |library| library.create_named("Team red", red)).unwrap();
+        projects.update_library_folders("show", |library| library.create("titles", "Titles", None)).unwrap();
+        projects.update_library_layer_styles("show", |library| library.set_effects(&id, vec![glow.clone(), shadow.clone()])).unwrap();
+        let (reopened, name) = Projects::open_gpx(&projects.gpx_path("show")).unwrap();
+        let styles = reopened.library_layer_styles(&name).unwrap();
+        assert_eq!((styles.styles.len(), styles.styles[0].name.as_str(), styles.styles[0].effects.len()), (1, "Soft shadow", 2));
+        assert_eq!(styles.styles[0].effects[0], glow);
+        assert_eq!(reopened.library_colours(&name).unwrap().colours.len(), 1);
+        assert_eq!(reopened.library_folders(&name).unwrap().folders.len(), 1);
+        // A refused edit writes nothing.
+        let bytes = std::fs::read(projects.gpx_path("show")).unwrap();
+        assert!(reopened.update_library_layer_styles(&name, |library| library.create_named("soft SHADOW", vec![shadow.clone()])).is_err());
+        assert!(reopened.update_library_layer_styles(&name, |library| library.delete("style-9")).is_err());
+        assert!(reopened.update_library_layer_styles(&name, |library| library.set_effects(&id, vec![])).is_err());
+        assert_eq!(std::fs::read(projects.gpx_path("show")).unwrap(), bytes);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// File > Open: a project is opened from its `.gpx`, and only from one that is a project.
     #[test]
     fn a_project_opens_from_its_gpx_path_and_nothing_else_opens() {
@@ -1758,7 +2139,7 @@ mod tests {
             )
         };
         assert!(invalid(
-            br#"{"schemaVersion":2,"name":"show","settings":{"workingColorSpace":"srgb"}}"#
+            br#"{"schemaVersion":3,"name":"show","settings":{"workingColorSpace":"srgb"}}"#
         ));
         assert!(
             invalid(
@@ -1854,6 +2235,37 @@ mod tests {
             provenance: AssetProvenance::default(),
             color_space: None,
         }
+    }
+
+    #[test]
+    fn library_folder_commands_count_assets_without_moving_their_bytes() {
+        let root = scratch("library-commands");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let bytes = b"asset bytes";
+        let item = asset_item("Logo", "assets/images/logo.png", bytes);
+        let hash = item.checksum.as_ref().unwrap();
+        projects.adopt_asset("news", &item, bytes).unwrap();
+        let stored = projects.asset_file("news", hash).unwrap().unwrap();
+
+        let folder = projects.update_library_folders("news", |library| library.create_named("Brand", None)).unwrap();
+        assert_eq!(projects.library_folder_view("news").unwrap().unfiled_count, 1);
+        projects.move_library_asset("news", &item.asset_id, Some(&folder)).unwrap();
+        assert!(projects.move_library_asset("news", "missing", Some(&folder)).is_err());
+        let view = projects.library_folder_view("news").unwrap();
+        assert_eq!(view.unfiled_count, 0);
+        assert_eq!(view.folders[0].asset_count, 1);
+        assert_eq!(view.asset_folders[&item.asset_id], folder);
+        assert_eq!(projects.asset_file("news", hash).unwrap().unwrap(), stored);
+        assert_eq!(std::fs::read(&stored).unwrap(), bytes);
+        assert_eq!(projects.project_assets("news").unwrap()[0].path, item.path);
+
+        projects.move_library_asset("news", &item.asset_id, None).unwrap();
+        projects.update_library_folders("news", |library| library.delete(&folder)).unwrap();
+        let next = projects.update_library_folders("news", |library| library.create_named("Brand", None)).unwrap();
+        assert_ne!(next, folder);
+        assert_eq!(projects.library_folder_view("news").unwrap().unfiled_count, 1);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

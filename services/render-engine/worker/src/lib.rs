@@ -31,6 +31,7 @@ pub mod effect_chain;
 pub mod effects;
 pub mod emission;
 pub mod engine;
+pub mod fit;
 pub mod governor;
 pub mod gpu;
 pub mod headless;

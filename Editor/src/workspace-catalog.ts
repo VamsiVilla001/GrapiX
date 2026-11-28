@@ -7,7 +7,7 @@
 
 import type { AppKind, SavedWorkspace } from "./dock-model";
 import { CARD_SORT_LAYOUT } from "./workspace-layout";
-import { workspaceFromLayout } from "./workspace-io";
+import { workspaceWithPageLayout } from "./layout-bridge";
 import type { WorkspaceSet } from "./workspace-presets";
 
 export const EDITOR_DESIGN_ID = "factory.editor.design";
@@ -18,7 +18,7 @@ export const PANEL_ALIASES: Readonly<Record<string, string>> = {};
 export function factoryWorkspaces(app: AppKind): Readonly<Record<string, SavedWorkspace>> {
   if (app === "editor") {
     return {
-      [EDITOR_DESIGN_ID]: workspaceFromLayout(CARD_SORT_LAYOUT, {
+      [EDITOR_DESIGN_ID]: workspaceWithPageLayout(CARD_SORT_LAYOUT, {
         workspaceId: EDITOR_DESIGN_ID,
         name: "Design",
         origin: "factory",

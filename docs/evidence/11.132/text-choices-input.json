@@ -1,0 +1,54 @@
+{
+ "state": {
+  "decision": "Text choices in the Properties dock: Case, Align, Vertical align, Box layout and Fit (plan row 11.132, Figma B3d Style card), asked BEFORE coding (claude, 26 Nov 2026).",
+  "facts": "A text object stores choices: case (original, upper, lower, title, small-caps), align (left, center, right), vertical align (top, middle, bottom), layout (point: grows from its origin; paragraph: wraps inside its box) and auto fit (none, shrink, fit). The Properties dock edits numbers today (tracking, leading, size...), and the element card shows these choices read-only. No edit can change them: the command that sets one field of every selected object (setObjectField) has only opacity, position, rotation, scale, text, font, size, radius, width, height and draw order. The engine does NOT draw every value yet: the drawability check refuses, by name and with the owning plan row (11.51), small caps, auto fit other than none, vertical align other than top, and centre or right alignment on point text; upper, lower, title, paragraph layout and left alignment are drawn. A control that does nothing must be dimmed naming the row; a value shown must be one the app holds; a refusal names its reason; the same facts must reach an agent as a person (invariant 27); what the engine can draw is decided in Rust and never copied into the Editor. These choices are held values: they are not animatable. One undo per edit.",
+  "proposed": "Five new ObjectField variants (textCase, align, verticalAlign, layout, autoFit) applied by setObjectField to every selected TEXT object, one undoable command, refused by name for any other kind. A read-only Rust surface (a shell command) lists each field, its values with their words, and for each value whether the engine draws it and, if not, the owning row, computed by asking the drawability check itself so it cannot drift. The Properties dock shows a Text choices block for a selection that contains text: one select per field, showing the shared value or Mixed when the selected text objects differ; a value the engine cannot draw yet stays in the list but is dimmed with its reason and row, and choosing it is not offered. Selecting a non-text object hides the block."
+ },
+ "questions": {
+  "edit": {
+   "type": "choice",
+   "instructions": "How are the five choices changed?",
+   "criteria": {
+    "A": "Five new fields of the existing one-field edit, applied to every selected text object as one undoable command, refused by name for a non-text object.",
+    "B": "A new separate command per choice.",
+    "C": "By editing the saved scene file."
+   }
+  },
+  "undrawable": {
+   "type": "choice",
+   "instructions": "What does the dock do with a value the engine cannot draw yet (small caps, auto fit, vertical middle or bottom, centre or right on point text)?",
+   "criteria": {
+    "A": "Lists it but dimmed with the reason and the owning plan row, and does not let it be chosen.",
+    "B": "Lets it be chosen and stores it, and the engine refuses the graphic later.",
+    "C": "Hides it."
+   }
+  },
+  "source": {
+   "type": "choice",
+   "instructions": "Where does the knowledge of which values the engine can draw live?",
+   "criteria": {
+    "A": "In Rust: a surface built by asking the drawability check itself, read by the Editor, so the two cannot disagree.",
+    "B": "A list copied into the Editor's TypeScript.",
+    "C": "Nowhere: the Editor tries the edit and shows whatever refusal comes back."
+   }
+  },
+  "mixed": {
+   "type": "choice",
+   "instructions": "What does a select show when the selected text objects have different values?",
+   "criteria": {
+    "A": "Mixed, and choosing a value sets it on every selected text object.",
+    "B": "The first object's value.",
+    "C": "Nothing is selectable until the selection is narrowed to one object."
+   }
+  },
+  "animate": {
+   "type": "choice",
+   "instructions": "Can these choices be keyframed?",
+   "criteria": {
+    "A": "No: they are held values with no keyframe diamond; animating a switch between them is a text animator's job.",
+    "B": "Yes, with hold keys.",
+    "C": "Yes, interpolated."
+   }
+  }
+ }
+}

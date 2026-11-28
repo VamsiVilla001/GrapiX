@@ -74,6 +74,27 @@ fn playing_by_default() -> bool {
     true
 }
 
+/// Lifecycle of a scene on a Program layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProgramLayerPhase {
+    OnAir,
+    Leaving,
+    Queued,
+}
+
+/// One current or pending scene in the Program stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramLayerStatus {
+    pub layer: i32,
+    pub take_id: TakeId,
+    pub revision: Revision,
+    pub state: ProgramLayerPhase,
+    /// Current phase commitment frame or queued scene start frame.
+    pub frame: u64,
+}
+
 /// The engine's reported state. The single source for every operator display.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -87,7 +108,12 @@ pub struct EngineStatus {
     /// Derived from ADR-005 conditions. Never inferred from an adapter name
     /// (invariant 20).
     pub live_allowed: bool,
+    /// The scene on layer zero.
     pub program: Option<ProgramState>,
+    /// Sorted by layer, with the current scene before its queued replacement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layers: Option<Vec<ProgramLayerStatus>>,
     /// Empty means healthy. Order is not significant.
     pub degradations: Vec<Degradation>,
 }
@@ -323,8 +349,36 @@ mod tests {
             device_tier: DeviceTier::T0,
             live_allowed: true,
             program: None,
+            layers: None,
             degradations: Vec::new(),
         }
+    }
+
+    #[test]
+    fn layer_status_is_additive_and_preserves_queued_scenes() {
+        let mut report = status(ClockSource::Genlocked, ReferenceState::Locked);
+        let legacy = serde_json::to_value(&report).unwrap();
+        assert!(legacy.get("layers").is_none());
+        assert_eq!(
+            serde_json::from_value::<EngineStatus>(legacy).unwrap(),
+            report
+        );
+
+        report.layers = Some(vec![ProgramLayerStatus {
+            layer: -10,
+            take_id: TakeId("lower-third".into()),
+            revision: Revision(7),
+            state: ProgramLayerPhase::Queued,
+            frame: 120,
+        }]);
+        let with_layers = serde_json::to_value(&report).unwrap();
+        assert!(with_layers["program"].is_null());
+        assert_eq!(with_layers["layers"][0]["layer"], -10);
+        assert_eq!(with_layers["layers"][0]["state"], "queued");
+        assert_eq!(
+            serde_json::from_value::<EngineStatus>(with_layers).unwrap(),
+            report
+        );
     }
 
     #[test]

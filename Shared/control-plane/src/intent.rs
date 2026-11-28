@@ -119,11 +119,26 @@ pub fn check_reference(
     check_pin(take_id, revision, &held.content_hash, pin)
 }
 
+/// The page an operator believes is on a layer: the take and revision they looked at (12.10, decision Q8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedProgram {
+    pub take_id: TakeId,
+    pub revision: Revision,
+}
+
 /// Clear Program. Also intent-based: the operator asks, the engine says when.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+///
+/// With `expected` set the Clear removes the layer's scene only if it is that take and revision, so a page that was replaced
+/// between the operator's look and the click is never taken off air by mistake; it refuses by name and changes nothing. Without
+/// it the Clear takes off whatever is on the layer, as it always did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearRequest {
     pub at: TakeAt,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub expected: Option<ExpectedProgram>,
 }
 /// Ask Program to enter one authored timeline phase.
 ///
@@ -154,8 +169,13 @@ pub struct PhaseCommitted {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TakeCommitted {
-    /// In the engine's timebase.
+    /// The frame where the command takes effect, in the engine's timebase.
     pub frame: u64,
+    /// An incoming scene's later start after the outgoing scene's Out.
+    /// When absent, the incoming scene starts at frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub start_frame: Option<u64>,
     /// Rational, never a float (invariant 12).
     pub timebase: RationalRate,
     pub clock: ClockSource,
@@ -220,6 +240,7 @@ pub fn resolve_intent(at: TakeAt, now: &ClockState, lead: Lead) -> Result<TakeCo
 
     Ok(TakeCommitted {
         frame,
+        start_frame: None,
         timebase: now.timebase,
         clock: now.clock,
     })
@@ -237,6 +258,27 @@ mod tests {
             reference: ReferenceState::NotPresent,
             epoch: Epoch(1),
         }
+    }
+
+    #[test]
+    fn a_delayed_take_keeps_both_frames_on_the_wire() {
+        let mut committed =
+            resolve_intent(TakeAt::NextOpportunity, &clock(), Lead::CO_LOCATED).unwrap();
+        let legacy = serde_json::to_value(committed).unwrap();
+        assert!(legacy.get("startFrame").is_none());
+        assert_eq!(
+            serde_json::from_value::<TakeCommitted>(legacy).unwrap(),
+            committed
+        );
+
+        committed.start_frame = Some(1021);
+        let delayed = serde_json::to_value(committed).unwrap();
+        assert_eq!(delayed["frame"], 1001);
+        assert_eq!(delayed["startFrame"], 1021);
+        assert_eq!(
+            serde_json::from_value::<TakeCommitted>(delayed).unwrap(),
+            committed
+        );
     }
 
     #[test]
@@ -320,5 +362,21 @@ mod tests {
         // 0 and fire it immediately.
         let committed = resolve_intent(TakeAt::NextOpportunity, &c, Lead::LAN).unwrap();
         assert_eq!(committed.frame, u64::MAX);
+    }
+    /// 12.10: the expected page rides the Clear only when given, and an older sender's Clear (no field) reads as no expectation.
+    #[test]
+    fn a_clear_carries_its_expected_page_only_when_it_names_one() {
+        let plain = ClearRequest { at: TakeAt::NextOpportunity, expected: None };
+        let wire = serde_json::to_string(&plain).unwrap();
+        assert!(!wire.contains("expected"), "{wire}");
+        let old: ClearRequest = serde_json::from_str(&wire).unwrap();
+        assert_eq!(old, plain);
+        let named = ClearRequest {
+            at: TakeAt::NextOpportunity,
+            expected: Some(ExpectedProgram { take_id: TakeId("lower-third".into()), revision: Revision(3) }),
+        };
+        let wire = serde_json::to_string(&named).unwrap();
+        assert!(wire.contains(r#""expected":{"takeId":"lower-third","revision":3}"#), "{wire}");
+        assert_eq!(serde_json::from_str::<ClearRequest>(&wire).unwrap(), named);
     }
 }

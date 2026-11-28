@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "The Timeline's keyframe card (Figma B3 right panel), asked before coding (user, 24 Nov 2026).",
+  "facts": "The design's right panel, when a keyframe is selected, is titled 'Keyframe, Name plate, Position, frame 20' and has TIME (Frame '20 and 400 ms'), VALUE (x, y), INTERPOLATION (Over time, Path, Ease in %, Ease out %, buttons Linear, Ease, Hold, Open graph) and ELEMENT and NAME (Parent, Blend, Matte). In the contract each property (x, y, opacity...) is its own channel with its own keys, so a selected key belongs to one channel; a position change is two keys on two channels at one frame. Existing machinery: moveKeyframe (planMove), updateKeyframe (value and easing), planSetEasing, planEasyEase, planSetSegmentBezier, the graph, and the Parent, Blend, Matte menus built earlier today. There is no per-key spatial interpolation (Path) in the contract. The Properties area already shows a selected-element card (Style, Motion, Data). Rule: never show a control that does nothing; a value shown must be one the scene holds.",
+  "proposed": "While one or more keys are selected, the keyframe card replaces the element card in that area (the design does the same); with none selected the element card returns. One selected moment (same element, same frame) lists every selected channel's value; keys spread over several frames or elements show a short summary (how many, which frames) and only the easing buttons. Frame and each Value are editable (through moveKeyframe and updateKeyframe), Over time is a select of the contract's easings, Ease in and Ease out are shown as percentages from the curve but not editable yet, Path is not drawn, and Parent, Blend and Matte open the same menus as the timeline cells."
+ },
+ "questions": {
+  "placement": {
+   "type": "choice",
+   "instructions": "Where should the keyframe card appear?",
+   "criteria": {
+    "A": "Replace the element card while keys are selected, as the design does (as proposed).",
+    "B": "Show it below the element card, both at once.",
+    "C": "Show it only in a separate floating panel."
+   }
+  },
+  "many_keys": {
+   "type": "choice",
+   "instructions": "What should the card show when the selected keys are on different frames or elements?",
+   "criteria": {
+    "A": "A summary (count and frames) and the easing buttons, no value rows (as proposed).",
+    "B": "The values of the first selected key only.",
+    "C": "Nothing; the card appears only for exactly one key."
+   }
+  },
+  "editable": {
+   "type": "choice",
+   "instructions": "Which fields of the card should be editable now?",
+   "criteria": {
+    "A": "Frame, each Value and the easing; Ease in and out percentages and the element menus as stated, Path not drawn (as proposed).",
+    "B": "Nothing; the card is read only and the existing Properties panel edits values.",
+    "C": "Everything the design shows including Path, with Path doing nothing yet."
+   }
+  }
+ }
+}

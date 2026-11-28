@@ -119,6 +119,7 @@ const RULES: Record<string, Rule> = {
   "motion.play-phase": needScene,
   "motion.jump-hold": needScene,
   "motion.play": needScene,
+  "motion.add-key": all(needScene, needSelection, needIdle),
   "motion.easy-ease": all(needScene, needKeys, needIdle),
   "motion.easy-ease-in": all(needScene, needKeys, needIdle),
   "motion.easy-ease-out": all(needScene, needKeys, needIdle),
@@ -154,6 +155,7 @@ export const CHANGES_DOCUMENT: ReadonlySet<string> = new Set([
   "edit.line-up.spread-down",
   "motion.preset-in",
   "motion.preset-out",
+  "motion.add-key",
   "motion.easy-ease",
   "motion.easy-ease-in",
   "motion.easy-ease-out",
@@ -211,6 +213,8 @@ export interface Shortcut {
   readonly quiet?: true;
   /** A held key repeats the command (undo and redo step on while the keys are held); any other key is one press. */
   readonly repeats?: true;
+  /** The chord works with a text field in focus (Ctrl K opens the search from anywhere). Every other chord leaves a text field alone. */
+  readonly fromFields?: true;
 }
 
 const ctrl = (key: string, shift = false): Chord => ({ key, ctrl: true, shift });
@@ -218,6 +222,7 @@ const plain = (key: string, shift = false): Chord => ({ key, ctrl: false, shift 
 
 /** The only table of chords. The menu's shortcut labels are written from it. */
 export const SHORTCUTS: readonly Shortcut[] = [
+  { chord: ctrl("k"), command: "edit.search", label: "Ctrl K", fromFields: true },
   { chord: ctrl("s"), command: "file.save", label: "Ctrl S" },
   { chord: ctrl("s", true), command: "file.next-version", label: "Ctrl Shift S" },
   { chord: ctrl("z"), command: "edit.undo", label: "Ctrl Z", repeats: true },
@@ -225,6 +230,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { chord: ctrl("y"), command: "edit.redo", repeats: true },
   { chord: ctrl("j"), command: "edit.join", label: "Ctrl J", quiet: true },
   { chord: plain(" "), command: "motion.play", label: "Space" },
+  { chord: plain("k"), command: "motion.add-key", label: "K", quiet: true },
   { chord: plain("f9"), command: "motion.easy-ease", label: "F9" },
   { chord: plain("f9", true), command: "motion.easy-ease-in", label: "Shift F9" },
   { chord: ctrl("f9", true), command: "motion.easy-ease-out", label: "Ctrl Shift F9" },
@@ -279,12 +285,12 @@ export type KeyDecision =
   | { readonly kind: "refused"; readonly command: string; readonly reason: Unavailable; readonly quiet: boolean }
   | { readonly kind: "run"; readonly command: string };
 
-/** The shortcut a key press is, if any. */
-export function shortcutFor(press: KeyPress): Shortcut | undefined {
+/** The shortcut a key press is, if any, in the table given (the person's keys on top of the Editor's own, `effectiveKeys` in keymap.ts) or `SHORTCUTS`. */
+export function shortcutFor(press: KeyPress, shortcuts: readonly Shortcut[] = SHORTCUTS): Shortcut | undefined {
   if (press.altKey) return undefined;
   const control = press.ctrlKey || press.metaKey;
   const key = press.key.toLowerCase();
-  return SHORTCUTS.find((s) => s.chord.key === key && s.chord.ctrl === control && s.chord.shift === press.shiftKey);
+  return shortcuts.find((s) => s.chord.key === key && s.chord.ctrl === control && s.chord.shift === press.shiftKey);
 }
 
 /** What to do with a key press: leave it to the page (`pass`), say a command cannot run (`refused`), or run it.
@@ -292,10 +298,11 @@ export function shortcutFor(press: KeyPress): Shortcut | undefined {
  *  A key never leaves a text field, and Space never leaves a button or slider. A held key is not a second press, except
  *  for undo and redo. A key something else already handled is left alone. The command is never run when the registry
  *  says it cannot. */
-export function decideKey(press: KeyPress, focus: KeyFocus, context: CommandContext): KeyDecision {
-  if (press.defaultPrevented || focus.editing) return { kind: "pass" };
-  const shortcut = shortcutFor(press);
+export function decideKey(press: KeyPress, focus: KeyFocus, context: CommandContext, shortcuts: readonly Shortcut[] = SHORTCUTS): KeyDecision {
+  if (press.defaultPrevented) return { kind: "pass" };
+  const shortcut = shortcutFor(press, shortcuts);
   if (shortcut === undefined) return { kind: "pass" };
+  if (focus.editing && shortcut.fromFields !== true) return { kind: "pass" };
   if (press.repeat && shortcut.repeats !== true) return { kind: "pass" };
   if (focus.control && shortcut.chord.key === " ") return { kind: "pass" };
   const reason = unavailable(shortcut.command, context);

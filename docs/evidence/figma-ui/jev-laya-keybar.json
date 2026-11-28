@@ -1,0 +1,129 @@
+{
+ "input": {
+  "state": {
+   "decision": "The Timeline's KEYFRAME button bar (Figma B3 toolbar), asked before coding (user, 24 Nov 2026: run Jev and Laya while coding).",
+   "facts": "The design's Timeline toolbar has a KEYFRAME group: '+ Add (K)', Linear, 'Ease (F9)', Ease in, Ease out, Hold, then at the right Snap, Markers and Zoom to fit. The Editor already has the logic: planEasyEase (both, in, out; F9, Shift F9, Ctrl Shift F9 are bound), planSetEasing (linear, hold, ease-in-out, custom bezier), a per-property key toggle in the Keyframe panel that creates a key at the playhead from the value at that frame, and a key drag that snaps to other keys within 3 frames. It has no timeline markers (a marker object kind exists but it is a scene object, not a timeline marker), no K shortcut, and no zoom-to-fit button. The current toolbar has Keys (an easing select), Presets and Phases groups, which stay until the user decides (11.131 against invariant 86). A key's easing is stored as one bezier per segment; 'Ease' is the Easy Ease bezier, not a stored easing name. Rule: never show a control that does nothing, and refuse by name with the reason.",
+   "proposed": "Add a KEYFRAME row of buttons above the existing groups, removing nothing. '+ Add (K)' adds a key at the playhead on every property the selected elements already animate (value taken from the curve at that frame), and refuses with 'Click a property's diamond to start keyframing it' when none animate. Linear, Ease, Ease in, Ease out, Hold act on the selected keys through the existing plans. Zoom to fit is added. Snap and Markers are left out until they exist."
+  },
+  "questions": {
+   "add_key": {
+    "type": "choice",
+    "instructions": "What should '+ Add (K)' do?",
+    "criteria": {
+     "A": "Add a key at the playhead on every property the selected elements already animate, and refuse with a reason when none animate (as proposed).",
+     "B": "Add a key at the playhead on every animatable property of the selected elements, creating new tracks.",
+     "C": "Open a menu of the selected element's properties and add a key on the one chosen."
+    }
+   },
+   "placement": {
+    "type": "choice",
+    "instructions": "Where should the KEYFRAME row go while the Presets and Phases question is open?",
+    "criteria": {
+     "A": "A new row above the existing groups, removing nothing.",
+     "B": "Replace the existing Keys group with it now and move the easing select into a menu.",
+     "C": "Wait to add it until the whole toolbar is rebuilt."
+    }
+   },
+   "snap_markers": {
+    "type": "choice",
+    "instructions": "The design shows Snap and Markers buttons. Neither exists as a feature (snap is always on in a key drag; there are no timeline markers). What should the toolbar do?",
+    "criteria": {
+     "A": "Leave them out until the features exist, and record that in the plan row.",
+     "B": "Show them disabled with a reason on hover, as the design shows them.",
+     "C": "Show Snap as a working toggle by adding the switch now, and leave Markers out."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "add_key": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "placement": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "snap_markers": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1491,
+   "output_tokens": 0,
+   "state_tokens": 409,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "add_key": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3348,
+     "B": 0.283,
+     "C": 0.3822
+    },
+    "confidence": 0.0068,
+    "answer_confidence": 0.3822,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "placement": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5943,
+     "B": 0.2597,
+     "C": 0.146
+    },
+    "confidence": 0.1441,
+    "answer_confidence": 0.5943,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "snap_markers": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5289,
+     "B": 0.1057,
+     "C": 0.3654
+    },
+    "confidence": 0.1423,
+    "answer_confidence": 0.5289,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

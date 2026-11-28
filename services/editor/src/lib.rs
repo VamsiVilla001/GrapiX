@@ -18,12 +18,16 @@
 
 #![forbid(unsafe_code)]
 
+pub mod asset_usage;
 pub mod command;
+pub mod csv_source;
 pub mod design_system;
 pub mod fidelity;
 pub mod figma;
 pub mod figma_rich;
 pub mod import;
+pub mod library_import;
+pub mod fit;
 pub mod preview;
 pub mod project;
 pub mod publish;

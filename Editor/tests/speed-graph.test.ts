@@ -159,6 +159,22 @@ describe("speed graph", () => {
     expect(graph.keys[0]!.outHandle).toBeUndefined();
   });
 
+  it("Bounce and Elastic have no handles either, on either side of the key: they are not cubic beziers", () => {
+    const graph = buildSpeedGraph(
+      channel([key(0, 0, "bounce"), key(50, 50, "elastic"), key(100, 100)]),
+      viewport,
+      160,
+      100,
+    );
+    expect(graph.keys.map((k) => [k.outHandle, k.inHandle])).toEqual([
+      [undefined, undefined],
+      [undefined, undefined],
+      [undefined, undefined],
+    ]);
+    // The curve itself is still drawn (a polyline), so the author sees the rebound.
+    expect(graph.polyline.length).toBeGreaterThan(2);
+  });
+
   it("a dragged handle round-trips into a control point the contract accepts", () => {
     const from = key(0, 0, "ease-in-out");
     const to = key(100, 100);

@@ -50,8 +50,8 @@ body {
   background: var(--base);
   color: var(--text);
   font-family: var(--font);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
   display: grid;
   grid-template-rows: auto 1fr auto auto;
@@ -689,6 +689,8 @@ button.primary:hover:not(:disabled) {
 
 .asset-manager-mount [role="region"] {
   display: grid;
+  /* One column as wide as the dock, however long a path or a note is. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -742,6 +744,113 @@ button.primary:hover:not(:disabled) {
   padding: 3px 7px;
   font-size: 12px;
 }
+
+/* --- The Library (Figma B13): folders, tabs, filter chips, a grid of asset cards, the selected asset ----------------------------------------- */
+.asset-manager-mount > [role="region"] > button[data-action="importFiles"] { justify-self: start; background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+/* The Folders list: one row per folder, indented by its depth, the buttons below in two columns. A row's name and count are in its button; the node keeps them for an agent. */
+.asset-manager-mount [id="library/folders"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 6px; }
+.asset-manager-mount [id="library/folders"]::before { content: attr(aria-description); grid-column: 1 / -1; color: var(--sk-ink-3); font: var(--sk-text-caption); padding-bottom: 2px; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"] { grid-column: 1 / -1; font-size: 0; padding: 0; border: 0; background: transparent; cursor: default; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"]::before { display: none; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"] > button { display: block; width: 100%; text-align: left; font-size: 12px; padding: 3px 8px; border: 0; border-left: 2px solid transparent; background: transparent; color: var(--sk-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"][aria-level="2"] > button { padding-left: 20px; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"][aria-level="3"] > button { padding-left: 32px; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"][aria-level="4"] > button { padding-left: 44px; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"][aria-level="5"] > button { padding-left: 56px; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"][aria-selected="true"] > button { border-left-color: var(--sk-ember); background: var(--sk-ember-tint); color: var(--sk-ember-deep); font-weight: 600; }
+.asset-manager-mount [id="library/folders"] > button { font-size: 12px; padding: 3px 7px; }
+.asset-manager-mount [id="library/folders"] > button:disabled { opacity: .45; }
+/* The Move to list in the selected asset's card, and the import review: the same row-of-buttons treatment, and each status reads "Label: value". */
+.asset-manager-mount [id="library/detail/move-to"] > [role="listitem"] { font-size: 0; padding: 0; border: 0; background: transparent; }
+.asset-manager-mount [id="library/detail/move-to"] > [role="listitem"]::before { display: none; }
+.asset-manager-mount [id="library/detail/move-to"] > [role="listitem"] > button { display: block; width: 100%; text-align: left; font-size: 12px; padding: 2px 8px; border-color: transparent; background: transparent; color: var(--sk-ink-2); }
+.asset-manager-mount [id="library/detail/move-to"] > [role="listitem"][aria-selected="true"] > button { border-left: 2px solid var(--sk-ember); background: var(--sk-ember-tint); color: var(--sk-ember-deep); }
+.asset-manager-mount [id="library/detail/move-to"] > [role="listitem"] > button:disabled { opacity: 1; }
+.asset-manager-mount [id="library/import"] { padding: 8px; background: var(--sk-surface-2); border: 1px solid var(--sk-ember); }
+.asset-manager-mount [id="library/import"]::before { content: attr(aria-label); color: var(--sk-ink); font: var(--sk-text-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/import"]::after { content: attr(aria-description); color: var(--sk-ink-3); font: var(--sk-text-caption); }
+.asset-manager-mount [id^="library/import/"]::before { content: attr(aria-label) ": "; color: var(--sk-ink-3); }
+.asset-manager-mount [id="library/import"] > button { justify-self: start; }
+.asset-manager-mount [id="library/import"] > button[data-action="importApply"] { background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+.asset-manager-mount [id="library/import"] > button:disabled { opacity: .5; }
+/* The count of a filter or a tab is in its button; its node keeps the value for an agent, and the text is not drawn twice. */
+.asset-manager-mount [id="library/tabs"] > [role="listitem"], .asset-manager-mount [id="library/filters"] > [role="listitem"] { font-size: 0; }
+.asset-manager-mount [id="library/tabs"] > [role="listitem"] > button { font-size: 12px; }
+.asset-manager-mount [id="asset-manager/list"]:empty::after, .asset-manager-mount [id="library/detail"]:empty::after { content: attr(aria-description); grid-column: 1 / -1; color: var(--sk-ink-3); font: var(--sk-text-caption); }
+.asset-manager-mount { overflow-x: hidden; }
+.asset-manager-mount [role="status"] { overflow-wrap: anywhere; min-width: 0; }
+.asset-manager-mount [id="library/folders"] > [role="listitem"]::before { flex: 1 1 auto; }
+.asset-manager-mount [id="library/tabs"], .asset-manager-mount [id="library/filters"] { display: flex; flex-wrap: wrap; gap: 2px 4px; }
+.asset-manager-mount [id="library/tabs"] > [role="listitem"], .asset-manager-mount [id="library/filters"] > [role="listitem"] { padding: 0; border: 0; background: transparent; cursor: default; }
+.asset-manager-mount [id="library/tabs"] > [role="listitem"]::before, .asset-manager-mount [id="library/filters"] > [role="listitem"]::before { display: none; }
+.asset-manager-mount [id="library/tabs"] > [role="listitem"] > button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--sk-ink-3); padding: 4px 8px; }
+.asset-manager-mount [id="library/tabs"] > [role="listitem"][aria-selected="true"] > button { border-bottom-color: var(--sk-ember); color: var(--sk-ink); font-weight: 600; }
+.asset-manager-mount [id="library/tabs"] > [role="listitem"] > button:disabled { opacity: .45; }
+.asset-manager-mount [id="library/filters"] > [role="listitem"] > button { font: 400 10px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 1px 7px; border-radius: 1px; border: 1px solid var(--sk-border-strong); background: var(--sk-canvas); color: var(--sk-ink-3); }
+.asset-manager-mount [id="library/filters"] > [role="listitem"][aria-selected="true"] > button { border-color: var(--sk-ember); background: var(--sk-ember-tint); color: var(--sk-ember-deep); }
+.asset-manager-mount [id="library/filters"] > [role="listitem"] > button:disabled { opacity: .45; }
+.asset-manager-mount [id="asset-manager/list"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px; }
+.asset-manager-mount [id="asset-manager/list"] > [role="listitem"] { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 5px; padding: 6px; background: var(--sk-surface-2); min-width: 0; }
+.asset-manager-mount [id="asset-manager/list"] > [role="listitem"]::before { flex: none; }
+.asset-manager-mount [id="asset-manager/list"] > [role="listitem"] > img { order: -1; width: 100%; height: 64px; object-fit: contain; background: var(--sk-viewport); }
+.asset-manager-mount [id="asset-manager/list"] > [role="listitem"] > [role="gridcell"] { order: -1; flex: none; display: grid; place-items: center; height: 64px; background: var(--sk-viewport); font: var(--sk-text-caption); text-align: center; padding: 4px; overflow: hidden; }
+.asset-manager-mount [id="asset-manager/list"] > [role="listitem"] > [role="gridcell"]::before { display: none; }
+.asset-manager-mount [role="status"][data-tone] { align-self: flex-start; font: 400 10px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 1px; border: 1px solid var(--sk-border-strong); background: var(--sk-canvas); color: var(--sk-ink-3); }
+.asset-manager-mount [role="status"][data-tone="ok"] { color: var(--sk-ok-ink); border-color: var(--sk-ok); background: var(--sk-ok-tint); }
+.asset-manager-mount [role="status"][data-tone="warn"] { color: var(--sk-warn-ink); border-color: var(--sk-warn); background: var(--sk-warn-tint); }
+.asset-manager-mount [role="status"][data-tone="danger"] { color: var(--sk-danger-ink); border-color: var(--sk-danger); background: var(--sk-danger-tint); }
+.asset-manager-mount [id="library/detail"] { display: grid; gap: 4px; padding: 8px; background: var(--sk-surface-2); border: 1px solid var(--sk-border); }
+.asset-manager-mount [id="library/detail"]::before { content: attr(aria-label); color: var(--sk-ink); font: var(--sk-text-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/detail"] > img { width: 100%; max-height: 120px; object-fit: contain; background: var(--sk-viewport); }
+.asset-manager-mount [id="library/detail"] > button:first-of-type { justify-self: start; }
+.asset-manager-mount [id="library/detail"] [role="list"] { display: grid; gap: 2px; }
+.asset-manager-mount [id="library/detail"] [role="list"]::before { content: attr(aria-label); color: var(--sk-ink-3); font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; }
+.asset-manager-mount [id="library/detail"] [role="listitem"] { padding: 3px 6px; background: transparent; cursor: default; }
+.asset-manager-mount [id="library/note"], .asset-manager-mount [id="library/folders-note"], .asset-manager-mount [role="status"]:not([data-tone]) { color: var(--sk-ink-3); font: var(--sk-text-caption); }
+
+/* The Colours tab: swatch cards in a grid, and the selected colour's card with a swatch bar. A row's name and value are in its button; the node keeps them for an agent. */
+.asset-manager-mount [id="library/colours"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.asset-manager-mount [id="library/colours"]::before { content: attr(aria-description); grid-column: 1 / -1; color: var(--sk-ink-3); font: var(--sk-text-caption); }
+.asset-manager-mount [id="library/colours"] > button { grid-column: auto; font-size: 12px; padding: 3px 7px; }
+.asset-manager-mount [id="library/colours"] > button:disabled { opacity: .45; }
+.asset-manager-mount [id="library/colours"] > [role="listitem"] { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 4px; padding: 6px; min-width: 0; font-size: 0; background: var(--sk-surface-2); }
+.asset-manager-mount [id="library/colours"] > [role="listitem"]::before { content: ""; display: block; flex: none; height: 38px; font-size: 0; background: var(--swatch, repeating-conic-gradient(var(--sk-surface-3) 0 25%, var(--sk-canvas) 0 50%) 0 0 / 10px 10px); border: 1px solid var(--sk-border-strong); }
+.asset-manager-mount [id="library/colours"] > [role="listitem"] > button { display: block; width: 100%; font-size: 11px; text-align: left; padding: 2px 4px; border: 0; background: transparent; color: var(--sk-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/colour-detail"] { display: grid; gap: 4px; padding: 8px; background: var(--sk-surface-2); border: 1px solid var(--sk-border); }
+.asset-manager-mount [id="library/colour-detail"]::before { content: attr(aria-label); color: var(--sk-ink); font: var(--sk-text-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/colour-detail"][data-swatch]::after { content: ""; order: -1; display: block; height: 44px; background: var(--swatch); border: 1px solid var(--sk-border-strong); }
+.asset-manager-mount [id="library/colour-detail"] > button { justify-self: start; }
+.asset-manager-mount [id="library/colour-detail"] > button:disabled { opacity: .45; }
+
+/* The Layer styles tab: one card per style, its name and effects in the card's button; the selected style's card below. */
+.asset-manager-mount [id="library/layer-styles"] { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.asset-manager-mount [id="library/layer-styles"]::before { content: attr(aria-description); color: var(--sk-ink-3); font: var(--sk-text-caption); }
+.asset-manager-mount [id="library/layer-styles"] > button { justify-self: start; font-size: 12px; padding: 3px 7px; }
+.asset-manager-mount [id="library/layer-styles"] > button:disabled { opacity: .45; }
+.asset-manager-mount [id="library/layer-styles"] > [role="listitem"] { padding: 0; font-size: 0; background: var(--sk-surface-2); min-width: 0; }
+.asset-manager-mount [id="library/layer-styles"] > [role="listitem"]::before { display: none; }
+.asset-manager-mount [id="library/layer-styles"] > [role="listitem"] > button { display: block; width: 100%; font-size: 12px; text-align: left; padding: 6px 8px; border: 0; background: transparent; color: var(--sk-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/layer-style-detail"] { display: grid; gap: 4px; padding: 8px; background: var(--sk-surface-2); border: 1px solid var(--sk-border); }
+.asset-manager-mount [id="library/layer-style-detail"]::before { content: attr(aria-label); color: var(--sk-ink); font: var(--sk-text-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-manager-mount [id="library/layer-style-detail"] > button { justify-self: start; }
+.asset-manager-mount [id="library/layer-style-detail"] > button:disabled { opacity: .45; }
+
+/* --- The Data panel (Figma B4): where the graphic's data comes from and the fields found in it ---------------------------------------------- */
+.data-mount > [role="region"] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.data-mount > [role="region"] > button { justify-self: start; }
+.data-mount > [role="region"] > button[data-action="addSampleData"] { background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+.data-mount > [role="region"] > button:disabled { opacity: .5; }
+.data-mount [role="list"] { display: grid; gap: 2px; list-style: none; padding: 0; margin: 0; }
+.data-mount [role="list"]::before { content: attr(aria-label); color: var(--sk-ink-3); font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; padding: 4px 0 2px; }
+.data-mount [role="listitem"] { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 4px 8px; background: transparent; border: 0; border-left: 2px solid transparent; font: var(--sk-text-body); color: var(--sk-ink-2); }
+.data-mount [role="listitem"]::before { content: attr(aria-label); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.data-mount [role="listitem"][aria-selected="true"] { background: var(--sk-surface-2); border-left-color: var(--sk-ink-3); }
+.data-mount [id="data/fields"] > [role="listitem"] { font: var(--sk-text-body); }
+.data-mount [id="data/fields"] > [role="listitem"] { color: var(--sk-ink-2); }
+.data-mount [id="data/fields"] > [role="listitem"] { text-align: right; font-family: var(--sk-font-mono); font-size: 10px; color: var(--sk-ink-3); }
+.data-mount [id="data/fields"] > [role="listitem"]::before { text-align: left; font: var(--sk-text-body); color: var(--sk-ink-2); }
+.data-mount [role="status"][data-tone] { font: 400 10px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border: 1px solid var(--sk-border-strong); background: var(--sk-canvas); color: var(--sk-ink-3); }
+.data-mount [role="status"]:not([data-tone]) { color: var(--sk-ink-3); font: var(--sk-text-caption); overflow-wrap: anywhere; }
 
 /* The control contract is a compact handoff, not a second inspector. */
 .control-contract-mount [role="region"],
@@ -979,6 +1088,10 @@ button.primary:hover:not(:disabled) {
   width: 72px;
   padding: 3px 6px;
 }
+
+/* Stagger settings (11.77): a short number field and two switches. */
+#stagger-step { width: 52px; }
+#stagger-reverse, #stagger-centre { width: auto; padding: 0; }
 
 .autokey-control {
   display: flex;
@@ -1372,6 +1485,15 @@ kbd { color: var(--dim); font-family: var(--font); margin-left: 20px; }
 .property-section [role="gridcell"]::before { content: attr(aria-label); color: var(--dim); font-size: 12px; }
 .property-section button { background: transparent; font-size: 12px; padding: 1px 4px; min-height: 21px; }
 .property-section [role="gridcell"] { grid-template-columns: minmax(58px,1fr) minmax(42px,75px) 51px; gap: 4px; }
+/* Text choices (11.132): a choice is a group of options drawn as small chips after the choice's name. The group's own text (its value,
+   for an agent and a screen reader) is hidden; the selected chip shows it. A dimmed chip says why in its tooltip. */
+.property-section [role="group"][id^="inspector/"] { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 2px 0; min-height: 22px; font-size: 0; }
+.property-section [role="group"][id^="inspector/"]::before { content: attr(aria-label); flex: 0 0 62px; color: var(--dim); font-size: 12px; }
+.property-section [role="group"][id^="inspector/"] > [role="listitem"] { display: contents; }
+.property-section [role="group"][id^="inspector/"] > [role="listitem"]::before { display: none; }
+.property-section [role="group"][id^="inspector/"] > [role="listitem"] > button { font-size: 11px; padding: 1px 6px; min-height: 19px; border: 1px solid var(--sk-border-strong); border-radius: 2px; color: var(--sk-ink-2); }
+.property-section [role="group"][id^="inspector/"] > [role="listitem"] > button:disabled { opacity: .4; cursor: not-allowed; }
+.property-section [role="group"][id^="inspector/"] > [role="listitem"][aria-selected="true"] > button { border-color: var(--sk-ember); background: var(--sk-ember-tint); color: var(--sk-ember-deep); opacity: 1; cursor: default; }
 .property-value { min-width: 0; width: 100%; padding: 2px 3px; min-height: 22px; text-align: right; color: var(--accent); background: transparent; border: 1px solid transparent; border-radius: 2px; font: inherit; }
 .property-value:hover { border-color: var(--rule); }
 .property-value:focus { background: var(--sk-canvas); border-color: var(--accent); outline: none; }
@@ -1392,7 +1514,8 @@ select { min-width: 0; max-width: 100%; color: var(--text); background: var(--sk
 .scene-manager-mount [role="listitem"] { padding: 5px 6px; gap: 3px; border-color: var(--sk-surface-2); }
 .scene-manager-mount [role="listitem"] > button { padding: 2px 4px; font-size: 12px; min-height: 21px; }
 .scene-manager-mount [role="status"] { font-size: 12px; }
-.scene-manager-summary { color: var(--dim); font-size: 12px; margin: 7px 0; }
+/* The project line holds a long path: three lines at most, the whole of it in the tooltip, never a word split to fit. */
+.scene-manager-summary { color: var(--dim); font-size: 12px; margin: 7px 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .graphic-search { width: 100%; min-width: 0; margin: 0 0 8px; padding: 5px 7px; background: var(--sk-canvas); border: 1px solid var(--rule); }
 .preview-panel > h2 { margin-bottom: 5px; padding-bottom: 6px; }
 .preview-panel .preview-settings { margin-bottom: 6px; }
@@ -1559,7 +1682,7 @@ button[disabled][title] { cursor: not-allowed; }
 #preset-save-dialog .dialog-choice legend { padding: 0 4px; color: var(--dim); font-size: 12px; }
 #preset-save-dialog .dialog-choice label { display: flex; align-items: center; gap: 6px; }
 #preset-save-dialog button[type="submit"][disabled] { opacity: .5; }
-.timeline-bar { grid-template-rows: auto auto 24px minmax(0, 1fr); }
+.timeline-bar { grid-template-rows: auto auto auto 24px minmax(0, 1fr); } /* head, KEYFRAME bar, tools, ruler, rows */
 /* Preset browser reuses the card styling; its buttons read as actions, not text. */
 #preset-browser-mount [role="region"] { display: grid; gap: 6px; }
 #preset-browser-mount [role="list"] { display: grid; gap: 6px; list-style: none; }
@@ -1607,6 +1730,11 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
 .font-import { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 8px; padding: 8px; border: 1px solid var(--rule); }
 .font-import > input { width: 100%; min-width: 0; }
 .font-import .font-link-row { margin-bottom: 0; }
+.font-installed { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 8px; padding: 8px; border: 1px solid var(--rule); }
+.font-installed > summary { cursor: pointer; }
+.font-installed:not([open]) > :not(summary) { display: none; }
+.font-installed > input, .font-installed > select { width: 100%; min-width: 0; }
+.font-installed .font-link-row { margin-bottom: 0; }
 /* The sample is the point of the line: drawn large, in the font itself. */
 .asset-manager-mount [role="gridcell"][id$="/sample"] { color: var(--text); font-size: 18px; line-height: 1.3; }
 .asset-manager-mount [role="gridcell"][id$="/sample"]::before { font-family: var(--mono); font-size: 12px; }
@@ -1691,7 +1819,7 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
 .engine-frame[data-status="stale"] .engine-image,
 .engine-frame[data-status="unavailable"] .engine-image,
 .engine-frame[data-status="refused"] .engine-image { opacity: .4; }
-.engine-detail { margin: 0; padding: 6px 8px; font-size: 12px; color: var(--sk-danger-ink); }
+.engine-detail { margin: 0; padding: 6px 8px; font-size: 12px; color: var(--sk-danger-ink); max-height: 3.4em; overflow-y: auto; overflow-wrap: anywhere; }
 .engine-detail:empty { display: none; }
 
 /* --- Scene Manager list view (11.72) -------------------------------------
@@ -1739,6 +1867,12 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
 /* --- Tab groups (11.73) ---------------------------------------------------
    A group is a tab strip over a run of panels, one showing. The panels keep
    their own content; the tab replaces the heading and the fold. */
+/* At 1440 by 900 the right dock is about 444 px: Preview took 230 and the two tab groups sat at 120 each, so the dock overflowed and Properties had four rows.
+   Preview may shrink to 190 and scroll; the Library group needs only 96; the Properties group takes three shares to the Library's one above its 140 floor.
+   These act while a dock holds no sizes of its own; sizes the author drags are stored inline and win. */
+.dock-group[data-group="inspector-group"] { flex-grow: 3; min-height: 140px; }
+.dock-group[data-group="library-group"] { min-height: 96px; }
+.dock-region[data-region="right"] > [data-panel="preview"] { flex: 0 1 auto; min-height: 190px; overflow-y: auto; }
 .dock-group { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 120px; overflow: hidden; border-bottom: 4px solid var(--sk-canvas); }
 /* The groups share the column's height; the showing panel scrolls inside its own group, so the column itself does not scroll. */
 .dock-group > [data-panel]:not(.tab-inactive) { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
@@ -1830,8 +1964,13 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
 .mask-matte { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 8px 0 0; border-top: 1px solid var(--line, #333); font-size: 11px; }
 
 /* 11.111: what the Pen will make, said before the first click. */
-.pen-creates { font-size: 11px; max-width: 96px; }
-.pen-creates-note { font-size: 11px; opacity: 0.8; align-self: center; max-width: 220px; }
+.pen-creates { font-size: 11px; min-width: 92px; max-width: 110px; }
+.pen-creates-note { font-size: 11px; opacity: 0.8; align-self: center; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* On-demand toolbar groups (visibility decision of 26 Nov, toolbar-context.ts): a hidden group or button takes no room. */
+.creation-tools [hidden] { display: none !important; }
+.tool-context { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 0 6px; border-left: 1px solid var(--sk-ember-tint-border, var(--rule)); border-right: 1px solid var(--sk-ember-tint-border, var(--rule)); background: var(--sk-ember-tint, transparent); }
+.tool-context .pen-creates-note { flex: 0 1 auto; max-width: 300px; margin-left: 6px; }
+#search-open { white-space: nowrap; }
 
 /* 11.117: the masks of the selected layer on the canvas. */
 .overlay-mask { fill: none; stroke: #f2c230; stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -1855,3 +1994,400 @@ body.matte-whip #viewport-overlay, body.matte-whip #object-manager, body.matte-w
 .overlay-feather-point { fill: var(--sk-ink); stroke: #3dd6d0; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .overlay-feather-reach { fill: none; stroke: #3dd6d0; stroke-width: 1; opacity: 0.6; vector-effect: non-scaling-stroke; pointer-events: none; }
 .overlay-feather-reach.is-inward { stroke-dasharray: 4 3; }
+
+/* --- The Editor header as designed (the new Figma UI, row 11.67) -------------------------------------------------------------------
+   Row 1: the menus, and the context line at the right (28 px). Row 2: the ribbon (40 px): the mark, the tools, and at the right the
+   engine chip, undo, redo and Publish. The open scenes and the scene's identity are over the picture, in the viewport. The file buttons are menu items; they stay in
+   the DOM, hidden, because a menu item runs the element. */
+.bar {
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "menu menu menu" "brand tools right";
+  gap: 0 12px;
+}
+.app-menubar { grid-area: menu; height: 28px; }
+.bar > .brand { grid-area: brand; align-self: center; min-height: 40px; }
+.bar > .creation-tools { grid-area: tools; grid-row: auto; grid-column: auto; min-height: 40px; }
+.bar > .ribbon-right { grid-area: right; display: flex; align-items: center; gap: 6px; min-height: 40px; }
+.bar > .actions { display: none; }
+.context-line { font: var(--sk-text-mono-small); color: var(--sk-ink-3); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ribbon-right .icon-only { width: 29px; padding: 4px; background: transparent; border-color: transparent; }
+.ribbon-right .icon-only:disabled { opacity: 0.4; }
+.ribbon-right .icon-only img { margin: 0; }
+.ribbon-right .primary { background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); font-weight: 600; }
+.engine-chip {
+  font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; white-space: nowrap;
+  padding: 3px 7px; border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-tag); color: var(--sk-ink-3);
+}
+.engine-chip[data-tone="ok"] { color: var(--sk-ok-ink); border-color: var(--sk-ok); background: var(--sk-ok-tint); }
+.engine-chip[data-tone="warn"] { color: var(--sk-warn-ink); border-color: var(--sk-warn); background: var(--sk-warn-tint); }
+.engine-chip[data-tone="bad"] { color: var(--sk-danger-ink); border-color: var(--sk-danger); background: var(--sk-danger-tint); }
+
+/* --- The Layout dropdown and the Layouts dialog (11.96) ---------------------------------------------------------------------------- */
+.layout-switch { display: flex; align-items: center; gap: 6px; }
+.layout-switch[hidden] { display: none; }
+.layout-switch .label { font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; color: var(--sk-ink-3); }
+.layout-switch select { min-width: 118px; height: 25px; padding: 0 6px; background: var(--sk-surface-2); color: var(--sk-ink); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-control); }
+#layouts-dialog { margin: auto; width: 500px; max-width: calc(100vw - 32px); padding: 14px; color: var(--text); background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-card); box-shadow: 0 8px 28px #000a; }
+#layouts-dialog::backdrop { background: #000a; }
+.layouts-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.layouts-head h2 { margin: 0; font: var(--sk-text-title); font-size: 16px; line-height: 22px; }
+.layouts-list { list-style: none; display: flex; flex-direction: column; gap: 1px; margin: 0 0 8px; padding: 0; }
+.layouts-list button { display: flex; width: 100%; justify-content: space-between; align-items: baseline; gap: 12px; padding: 6px 8px; text-align: left; background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 0; color: var(--sk-ink-2); }
+.layouts-list button:hover { background: var(--sk-surface); }
+.layouts-list button[aria-selected="true"] { background: var(--sk-ember-tint); color: var(--sk-ink); }
+.layouts-list button.in-use { border-left-color: var(--sk-ember); }
+.layouts-list .layout-detail { font: var(--sk-text-mono-small); color: var(--sk-ink-3); white-space: nowrap; }
+.layouts-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.layouts-actions .primary { background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+.layouts-actions .danger { border-color: var(--sk-danger); color: var(--sk-danger-ink); }
+.layouts-actions button:disabled { opacity: 0.45; }
+.layouts-name-form { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.layouts-name-form[hidden] { display: none; }
+.layouts-name-form label { display: flex; align-items: center; gap: 6px; flex: 1; }
+.layouts-name-form input { flex: 1; min-width: 0; padding: 3px 6px; height: 25px; }
+.layouts-message { min-height: 16px; margin: 0 0 6px; color: var(--sk-ink-2); }
+.layouts-message[data-tone="bad"] { color: var(--sk-danger-ink); }
+.layouts-message[data-tone="good"] { color: var(--sk-ok-ink); }
+.layouts-note { margin: 0; color: var(--sk-ink-3); font: var(--sk-text-caption); }
+/* The global primary button is full width; in a row of buttons it is not. */
+.ribbon-right .primary, .layouts-actions .primary, .layouts-name-form .primary { width: auto; }
+
+/* --- Search everything, Ctrl K (the new Figma UI, E1) ---------------------------------------------------------------------------- */
+.ribbon-search { display: flex; align-items: center; justify-content: space-between; gap: 18px; width: 210px; height: 25px; padding: 0 8px; background: var(--sk-surface-2); color: var(--sk-ink-3); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-control); }
+.ribbon-search kbd { margin: 0; font: var(--sk-text-mono-small); color: var(--sk-ink-4); }
+.search-dialog { margin: 0; position: fixed; inset: 72px auto auto 50%; transform: translateX(-50%); width: 660px; max-width: calc(100vw - 32px); padding: 0; color: var(--text); background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-card); box-shadow: 0 8px 28px #000a; }
+.search-dialog::backdrop { background: #0008; }
+.search-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--sk-border); }
+.search-head input { flex: 1; min-width: 0; height: 28px; padding: 0 6px; font: var(--sk-text-title); font-size: 14px; background: transparent; border: 0; color: var(--sk-ink); outline: none; }
+.search-head kbd { margin: 0; padding: 1px 6px; font: var(--sk-text-mono-small); color: var(--sk-ink-3); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-tag); }
+.search-results { max-height: 52vh; overflow: auto; padding: 4px 0; }
+.search-group { padding: 8px 14px 3px; font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; color: var(--sk-ink-3); }
+.search-option { display: flex; width: 100%; justify-content: space-between; align-items: baseline; gap: 16px; padding: 6px 14px; text-align: left; background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 0; color: var(--sk-ink-2); min-height: 28px; }
+.search-option[aria-selected="true"] { background: var(--sk-ember-tint); border-left-color: var(--sk-ember); color: var(--sk-ink); }
+.search-option.blocked { color: var(--sk-ink-4); }
+.search-option .search-detail { font: var(--sk-text-mono-small); color: var(--sk-ink-3); white-space: nowrap; }
+.search-option.blocked .search-detail { color: var(--sk-ink-4); }
+.search-more, .search-none { padding: 4px 14px; font: var(--sk-text-caption); color: var(--sk-ink-3); }
+.search-message { min-height: 16px; margin: 0; padding: 2px 14px; color: var(--sk-warn-ink); }
+.search-note { margin: 0; padding: 8px 14px 10px; border-top: 1px solid var(--sk-border); font: var(--sk-text-caption); color: var(--sk-ink-3); }
+/* The ribbon has to fit the window: the design has no "Scene tools" caption and the search box shrinks to its key. */
+.bar > .creation-tools .tool-description { display: none; }
+@media (max-width: 1700px) {
+  .ribbon-search { width: auto; gap: 8px; }
+  .ribbon-search span { display: none; }
+}
+/* The line-up buttons no longer step aside on a narrow window: since 26 Nov they show only with two or more elements selected
+   (toolbar-context.ts), and the path tools that crowded the ribbon show only while the Pen is in use. */
+
+/* --- The scene's identity and the open scenes, over the picture (the new Figma UI) ----------------------------------------------------- */
+.viewport-pane .scene-tabs { display: flex; gap: 3px; align-items: flex-end; margin: 0; padding: 4px 8px 0; border: 0; border-bottom: 1px solid var(--sk-border); }
+.viewport-pane .scene-tabs[hidden] { display: none; }
+.viewport-pane .scene-identity { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; padding: 0; }
+.viewport-pane .scene-identity .field { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; flex: 0 1 auto; max-width: none; }
+.viewport-pane .pane-head h2 { white-space: nowrap; font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; color: var(--sk-ink-3); }
+.viewport-pane .scene-identity .label { white-space: nowrap; font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; color: var(--sk-ink-3); }
+.viewport-pane .scene-identity input { width: 190px; height: 25px; padding: 3px 6px; }
+#scene-label { width: 76px; }
+#scene-key-field[hidden] { display: none; }
+
+/* --- The Elements list (the new Figma UI, B2) --------------------------------------------------------------------------------------- */
+.elements-add { display: flex; gap: 6px; margin-bottom: 8px; }
+.elements-add button { flex: 1 1 0; min-width: 0; padding: 2px 4px; white-space: nowrap; }
+.object-more { margin-top: 10px; border-top: 1px solid var(--sk-border); padding-top: 6px; }
+.object-more > summary { cursor: pointer; color: var(--sk-ink-3); font: var(--sk-text-caption); }
+.object-more[open] > summary { margin-bottom: 6px; }
+/* One line to an element: the eye, the name, what it is, and the lock when it is locked. */
+#object-manager { gap: 0; }
+#object-manager > [role="row"] {
+  grid-template-columns: 14px 18px minmax(0, 1fr) auto 14px;
+  grid-template-areas: "caret vis name tag lock";
+  column-gap: 3px;
+  min-height: 28px;
+  padding: 0 6px 0 calc(2px + var(--depth, 0) * 14px);
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+#object-manager > [role="row"][aria-selected="true"] { border-left-color: var(--sk-ember); background: var(--sk-ember-tint); }
+#object-manager [id$="/name"] { font: var(--sk-text-body); color: var(--sk-ink); }
+#object-manager [id$="/kind"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#object-manager > [role="row"]::after { content: attr(data-tag); grid-area: tag; font: var(--sk-text-mono-small); color: var(--sk-ink-3); white-space: nowrap; pointer-events: none; }
+#object-manager button[data-action="toggleVisibility"], #object-manager button[data-action="toggleLock"] {
+  min-width: 0; width: 18px; height: 22px; min-height: 0; padding: 0; border: 0; background: transparent; font-size: 0; color: transparent;
+}
+#object-manager button[data-action="toggleVisibility"]::before, #object-manager button[data-action="toggleLock"]::before {
+  content: ""; display: block; width: 12px; height: 12px; margin: auto; background-color: var(--sk-ink-3);
+  -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat;
+}
+#object-manager button[data-action="toggleVisibility"] { --icon: url("icons/eye.svg"); }
+#object-manager button[data-action="toggleLock"] { --icon: url("icons/lock-simple.svg"); opacity: 0; width: 14px; }
+#object-manager button[data-action="expand"], #object-manager button[data-action="collapse"] { width: 14px; }
+#object-manager > [role="row"]:hover button[data-action="toggleLock"], #object-manager > [role="row"][data-locked="true"] button[data-action="toggleLock"] { opacity: 1; }
+#object-manager > [role="row"][data-locked="true"] button[data-action="toggleLock"]::before { background-color: var(--sk-ember-deep); }
+#object-manager > [role="row"][data-hidden="true"] button[data-action="toggleVisibility"]::before { opacity: 0.35; }
+#object-manager > [role="row"][data-hidden="true"] button[data-action="toggleVisibility"] { border: 0; background: transparent; color: transparent; }
+#object-manager > [role="row"][data-locked="true"] button[data-action="toggleLock"] { border: 0; background: transparent; }
+
+/* --- The selected element's card (the new Figma UI, B2) ---------------------------------------------------------------------------- */
+.element-card { margin-bottom: 8px; }
+.card-head { padding: 0 0 6px; font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; color: var(--sk-ink-3); }
+.card-section { padding: 4px 0 6px; border-top: 1px solid var(--sk-border); }
+.card-title { margin: 2px 0 4px; font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; color: var(--sk-ink-3); }
+.card-row { display: grid; grid-template-columns: minmax(62px, 27%) 1fr auto; align-items: center; gap: 8px; min-height: 24px; }
+.card-label { color: var(--sk-ink-3); font: var(--sk-text-body); }
+.card-value { padding: 2px 8px; min-height: 22px; display: flex; align-items: center; background: var(--sk-surface); border: 1px solid var(--sk-border); border-radius: var(--sk-radius-control); color: var(--sk-ink); font: var(--sk-text-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-link { padding: 0 6px; min-height: 22px; background: transparent; border: 0; color: var(--sk-ember-deep); font: var(--sk-text-caption); text-decoration: underline; cursor: pointer; }
+.card-empty { margin: 2px 0; color: var(--sk-ink-3); font: var(--sk-text-caption); }
+
+/* --- Empty graphic (S1) and a font that blocks Publish (S2), over the picture (the new Figma UI) ---------------------------------------- */
+.viewport-stage { position: relative; }
+.viewport-empty { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; pointer-events: none; text-align: center; }
+.viewport-empty[hidden] { display: none; }
+.viewport-empty-title { margin: 0; font: var(--sk-text-title); color: var(--sk-ink); }
+/* Guides sit behind one button in the composition header: seven controls on a row made the header three rows tall. The list opens over the stage and does not move it. */
+.viewport-pane > .pane-head { position: relative; }
+.guide-tools { position: static; }
+.guide-tools > summary { cursor: pointer; list-style: none; height: 25px; padding: 3px 9px; display: inline-flex; align-items: center; background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-control); font: var(--sk-text-body); color: var(--sk-ink); }
+.guide-tools > summary::-webkit-details-marker { display: none; }
+.guide-tools[open] > summary { border-color: var(--sk-ember); }
+.guide-tools-body { position: absolute; z-index: 20; top: 100%; left: 12px; right: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-control); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+.viewport-start { width: min(920px, 96%); max-height: 86%; margin-top: 4px; overflow: auto; pointer-events: auto; text-align: left; }
+.start-card { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 10px; }
+.start-panel { background: var(--sk-surface); border: 1px solid var(--sk-border); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.start-heading { margin: 0; font: var(--sk-text-title); color: var(--sk-ink); }
+.start-tiles { display: flex; flex-wrap: wrap; gap: 8px; }
+.start-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: calc(50% - 4px); padding: 8px 10px; text-align: left; background: var(--sk-surface-2); border: 1px solid var(--sk-border); border-radius: var(--sk-radius-control); }
+.start-tile-current { border-color: var(--sk-ember); }
+.start-tile-title { font: var(--sk-text-title); color: var(--sk-ink); }
+.start-tile-body { font: var(--sk-text-caption); color: var(--sk-ink-3); white-space: normal; }
+.start-tile:disabled { opacity: .5; cursor: default; }
+.start-rows { display: flex; flex-direction: column; }
+.start-row-graphic { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 6px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--sk-border); border-radius: 0; }
+.start-row-graphic:disabled { opacity: .6; cursor: default; }
+.start-row-name { font: var(--sk-text-body); color: var(--sk-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.start-card .chip { flex: none; font: 400 10px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 1px; border: 1px solid var(--sk-border-strong); color: var(--sk-ink-3); background: var(--sk-canvas); }
+.start-card .chip[data-tone="ok"] { color: var(--sk-ok-ink); border-color: var(--sk-ok); background: var(--sk-ok-tint); }
+.start-card .chip[data-tone="danger"] { color: var(--sk-danger-ink); border-color: var(--sk-danger); background: var(--sk-danger-tint); }
+.start-field { display: grid; grid-template-columns: 88px 1fr; align-items: center; }
+@media (max-width: 1100px) { .start-card { grid-template-columns: 1fr; } }
+.font-band { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: var(--sk-danger-tint); border-bottom: 1px solid var(--sk-danger); color: var(--sk-danger-ink); font: var(--sk-text-body); }
+.font-band[hidden] { display: none; }
+.font-band-actions { display: flex; gap: 6px; flex: none; }
+.font-band-actions button { border-color: var(--sk-danger); color: var(--sk-danger-ink); background: transparent; }
+/* The viewport pane has optional rows (the font band, the open scenes), so it is a column and the stage takes what is left: a grid of
+   fixed rows would give the stage's share to whichever row came to be third. */
+.viewport-pane { display: flex; flex-direction: column; }
+.viewport-pane > .viewport-stage { flex: 1 1 0; min-height: 0; min-width: 0; }
+.viewport-pane > .scene-tabs, .viewport-pane > .font-band, .viewport-pane > .pane-head, .viewport-pane > .viewer-footer { flex: none; }
+/* The composition row has more in it than one line holds (the name, the Scene ID, and the viewport's own controls): it wraps, and the
+   identity keeps the width of what is typed in it. */
+.viewport-pane .pane-head { flex-wrap: wrap; row-gap: 4px; align-items: center; }
+.viewport-pane .scene-identity { flex: 0 0 auto; }
+
+/* --- Timeline: the PARENT, BLEND and MATTE columns of a layer row (B3) ------------------------------------------------ */
+.timeline-layer-name { flex: 1 1 0; min-width: 0; }
+.timeline-layer-cell { flex: 0 0 90px; width: 90px; min-height: 22px; height: 22px; padding: 0 6px; border: 0; border-left: 1px solid var(--sk-surface-2); border-radius: 0; background: transparent; color: var(--sk-ink-3); font: var(--sk-text-body); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-layer-cell[data-layer-column="blend"] { flex-basis: 110px; width: 110px; }
+.timeline-layer-cell[data-layer-column="matte"] { flex-basis: 130px; width: 130px; }
+.timeline-layer-cell:hover, .timeline-layer-cell:focus-visible { background: var(--sk-surface-2); color: var(--sk-ink); }
+.timeline-layer-cell[data-inert] { color: var(--sk-ink-4, var(--dim)); }
+.timeline-layer-cell[data-warn] { color: var(--sk-danger-ink); }
+.column-menu { min-width: 190px; }
+.column-menu button[aria-checked="true"]::before { content: "¹3  "; color: var(--sk-ember); }
+.column-menu button:disabled { opacity: .5; }
+.column-menu-heading { margin: 4px 0 2px; padding: 0 9px; color: var(--sk-ink-4, var(--dim)); font: var(--sk-text-label, 600 10px/14px Manrope, sans-serif); letter-spacing: .06em; text-transform: uppercase; }
+.timeline-ruler .layer-column-heading { display: flex; align-items: center; padding: 0; box-sizing: border-box; }
+.timeline-layer-cells { display: flex; flex: none; margin-right: -7px; }
+.timeline-ruler .layer-column-heading .tl-col { flex: 0 0 auto; padding: 0 6px; }
+.timeline-ruler .layer-column-heading .tl-col-name { flex: 1 1 0; padding-left: 9px; }
+.timeline-ruler .layer-column-heading .tl-col-parent { width: 90px; }
+.timeline-ruler .layer-column-heading .tl-col-blend { width: 110px; }
+.timeline-ruler .layer-column-heading .tl-col-matte { width: 130px; }
+.timeline-ruler .layer-column-heading .tl-col-parent, .timeline-ruler .layer-column-heading .tl-col-blend, .timeline-ruler .layer-column-heading .tl-col-matte { box-sizing: border-box; border-left: 1px solid var(--sk-surface-2); text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
+.timeline-bar[data-columns="on"] .timeline, .timeline-bar[data-columns="on"] .timeline-ruler { grid-template-columns: 570px minmax(0,1fr); }
+/* The playhead handle lives in the ruler track, which must start where the ticks start: after the label columns, 240px with them off and 570px with them on. */
+.timeline-bar[data-columns="on"] .timeline-ruler-track { left: 570px; }
+.timeline-bar[data-columns="off"] .timeline-layer-cell, .timeline-bar:not([data-columns]) .timeline-layer-cell { display: none; }
+.timeline-bar[data-columns="off"] .tl-col-parent, .timeline-bar[data-columns="off"] .tl-col-blend, .timeline-bar[data-columns="off"] .tl-col-matte, .timeline-bar:not([data-columns]) .tl-col-parent, .timeline-bar:not([data-columns]) .tl-col-blend, .timeline-bar:not([data-columns]) .tl-col-matte { display: none; }
+
+/* --- Timeline: the KEYFRAME bar (B3) ------------------------------------------------------------------------------------ */
+.keyframe-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--sk-surface-2); border-bottom: 1px solid var(--rule); }
+.keyframe-bar-label { margin-right: 2px; color: var(--sk-ink-3); font: var(--sk-text-label, 600 10px/12px Manrope, sans-serif); letter-spacing: .06em; text-transform: uppercase; }
+.keyframe-bar-gap { flex: 1 1 0; }
+.keyframe-bar button { width: auto; min-height: 26px; height: 26px; padding: 0 12px; white-space: nowrap; }
+.keyframe-bar button.primary { background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+.keyframe-bar button.ghost { background: transparent; border-color: transparent; color: var(--sk-ink-2); }
+.keyframe-bar button.active { border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+.keyframe-bar button:disabled { opacity: .45; }
+
+/* --- The keyframe card (B3): time, value, interpolation and the element's menus ------------------------------------------- */
+.key-card-area { display: block; }
+.key-card-area[hidden] { display: none; }
+.key-card-row { grid-template-columns: 76px minmax(0, 1fr); }
+.key-card-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.key-card-input, .key-card-select, .key-card-cell { width: 100%; min-width: 0; min-height: 26px; height: 26px; padding: 0 8px; background: var(--sk-canvas); border: 1px solid var(--sk-border); border-radius: var(--sk-radius-control, 2px); color: var(--sk-ink); font: var(--sk-text-mono, 500 11px/16px "JetBrains Mono", monospace); text-align: left; }
+.key-card-input { text-align: right; }
+.key-card-cell { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.key-card-cell:hover, .key-card-cell:focus-visible, .key-card-input:focus-visible, .key-card-select:focus-visible { border-color: var(--sk-ember); }
+.key-card-suffix, .key-card-note { color: var(--sk-ink-3); font: var(--sk-text-caption, 500 11px/14px Manrope, sans-serif); }
+.key-card-note { display: block; margin: 2px 0 0 84px; }
+.key-card-value { color: var(--sk-ink); font: var(--sk-text-mono, 500 11px/16px "JetBrains Mono", monospace); }
+.key-card-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.key-card-buttons button { width: auto; min-height: 26px; height: 26px; padding: 0 12px; }
+.key-card-buttons button.primary { background: var(--sk-ember-tint); border-color: var(--sk-ember); color: var(--sk-ember-deep); }
+.key-card-buttons button.ghost { background: transparent; border-color: transparent; color: var(--sk-ink-2); }
+.key-card-hint { margin: 8px 0 0; color: var(--sk-ink-3); font: var(--sk-text-caption, 500 11px/14px Manrope, sans-serif); }
+
+/* Publish checks (B6): what Check graphic found, above the Publish button. */
+.publish-checks { display: flex; flex-direction: column; gap: 8px; }
+.publish-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.publish-checks .chip, .publish-check .chip { font: 400 10px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 1px; border: 1px solid var(--sk-border-strong); color: var(--sk-ink-3); background: var(--sk-canvas); }
+.publish-checks .chip[data-tone="ok"] { color: var(--sk-ok-ink); border-color: var(--sk-ok); background: var(--sk-ok-tint); }
+.publish-checks .chip[data-tone="warn"] { color: var(--sk-warn-ink); border-color: var(--sk-warn); background: var(--sk-warn-tint); }
+.publish-check-list { display: flex; flex-direction: column; }
+.publish-check { display: grid; grid-template-columns: 44px 56px 1fr; align-items: center; gap: 8px; padding: 5px 6px; border-bottom: 1px solid var(--sk-border); }
+.publish-check-label { font-weight: 600; color: var(--sk-ink); }
+.publish-check-text { color: var(--sk-ink-2); }
+.publish-check[data-state="fix"] .publish-check-text { color: var(--sk-warn-ink); }
+.publish-check[data-state="idle"] .publish-check-text { color: var(--sk-ink-3); }
+.publish-check-run { margin: 2px 6px 6px 114px; font: 400 11px/16px var(--mono); padding: 2px 8px; }
+.publish-check-details { margin: 0; padding: 4px 6px 6px 114px; list-style: none; color: var(--sk-ink-3); font-size: 11px; }
+.publish-check-detail { overflow-wrap: anywhere; }
+.publish-note { margin: 0; }
+.publish-field .key-card-value { grid-column: 2 / 4; overflow-wrap: anywhere; }
+
+/* The visibility decision of 26 Nov (docs/design/ui-visibility-2026-11-26.md): the composition name opens the Composition popover,
+   the footer chip opens the not-drawn list. Popovers float over the viewport and close on Escape or a press outside. */
+.pane-head { position: relative; }
+.composition-open { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--sk-ink); font-weight: 600; font-size: 13px; padding: 2px 6px; border-radius: 2px; }
+.composition-open:hover, .composition-open[aria-expanded="true"] { background: var(--sk-surface-2); }
+.composition-open .caret { color: var(--sk-ink-3); font-size: 10px; }
+.composition-popover, .footer-popover { position: absolute; z-index: 40; display: grid; gap: 8px; padding: 12px; min-width: 320px; max-width: 420px; background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.composition-popover[hidden], .footer-popover[hidden] { display: none; }
+.composition-popover { top: 100%; left: 72px; }
+.composition-popover .scene-identity { display: grid; gap: 6px; justify-content: stretch; }
+.composition-popover .scene-identity .field { justify-content: space-between; }
+.composition-popover .scene-identity input { width: 200px; }
+.composition-popover .frame-control { justify-content: space-between; }
+.composition-popover .guide-tools-body { display: flex; flex-wrap: wrap; gap: 4px; }
+.viewer-footer { position: relative; }
+.footer-popover { bottom: 100%; left: 8px; margin-bottom: 6px; }
+.footer-popover h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--sk-ink); }
+.not-drawn-chip { font: 400 10px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 1px; border: 1px solid var(--sk-warn); background: var(--sk-warn-tint); color: var(--sk-warn-ink); }
+.viewer-footer [hidden] { display: none !important; }
+
+/* The Composition popover's rows: a label column and a control column. The view note is the DRAFT chip's tooltip, not header text. */
+.pane-head .viewport-note { display: none; }
+.composition-popover .scene-identity .field, .composition-popover .frame-control, .composition-popover .popover-row { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 8px; }
+.composition-popover .label, .composition-popover .frame-control > span { color: var(--sk-ink-3); font-size: 12px; text-transform: none; letter-spacing: 0; }
+.composition-popover .scene-identity input, .composition-popover select { width: 100%; }
+.composition-popover .popover-controls { display: flex; align-items: center; gap: 8px; }
+.composition-popover .guide-tools > summary { cursor: pointer; color: var(--sk-ink-2); font-size: 12px; }
+
+/* The timeline's on-demand groups (visibility decision of 26 Nov 2026): popovers over the timeline, not a row. */
+.timeline-bar { position: relative; }
+.timeline-tools-wrap { border-bottom: 0; }
+.timeline-tools-wrap .timeline-tools { display: contents; }
+.timeline-popover { position: absolute; z-index: 40; top: 64px; right: 12px; display: grid; gap: 8px; margin: 0; padding: 12px; min-width: 240px; background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.timeline-popover[hidden] { display: none; }
+.timeline-popover h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--sk-ink); }
+.timeline-popover .frame-control { justify-content: space-between; }
+.tl-group.timeline-popover { flex-wrap: wrap; }
+#stagger-popover { right: auto; }
+.keyframe-bar-caret { min-width: 20px; padding: 0 4px; margin-left: -4px; }
+
+/* The text choices as dropdown fields (Figma B3d v2): label, a field with the value, and its list under it. */
+.property-section [role="group"][id^="inspector/"]:has(> .choice-field) { position: relative; flex-wrap: nowrap; }
+.choice-field { flex: 1 1 auto; min-width: 0; display: flex; justify-content: space-between; align-items: center; height: 22px; padding: 0 6px; font-size: 12px; text-align: left; color: var(--sk-ink); background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: 2px; }
+.choice-field::after { content: "▾"; margin-left: 6px; color: var(--dim); }
+.choice-field[aria-expanded="true"] { border-color: var(--sk-ember); }
+.choice-list { position: absolute; z-index: 30; top: 100%; left: 62px; right: 0; display: grid; padding: 3px; background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: 3px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); font-size: 12px; }
+.choice-list[hidden] { display: none; }
+.choice-list > [role="listitem"] { display: block; }
+.property-section [role="group"][id^="inspector/"] .choice-list > [role="listitem"] > button { display: grid; width: 100%; text-align: left; font-size: 12px; padding: 4px 8px; min-height: 22px; border: 0; background: transparent; }
+.property-section [role="group"][id^="inspector/"] .choice-list > [role="listitem"] > button:not(:disabled):hover { background: var(--sk-ember-tint); }
+.choice-reason { font-size: 10px; line-height: 1.3; color: var(--dim); white-space: normal; }
+.choice-list > [role="listitem"][aria-selected="true"] > button { color: var(--sk-ember-deep); font-weight: 600; }
+.choice-list > [role="listitem"] > button:disabled { opacity: .45; cursor: not-allowed; }
+.choice-list > [role="listitem"][aria-selected="true"] > button:disabled { opacity: 1; cursor: default; }
+
+/* Properties, one list (Figma B3d v2): while the selection or tool calls for them, Pivot, Masks and Effect Controls stand under
+   Properties in one scrolling column, each with its header. */
+.dock-group.has-sections { overflow-y: auto; }
+.dock-group.has-sections > [data-panel]:not(.tab-inactive) { flex: 0 0 auto; overflow: visible; min-height: auto; }
+.dock-group > [data-panel].as-section { border-top: 1px solid var(--rule); padding-top: 6px; }
+.dock-group > [data-panel].as-section > h2,
+.dock-group > [data-panel].as-section > .panel-title-row > h2 { display: block; margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--sk-ink); }
+.properties-add { display: flex; align-items: center; gap: 6px; padding: 8px 0 4px; border-top: 1px solid var(--rule); margin-top: 8px; }
+.properties-add-label { flex: 0 0 62px; color: var(--dim); font-size: 12px; }
+.properties-add button { font-size: 12px; min-height: 22px; padding: 0 8px; }
+.properties-add button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The one-line status bar (visibility decision of 26 Nov 2026): Library, the latest message, the engine's frame time; the full
+   history opens above it. */
+.log-bar.status-bar { position: relative; display: flex; align-items: center; gap: 8px; height: 26px; max-height: 26px; padding: 0 10px; overflow: visible; }
+.status-bar > button { min-height: 20px; height: 20px; padding: 0 8px; font-size: 12px; }
+#status-message { flex: 1 1 auto; min-width: 0; text-align: left; background: transparent; border-color: transparent; }
+#status-message:hover, #status-message[aria-expanded="true"] { border-color: var(--sk-border-strong); }
+#status-latest { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--mono, monospace); font-size: 12px; color: var(--sk-ink-2); }
+#status-latest.good { color: var(--good, #5fbf7f); }
+#status-latest.bad { color: var(--bad, #e0605a); }
+#status-render { flex: 0 0 auto; font-family: var(--mono, monospace); font-size: 12px; color: var(--dim); }
+.log-popover { position: absolute; z-index: 40; bottom: 100%; left: 8px; right: 8px; max-height: 40vh; display: grid; grid-template-rows: auto minmax(0, 1fr); margin-bottom: 4px; background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: 4px; box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.5); }
+.log-popover[hidden] { display: none; }
+.log-popover .log { overflow-y: auto; }
+
+/* Fill and Stroke rows (11.132): label, the colour in words, the picker, then ‹ ◇ › as the number rows have. */
+.colour-section [role="row"][id^="colour/"] { display: grid; grid-template-columns: 62px minmax(0, 1fr) 34px 18px 22px 18px; align-items: center; gap: 4px; min-height: 26px; font-size: 12px; font-family: var(--mono, monospace); color: var(--sk-ink); }
+.colour-section [role="row"][id^="colour/"]::before { content: attr(aria-label); font-family: var(--sans, inherit); color: var(--dim); }
+.colour-section input[type="color"] { width: 32px; height: 20px; padding: 0; border: 1px solid var(--sk-border-strong); background: transparent; }
+.colour-section button[data-for^="colour/"] { min-width: 0; min-height: 20px; padding: 0; border: 0; background: transparent; color: var(--dim); font-size: 12px; }
+.colour-section button[data-action="key"][data-for^="colour/"] { color: var(--sk-ember); }
+.colour-section button[data-for^="colour/"]:disabled { opacity: .35; }
+
+/* The engine chip's hover card and the scene tabs' + (visibility decision of 26 Nov 2026). */
+.engine-chip-wrap { position: relative; display: inline-block; }
+.engine-hover { position: absolute; z-index: 50; top: 100%; right: 0; margin-top: 6px; min-width: 220px; max-width: 360px; padding: 8px 10px; white-space: pre-line; font-size: 12px; line-height: 1.4; color: var(--sk-ink); background: var(--sk-surface-2); border: 1px solid var(--sk-border-strong); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.engine-hover { display: none; }
+.engine-chip-wrap:hover .engine-hover:not(:empty), .engine-chip-wrap:focus-within .engine-hover:not(:empty) { display: block; }
+.scene-tab-add { min-height: 22px; padding: 0 8px; font-size: 14px; color: var(--dim); background: transparent; border: 0; }
+.scene-tab-add:hover { color: var(--sk-ink); }
+
+/* The Library as its own screen (B13): over the Editor, under the status bar; the panel on show fills the body. */
+.library-screen { position: fixed; z-index: 60; inset: 0 0 26px 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--sk-canvas); }
+.library-screen[hidden] { display: none; }
+.library-screen-head { display: flex; align-items: center; gap: 16px; padding: 8px 14px; border-bottom: 1px solid var(--rule); background: var(--sk-surface); }
+.library-screen-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.library-screen-tabs { display: flex; flex: 1 1 auto; gap: 2px; overflow-x: auto; }
+.library-screen-tabs button { min-height: 26px; padding: 0 12px; font-size: 12px; color: var(--dim); background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; }
+.library-screen-tabs button.active { color: var(--sk-ink); border-bottom-color: var(--sk-ember); }
+.library-screen-body { min-height: 0; overflow: auto; padding: 12px 16px; }
+.library-screen-body > [data-panel].in-library-screen,
+.library-screen-body > [data-panel].in-library-screen.tab-inactive { display: block !important; flex: none; max-width: 1100px; margin: 0 auto; }
+.library-screen-body > [data-panel] > h2,
+.library-screen-body > [data-panel] > .panel-title-row > h2,
+.library-screen-body > [data-panel] .panel-disclosure { display: none; }
+.library-screen-body [id="library/tabs"] { display: none; }
+
+/* The Text animator section (11.61): its header is the section's own, so the Add row is the state and two small buttons. */
+.property-section [id="inspector/textAnimator/add"] { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-height: 26px; }
+.property-section [id="inspector/textAnimator/add"]::before { display: none; }
+.property-section [id="inspector/textAnimator/add"] button { flex: 0 0 auto; white-space: nowrap; font-size: 12px; min-height: 22px; padding: 0 8px; }
+.property-section [id="inspector/textAnimator/add"] button[data-action="add"]:disabled { display: none; }
+.property-section [id="inspector/textAnimator/add"] button[data-action="remove"] { color: var(--dim); }
+
+/* The Data block's buttons on the element card (Figma B2v2): Auto-fit and Hide when empty, lit when on. */
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 2px; }
+.card-toggle { min-height: 22px; padding: 0 10px; font-size: 12px; color: var(--sk-ink-2); background: transparent; border: 1px solid var(--sk-border-strong); border-radius: 2px; }
+.card-toggle.on { color: var(--sk-ember-deep); border-color: var(--sk-ember); background: var(--sk-ember-tint); }
+.card-toggle:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The record check's line on the element card (11.153): what the engine found for this element. */
+.card-warning { margin: 4px 0 0; padding: 4px 6px; font-size: 12px; line-height: 1.35; color: var(--sk-warn, #e0a64a); background: var(--sk-warn-tint, rgba(224, 166, 74, .12)); border-left: 2px solid var(--sk-warn, #e0a64a); }
+
+/* The Test records block (11.153) is headed like Sources and Fields found, its tally and button on one line under the heading. */
+.data-mount [id="data/records"]::before { content: attr(aria-label); display: block; color: var(--sk-ink-3); font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; padding: 10px 0 2px; }
+.data-mount [id="data/records"] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.data-mount [id="data/records"] > [role="list"] { flex: 1 1 100%; }

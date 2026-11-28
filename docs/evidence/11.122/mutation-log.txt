@@ -1,0 +1,32 @@
+caught   R1 the key ignores the content hash (always id:<assetId>)  [the_key_is_the_content_hash_and_an_asset_without_one_is_keyed_by_its_i | a_file_shared_by_two_scenes_is_one_entry_listing_each_scene_once_in_th | a_model_and_a_bound_material_texture_count_for_their_scene | nothing_using_an_asset_is_an_empty_list_not_a_missing_entry | a_scene_order_is_the_order_the_scenes_were_given | a_scene_that_could_not_be_read_is_named_and_not_counted_while_the_othe | the_shared_fixture_holds_the_rule]
+caught   R2 an image object does not draw its asset  [a_scene_order_is_the_order_the_scenes_were_given | an_asset_without_a_hash_is_kept_apart_by_id_across_scenes | a_scene_that_could_not_be_read_is_named_and_not_counted_while_the_othe | an_object_draws_an_asset_as_an_image_a_model_or_the_texture_of_a_bound | a_file_shared_by_two_scenes_is_one_entry_listing_each_scene_once_in_th | the_shared_fixture_holds_the_rule]
+caught   R3 a mesh model does not count  [a_model_and_a_bound_material_texture_count_for_their_scene | an_object_draws_an_asset_as_an_image_a_model_or_the_texture_of_a_bound | a_material_binds_through_any_slot_and_a_mesh_can_have_both_a_model_and | the_shared_fixture_holds_the_rule]
+caught   R4 any declared material counts, bound or not  [an_object_draws_an_asset_as_an_image_a_model_or_the_texture_of_a_bound]
+caught   R5 a material texture counts whatever asset it names  [an_object_draws_an_asset_as_an_image_a_model_or_the_texture_of_a_bound | nothing_using_an_asset_is_an_empty_list_not_a_missing_entry | the_shared_fixture_holds_the_rule]
+SURVIVED R6 a scene is counted once per object, not once  []
+caught   R7 a scene that declares an asset counts although nothing draws it  [nothing_using_an_asset_is_an_empty_list_not_a_missing_entry | the_shared_fixture_holds_the_rule]
+caught   R8 an unreadable scene is swallowed (no problem is named)  [a_scene_that_could_not_be_read_is_named_and_not_counted_while_the_othe]
+SURVIVED R9 the same asset id is listed twice  []
+caught   R10 the library's assets are not entered (an unused library asset is missing)  [a_file_shared_by_two_scenes_is_one_entry_listing_each_scene_once_in_th | nothing_using_an_asset_is_an_empty_list_not_a_missing_entry | the_shared_fixture_holds_the_rule]
+caught   R11 scenes are reported in reverse of the order given  [an_asset_without_a_hash_is_kept_apart_by_id_across_scenes | a_scene_that_could_not_be_read_is_named_and_not_counted_while_the_othe | a_file_shared_by_two_scenes_is_one_entry_listing_each_scene_once_in_th | a_scene_order_is_the_order_the_scenes_were_given | the_shared_fixture_holds_the_rule]
+SURVIVED R12 the scene's id is the document's own id, not the store's  []
+caught   S1 the scenes are read in reverse store order  [a_scene_that_cannot_be_read_is_named_with_its_reason_and_the_rest_are_ | a_project_is_read_scene_by_scene_in_the_stores_order_and_a_file_in_two]
+SURVIVED S2 the project library is not read (an empty library)  []
+caught   S3 an unreadable scene is dropped from the scenes (never reaches the rule)  [a_scene_that_cannot_be_read_is_named_with_its_reason_and_the_rest_are_]
+caught   S4 the reason is lost  [a_scene_that_cannot_be_read_is_named_with_its_reason_and_the_rest_are_]
+{"mutants":16,"caught":12,"survivors":["R6 a scene is counted once per object, not once","R9 the same asset id is listed twice","R12 the scene's id is the document's own id, not the store's","S2 the project library is not read (an empty library)"],"restoredByteForByte":true}
+--- rerun of the four survivors after the missing tests were added:
+caught   R6 a scene is counted once per object, not once  [a_scene_that_imported_the_same_file_twice_counts_once]
+caught   R9 the same asset id is listed twice  [the_library_and_a_scene_naming_one_asset_the_same_way_list_its_id_once]
+caught   R12 the scene's id is the document's own id, not the store's  [a_scene_is_named_by_its_id_in_the_store_not_by_the_id_inside_its_docum]
+caught   S2 the project library is not read (an empty library)  [an_asset_in_the_projects_library_that_no_scene_declares_is_reported_un]
+{"mutants":4,"caught":4,"survivors":[],"restoredByteForByte":true}
+=> 16 of 16 caught (12 on the first run, the 4 survivors after the four missing tests were added).
+
+--- slice 1b (fonts counted as used by text), tools/mutate-asset-usage-fonts.mjs, the rule file only, restored byte for byte after each run:
+caught   F1 a text object never draws a font file (its faces never match)  [a_font_file_in_two_scenes_counts_each_scene_once_in_order | a_hidden_object_still_draws_text_images_and_fonts_alike | a_font_file_is_used_by_a_scene_whose_text_names_a_font_with_a_face_from_it]
+caught   F2 any font's file counts, not the font the text names  [a_font_file_is_used_by_a_scene_whose_text_names_a_font_with_a_face_from_it]
+caught   F3 every face of the font must come from the file, not any one  [a_font_file_is_used_by_a_scene_whose_text_names_a_font_with_a_face_from_it]
+caught   F4 a hidden text object does not draw its font  [a_hidden_object_still_draws_text_images_and_fonts_alike]
+=> 4 of 4 caught (F1 was first written with a mutant that did not compile: a flaw in the mutant, not a result; it was rewritten and re-run).
+=> TOTAL 20 of 20 mutants caught.

@@ -10,9 +10,14 @@ import type { RationalRate } from "./RationalRate";
  */
 export type TakeCommitted = {
 /**
- * In the engine's timebase.
+ * The frame where the command takes effect, in the engine's timebase.
  */
 frame: bigint,
+/**
+ * An incoming scene's later start after the outgoing scene's Out.
+ * When absent, the incoming scene starts at frame.
+ */
+startFrame?: bigint,
 /**
  * Rational, never a float (invariant 12).
  */

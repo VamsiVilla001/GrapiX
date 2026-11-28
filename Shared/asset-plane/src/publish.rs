@@ -158,6 +158,30 @@ pub enum PreviewReply {
     },
 }
 
+/// The record check of one request (11.153), to be run **outside** the peer's lock, like a preview: shaping every record is work, and it
+/// must never delay a Program frame (invariant 14). The peer builds it under the lock from what it must read there (its font bytes).
+pub type FitJob = Box<dyn FnOnce() -> Result<gx_contracts::fit_report::FitReport, gx_contracts::fit_report::FitFailure> + Send>;
+
+/// The asset-plane reply to a fit request: the report as one header, no bytes after it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "reply",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum FitReply {
+    Report {
+        report: gx_contracts::fit_report::FitReport,
+    },
+    Refused {
+        cause: Refusal,
+    },
+    /// The request was not a well-formed fit request.
+    InvalidRequest {
+        detail: String,
+    },
+}
+
 /// A peer that can atomically turn a strictly parsed scene into a revision,
 /// and serve the bytes of images it rendered.
 ///
@@ -190,6 +214,17 @@ pub trait AssetPublishPeer: Send + 'static {
         Err(Refusal::NotImplemented {
             what: "this asset-plane peer renders no previews".into(),
         })
+    }
+
+    /// Get ready to check a scene against records (11.153): gather what the shaping needs from this peer (the bytes of the scene's
+    /// fonts) and return the check as a job the listener runs without holding the peer. A peer that shapes no text refuses by name.
+    fn prepare_fit(
+        &mut self,
+        _request: gx_contracts::fit_report::FitRequest,
+    ) -> Result<FitJob, gx_contracts::fit_report::FitFailure> {
+        Err(gx_contracts::fit_report::FitFailure::Refused(Refusal::NotImplemented {
+            what: "this asset-plane peer checks no records against a layout".into(),
+        }))
     }
 
     /// Whether this peer already holds verified bytes for `hash` (5.9): the
@@ -580,6 +615,45 @@ pub fn preview_scene(
     Ok(PreviewImage { width, height, png })
 }
 
+/// Why a fit check returned no report.
+#[derive(Debug)]
+pub enum FitError {
+    /// No reply was obtained at all (the engine is unreachable, or the connection failed).
+    Client(PublishClientError),
+    /// The engine declined by name.
+    Refused(Refusal),
+    /// The engine says the request was not a fit request.
+    Invalid(String),
+}
+
+impl std::fmt::Display for FitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Client(error) => write!(f, "{error}"),
+            Self::Refused(refusal) => write!(f, "fit check refused: {refusal}"),
+            Self::Invalid(detail) => write!(f, "fit check request invalid: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for FitError {}
+
+/// Ask an engine to check a scene against records (11.153): every text bound to data, shaped with each record's values in its own box,
+/// answered as Fits, Overflows, Empty or Missing. Nothing is drawn, no revision is made.
+pub fn fit_scene(
+    engine: SocketAddr,
+    request: gx_contracts::fit_report::FitRequest,
+) -> Result<gx_contracts::fit_report::FitReport, FitError> {
+    let framed = serde_json::to_vec(&serde_json::json!({ "fit": request }))
+        .map_err(|error| FitError::Client(PublishClientError::Malformed(error)))?;
+    let (_, header) = exchange(engine, &framed).map_err(FitError::Client)?;
+    match serde_json::from_slice(&header).map_err(|error| FitError::Client(PublishClientError::Malformed(error)))? {
+        FitReply::Report { report } => Ok(report),
+        FitReply::Refused { cause } => Err(FitError::Refused(cause)),
+        FitReply::InvalidRequest { detail } => Err(FitError::Invalid(detail)),
+    }
+}
+
 /// Why a fetch returned no bytes.
 #[derive(Debug)]
 pub enum FetchError {
@@ -761,6 +835,8 @@ enum AssetRequest {
     Locality,
     /// Render a draft scene at a frame (11.65).
     Preview(Result<PreviewRequest, PublishRefusal>),
+    /// Check a scene against records (11.153).
+    Fit(Result<gx_contracts::fit_report::FitRequest, PublishRefusal>),
 }
 
 fn handle_publish<P: AssetPublishPeer>(
@@ -838,7 +914,7 @@ fn handle_publish<P: AssetPublishPeer>(
     // peer's lock, while the engine sheds load; the gate is read and released at once.
     if matches!(
         request,
-        AssetRequest::Publish(_) | AssetRequest::Package(_) | AssetRequest::Preview(_)
+        AssetRequest::Publish(_) | AssetRequest::Package(_) | AssetRequest::Preview(_) | AssetRequest::Fit(_)
     ) {
         let gate = locked()?.calm_gate();
         if let Some(gate) = gate {
@@ -935,6 +1011,22 @@ fn handle_publish<P: AssetPublishPeer>(
                 Err(refusal) => write_header(&mut stream, &refusal),
             }
         }
+        AssetRequest::Fit(request) => {
+            let reply = match request {
+                Ok(request) => {
+                    // The peer is held only to build the job; the shaping runs without it.
+                    let job = locked()?.prepare_fit(request);
+                    match job.and_then(|job| job()) {
+                        Ok(report) => FitReply::Report { report },
+                        Err(gx_contracts::fit_report::FitFailure::Refused(cause)) => FitReply::Refused { cause },
+                        Err(gx_contracts::fit_report::FitFailure::Invalid(detail)) => FitReply::InvalidRequest { detail },
+                    }
+                }
+                Err(PublishRefusal::InvalidPublishRequest { detail }) => FitReply::InvalidRequest { detail },
+                Err(_) => FitReply::InvalidRequest { detail: "the fit request was refused".into() },
+            };
+            write_header(&mut stream, &reply)
+        }
         AssetRequest::Fetch(hash) => {
             // The peer is held only long enough to share the bytes.
             let served = locked()?.fetch(&hash);
@@ -1004,6 +1096,7 @@ fn needs_of(request: &AssetRequest) -> (crate::auth::Needs, &'static str) {
         AssetRequest::Transfer(_) => (Needs::Author, "transfer"),
         AssetRequest::Package(_) => (Needs::Author, "package"),
         AssetRequest::Preview(_) => (Needs::Author, "preview"),
+        AssetRequest::Fit(_) => (Needs::Author, "fit"),
     }
 }
 
@@ -1024,6 +1117,7 @@ fn write_auth_refusal(
         ),
         AssetRequest::Fetch(_) => write_header(stream, &FetchReply::Refused { cause }),
         AssetRequest::Preview(_) => write_header(stream, &PreviewReply::Refused { cause }),
+        AssetRequest::Fit(_) => write_header(stream, &FitReply::Refused { cause }),
         AssetRequest::Transfer(_) => write_header(
             stream,
             &crate::preflight::AssetTransferReply::Refused { cause },
@@ -1105,9 +1199,17 @@ fn parse_members(mut request: serde_json::Map<String, serde_json::Value>) -> Ass
     }
     if request.len() != 1 {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package`, `preview` or `locality`"
+            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package`, `preview`, `fit` or `locality`"
                 .to_string(),
         );
+    }
+    if let Some(fit) = request.remove("fit") {
+        return match serde_json::from_value::<gx_contracts::fit_report::FitRequest>(fit) {
+            Ok(fit) => AssetRequest::Fit(Ok(fit)),
+            Err(error) => AssetRequest::Fit(Err(PublishRefusal::InvalidPublishRequest {
+                detail: format!("fit request: {error}"),
+            })),
+        };
     }
     if let Some(preview) = request.remove("preview") {
         return match serde_json::from_value::<PreviewRequest>(preview) {
@@ -1151,7 +1253,7 @@ fn parse_members(mut request: serde_json::Map<String, serde_json::Value>) -> Ass
     }
     let Some(scene) = request.remove("scene") else {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package`, `preview` or `locality`"
+            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package`, `preview`, `fit` or `locality`"
                 .to_string(),
         );
     };

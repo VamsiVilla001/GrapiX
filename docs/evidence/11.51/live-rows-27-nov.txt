@@ -1,0 +1,11 @@
+11.51 Properties rows, seen in a real Editor window (27 Nov 2026, claude)
+
+Setup: debug Editor shell (DevTools port 9335), a project RowsLive, a scene "Rows check", Manrope added through the Fonts panel, one text added and selected. The page's own DOM and log were read; no engine was started (the rows do not need one).
+
+1. Drawn in the Text section: Paragraph spacing 0, Word spacing 0, Kerning on (checkbox), Max lines "none", Overflow dropdown (Visible, Hidden, Clip), Fit dropdown. Underline and Strike-through were absent because this build's bundle was made before those two rows were written (they are covered by tests only).
+2. Edited through the real inputs: Max lines 2, Paragraph spacing 12, Word spacing -3, Kerning off, Overflow Clip. The log said "Set Max lines", "Set Word spacing", "Set Kerning", "Set Overflow to Clip" (one undoable entry each); the rows read back 12, -3, unchecked, Clip.
+3. Max lines "none" cleared the limit (row reads none again; log "Set Max lines").
+4. Max lines "1.5" was refused before anything was sent: "inspector edit refused: Max lines needs a whole number from 1, or "none", not "1.5"".
+Not seen: the engine drawing any of it (codex's witnesses: Overflow Hidden and Clip on Vulkan and DX12), Underline and Strike-through in a window, a screenshot of the Properties panel (live/rows.png was taken but is the main window).
+Every edit logged "1 object(s) not drawn in the Draft view (see the Engine preview)": the Draft view does not draw text, as before these rows.
+Clean-up: my Editor stopped by PID, recents restored, settings folder absent.

@@ -62,6 +62,32 @@ function bezierAxisSlope(c1: number, c2: number, u: number): number {
   return 3 * inv * inv * c1 + 6 * inv * u * (c2 - c1) + 3 * u * u * (1 - c2);
 }
 
+/// Penner's easeOutBounce on 0–1: four parabolic arcs, ending exactly on 1 and never above it.
+function bounceOut(t: number): number {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+  if (t >= 1) return 1;
+  if (t < 1 / d1) return n1 * t * t;
+  if (t < 2 / d1) {
+    const u = t - 1.5 / d1;
+    return n1 * u * u + 0.75;
+  }
+  if (t < 2.5 / d1) {
+    const u = t - 2.25 / d1;
+    return n1 * u * u + 0.9375;
+  }
+  const u = t - 2.625 / d1;
+  return n1 * u * u + 0.984375;
+}
+
+/// Penner's easeOutElastic on 0–1 (amplitude 1, period 0.3): a decaying oscillation about 1.
+function elasticOut(t: number): number {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  const c4 = (2 * Math.PI) / 3;
+  return 2 ** (-10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+}
+
 /// Solve the curve for `t`, returning eased 0–1 progress.
 ///
 /// Newton-Raphson with a bisection fallback where the slope is too flat to
@@ -76,6 +102,9 @@ export function easeAt(
   const clamped = Math.min(1, Math.max(0, t));
   // A hold does not interpolate: it stays on the from-key until the next one.
   if (easing === "hold") return 0;
+  // Bounce and Elastic are not cubic beziers; their formulas are the Rust's (`bounce_out`, `elastic_out`), pinned by the reference table.
+  if (easing === "bounce") return bounceOut(clamped);
+  if (easing === "elastic") return elasticOut(clamped);
 
   const points =
     easing === "custom-bezier" ? (bezier ?? LINEAR) : easingControlPoints(easing);
@@ -158,8 +187,10 @@ export function channelValueRange(
     consider(key.value);
     const next = channel.keys[index + 1];
     if (!next) continue;
-    for (let step = 1; step < samplesPerSegment; step += 1) {
-      const t = step / samplesPerSegment;
+    // Bounce and Elastic swing several times inside one segment: eight samples would miss the first peak.
+    const samples = key.easing === "bounce" || key.easing === "elastic" ? Math.max(samplesPerSegment, 128) : samplesPerSegment;
+    for (let step = 1; step < samples; step += 1) {
+      const t = step / samples;
       const eased = easeAt(key.easing, key.bezier, t);
       consider(key.value + (next.value - key.value) * eased);
     }

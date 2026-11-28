@@ -74,6 +74,7 @@ fn the_engine_writes_a_requests_correlation_id_on_every_record_the_request_cause
         let reply = client
             .request(ClientRequest::Clear(ClearRequest {
                 at: TakeAt::NextOpportunity,
+                expected: None,
             }))
             .expect("a reply");
         assert!(matches!(reply, EngineReply::Cleared(_)), "{reply:?}");

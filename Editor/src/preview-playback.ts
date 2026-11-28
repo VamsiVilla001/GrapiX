@@ -16,10 +16,13 @@ import type {
   RationalRate,
   SceneDocument,
   SceneObject,
+  StrokeStyle,
 } from "@grapix/contracts";
 
+import { supportsScalarProperty } from "./keyframe-editor";
 import { applyPathChannels } from "./path-anim";
 import { evaluateChannel } from "./timeline/easing";
+import { evaluateColour } from "./colour-anim";
 
 export interface PreviewFrame {
   readonly frame: number;
@@ -57,9 +60,7 @@ export interface PreviewEvaluation {
 
 /// Evaluate every authored channel at one whole scene frame.
 ///
-/// Animation properties are flattened ObjectBase fields on every SceneObject,
-/// so applying a property by its Rust-advertised name keeps this composition
-/// open to the generated contract without a second hand-maintained switch.
+/// Scalar channels use the stored JSON names of their object or base fields.
 export function previewSceneAt(
   document: SceneDocument,
   requestedFrame: number,
@@ -69,9 +70,77 @@ export function previewSceneAt(
   // 11.112: animated paths, by vertex id, then put where the channels have them at this frame.
   const duration = Number(document.timeline.durationFrames);
   const paths = applyPathChannels(numeric.document, Math.min(duration, Math.max(0, Math.round(requestedFrame))));
-  return paths.issues.length === 0 && paths.document === numeric.document
+  // 11.132: solid fill and stroke colours, worked out as the contract does, put on the paint.
+  const coloured = applyColourChannels(paths.document, Math.min(duration, Math.max(0, Math.round(requestedFrame))));
+  return paths.issues.length === 0 && coloured === numeric.document
     ? numeric
-    : { document: paths.document, issues: [...numeric.issues, ...paths.issues] };
+    : { document: coloured, issues: [...numeric.issues, ...paths.issues] };
+}
+
+/// The colour channels' values at a frame, as each object's solid paint. A channel with no keys leaves the paint as authored.
+export function applyColourChannels(document: SceneDocument, frame: number): SceneDocument {
+  const channels = (document.timeline.colourChannels ?? []).filter((channel) => channel.keys.length > 0);
+  if (channels.length === 0) return document;
+  const patches = new Map<string, Record<string, unknown>>();
+  for (const channel of channels) {
+    const value = evaluateColour(channel, frame);
+    if (value === undefined) continue;
+    const patch = patches.get(channel.objectId) ?? {};
+    // The text animator's colour is the animator's own field, not a paint; the Draft view keeps the animator whole.
+    if (channel.property === "textAnimatorFill") {
+      const object = document.objects.find((candidate) => candidate.id === channel.objectId) as { textAnimator?: Record<string, unknown> } | undefined;
+      if (object?.textAnimator === undefined) continue;
+      patch.textAnimator = { ...((patch.textAnimator as Record<string, unknown> | undefined) ?? object.textAnimator), fill: value };
+    } else {
+      patch[channel.property] = { type: "solid", color: value };
+    }
+    patches.set(channel.objectId, patch);
+  }
+  if (patches.size === 0) return document;
+  return {
+    ...document,
+    objects: document.objects.map((object) => {
+      const patch = patches.get(object.id);
+      return patch === undefined ? object : ({ ...object, ...patch } as SceneObject);
+    }),
+  };
+}
+
+/// The stroke style an object draws with when it stores none: what the contract's `StrokeStyle::default` gives.
+const DEFAULT_STROKE_STYLE: StrokeStyle = { join: "miter", cap: "butt", miterLimit: 4, dash: [], dashOffset: 0 };
+
+/// Put evaluated scalars on a copy of the object. Most are top-level fields under their stored names; `strokeStyle.dashOffset` is nested, so it is
+/// merged into the object's own stroke style and the dash pattern, join, cap and miter limit stay as authored.
+function applyScalarPatch(object: SceneObject, patch: Record<string, number>): SceneObject {
+  const { ["strokeStyle.dashOffset"]: dashOffset, ...rest } = patch;
+  // The dash pattern's entries (`strokeStyle.dash.N`, the contract's `dash::index`) are nested in the same stroke style.
+  const dashEntries: [number, number][] = [];
+  const flat: Record<string, number> = {};
+  for (const [name, value] of Object.entries(rest)) {
+    const match = /^strokeStyle\.dash\.(0|[1-9][0-9]*)$/.exec(name);
+    if (match === null) flat[name] = value;
+    else dashEntries.push([Number(match[1]), value]);
+  }
+  // The text animator's scalars (11.61) are nested in `textAnimator`: `selector.start|end|offset`, `x`, `y`, `scale`, `rotation`, `opacity`.
+  const animator = (object as { textAnimator?: { selector: Record<string, unknown> } & Record<string, unknown> }).textAnimator;
+  let animated: Record<string, unknown> | undefined;
+  for (const name of Object.keys(flat)) {
+    if (!name.startsWith("textAnimator.")) continue;
+    const value = flat[name]!;
+    delete flat[name];
+    if (animator === undefined) continue;
+    animated ??= { ...animator, selector: { ...animator.selector } };
+    const path = name.slice("textAnimator.".length);
+    if (path.startsWith("selector.")) (animated.selector as Record<string, unknown>)[path.slice("selector.".length)] = value;
+    else animated[path] = value;
+  }
+  const next = { ...object, ...flat, ...(animated === undefined ? {} : { textAnimator: animated }) } as SceneObject;
+  if (dashOffset === undefined && dashEntries.length === 0) return next;
+  const own = (object as { strokeStyle?: StrokeStyle }).strokeStyle ?? DEFAULT_STROKE_STYLE;
+  const dash = [...own.dash];
+  // An entry past the authored pattern is not drawn: the contract refuses such a channel, so it is left out here.
+  for (const [index, value] of dashEntries) if (index < dash.length) dash[index] = value;
+  return { ...next, strokeStyle: { ...own, dash, dashOffset: dashOffset ?? own.dashOffset } } as SceneObject;
 }
 
 function previewNumericAt(
@@ -90,7 +159,6 @@ function previewNumericAt(
   }
 
   const objects = new Map(document.objects.map((object) => [object.id, object] as const));
-  const properties = new Set(surface.properties);
   const kinds = new Set(surface.objectKinds);
   const patches = new Map<string, Record<string, number>>();
   const evaluated = new Set<string>();
@@ -113,7 +181,7 @@ function previewNumericAt(
       issues.push(`animation preview does not support ${object.type} object ${object.id}`);
       continue;
     }
-    if (!properties.has(channel.property)) {
+    if (!supportsScalarProperty(surface, object.type, channel.property)) {
       issues.push(`animation preview does not support property ${channel.property} on ${object.id}`);
       continue;
     }
@@ -131,7 +199,7 @@ function previewNumericAt(
   if (patches.size === 0) return { document, issues };
   const nextObjects = document.objects.map((object) => {
     const patch = patches.get(object.id);
-    return patch === undefined ? object : ({ ...object, ...patch } as SceneObject);
+    return patch === undefined ? object : applyScalarPatch(object, patch);
   });
   return { document: { ...document, objects: nextObjects }, issues };
 }

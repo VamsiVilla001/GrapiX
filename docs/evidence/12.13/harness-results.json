@@ -1,0 +1,467 @@
+[
+ {
+  "name": "viewport is wide enough for the desktop layout",
+  "ok": true,
+  "detail": 1478
+ },
+ {
+  "name": "connected and signed in: the page reads the status",
+  "ok": true,
+  "detail": "CONNECTED"
+ },
+ {
+  "name": "rows are front to back: +60, 0, -50",
+  "ok": true,
+  "detail": [
+   "+60",
+   "0",
+   "-50"
+  ]
+ },
+ {
+  "name": "stack 0 is selected at the start",
+  "ok": true
+ },
+ {
+  "name": "a leaving scene with a queued replacement is one row with a second line",
+  "ok": true,
+  "detail": {
+   "stack": "60",
+   "label": "+60",
+   "scene": "old · revision 3",
+   "then": "then new · revision 5 from frame 730",
+   "chips": [
+    "LEAVING",
+    "QUEUED"
+   ],
+   "selected": false,
+   "onair": false,
+   "disabled": [
+    true,
+    true,
+    false
+   ]
+  }
+ },
+ {
+  "name": "its chips say LEAVING and QUEUED",
+  "ok": true,
+  "detail": [
+   "LEAVING",
+   "QUEUED"
+  ]
+ },
+ {
+  "name": "on-air rows are marked and have controls enabled; a leaving row has only Clear",
+  "ok": true,
+  "detail": {
+   "zero": [
+    false,
+    false,
+    false
+   ],
+   "sixty": [
+    true,
+    true,
+    false
+   ]
+  }
+ },
+ {
+  "name": "typing +60 selects that row",
+  "ok": true
+ },
+ {
+  "name": "the note says where the next command goes",
+  "ok": true,
+  "detail": "Every command here goes to stack +60."
+ },
+ {
+  "name": "a fraction is refused by name, marked, and the table keeps the last valid stack",
+  "ok": true
+ },
+ {
+  "name": "out of range says the range",
+  "ok": true
+ },
+ {
+  "name": "plus steps to +1 and adds an empty row marked as the Transport's target",
+  "ok": true,
+  "detail": "+1"
+ },
+ {
+  "name": "minus twice reaches -1; the row for +1 is gone again",
+  "ok": true
+ },
+ {
+  "name": "ArrowUp steps the stack from the keyboard",
+  "ok": true,
+  "detail": "0"
+ },
+ {
+  "name": "TAKE on stack 0 sends no layer at all",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_take",
+    "args": {
+     "takeId": "scorebug",
+     "revision": 2,
+     "contentHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "TAKE on +60 sends layer 60",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_take",
+    "args": {
+     "takeId": "scorebug",
+     "revision": 2,
+     "contentHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "layer": 60,
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "a take onto an occupied stack shows both frames: the command and the new scene's start",
+  "ok": true,
+  "detail": "The scene on this stack leaves first. The new scene starts at frame 730."
+ },
+ {
+  "name": "CUE on +60 sends layer 60",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_cue",
+    "args": {
+     "takeId": "scorebug",
+     "revision": 2,
+     "contentHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "layer": 60,
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "TAKE OUT on +60 sends the out phase to layer 60",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_phase",
+    "args": {
+     "phase": "out",
+     "frame": null,
+     "layer": 60
+    }
+   }
+  ]
+ },
+ {
+  "name": "an invalid stack sends nothing and says why in the activity log",
+  "ok": true,
+  "detail": "#0007LOCALTAKE not sentA stack is a whole number, such as 0, +60 or -10."
+ },
+ {
+  "name": "an invalid stack stops CUE too: nothing is sent",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "an invalid stack stops CLEAR too: nothing is sent",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "an invalid stack stops TAKE OUT too: nothing is sent",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "an invalid stack stops HOLD too: nothing is sent",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "an invalid stack stops CONTINUE too: nothing is sent",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "an invalid stack stops UPDATE too: nothing is sent",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "CLEAR on stack 0 is what it always was: no layer, no expected page",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_clear",
+    "args": {
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "CLEAR on -50 names the page the table shows",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_clear",
+    "args": {
+     "layer": -50,
+     "expected": {
+      "takeId": "bumper",
+      "revision": 1
+     },
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "CLEAR on a stack the table shows empty names no page; the engine answers for it",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_clear",
+    "args": {
+     "layer": 20,
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "a hold released at 0.4 s sends nothing",
+  "ok": true
+ },
+ {
+  "name": "and the fill is back at nothing",
+  "ok": true
+ },
+ {
+  "name": "a hold of one second sends one Clear that names the page the row showed",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_clear",
+    "args": {
+     "expected": {
+      "takeId": "l3",
+      "revision": 4
+     },
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "the engine took stack 0 off and the row is empty on the next read",
+  "ok": true
+ },
+ {
+  "name": "the row's button is the same element after status reads, and the hold sent Out to -50",
+  "ok": true,
+  "detail": {
+   "survived": true,
+   "c": [
+    {
+     "command": "cmd_clear",
+     "args": {
+      "expected": {
+       "takeId": "l3",
+       "revision": 4
+      },
+      "frame": null
+     }
+    },
+    {
+     "command": "cmd_phase",
+     "args": {
+      "phase": "out",
+      "frame": null,
+      "layer": -50
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "a scene replaced during the hold is refused by name and not cleared",
+  "ok": true,
+  "detail": "#0019CLEARrefused: clearExpectationUnmet (layer=-50, expected=bumper, onAir=other)the page named is not on that stack [po-0361a606-79] · stack -50"
+ },
+ {
+  "name": "the refusal is also written in the Stacks panel, as a refusal, naming the stack",
+  "ok": true,
+  "detail": "CLEAR · refused: clearExpectationUnmet (layer=-50, expected=bumper, onAir=other) · the page named is not on that stack [po-0361a606-79] · stack -50"
+ },
+ {
+  "name": "a row is two lines tall, not three: its controls fit on one line",
+  "ok": true,
+  "detail": 45
+ },
+ {
+  "name": "Space held one second sends one Clear, naming the leaving scene's page",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_clear",
+    "args": {
+     "layer": 60,
+     "expected": {
+      "takeId": "old",
+      "revision": 3
+     },
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "a hold whose pointer is taken off the button sends nothing",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "a keyboard hold whose button loses focus sends nothing",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "signed out: the table still shows what is on air, and every row control is disabled",
+  "ok": true,
+  "detail": [
+   [
+    true,
+    true,
+    true
+   ],
+   [
+    true,
+    true,
+    true
+   ],
+   [
+    true,
+    true,
+    true
+   ],
+   [
+    true,
+    true,
+    true
+   ]
+  ]
+ },
+ {
+  "name": "and a hold on a disabled control sends nothing",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "signed in again: the controls are back",
+  "ok": true
+ },
+ {
+  "name": "Continue on the row sends the continue phase to its stack, none for stack 0",
+  "ok": true,
+  "detail": [
+   {
+    "command": "cmd_phase",
+    "args": {
+     "phase": "continue",
+     "frame": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "the controls with no backend are dimmed and name their rows",
+  "ok": true,
+  "detail": [
+   [
+    true,
+    "Clear all stacks row 12.14"
+   ],
+   [
+    true,
+    "Hide · solo in the Airview row 12.17"
+   ]
+  ]
+ },
+ {
+  "name": "a click on a row selects its stack in the field",
+  "ok": true
+ },
+ {
+  "name": "a lost engine clears the table: nothing is drawn from a status nobody reports",
+  "ok": true,
+  "detail": [
+   {
+    "stack": "-50",
+    "label": "-50",
+    "scene": "empty",
+    "then": "",
+    "chips": [],
+    "selected": true,
+    "onair": false,
+    "disabled": [
+     true,
+     true,
+     true
+    ]
+   }
+  ]
+ },
+ {
+  "name": "and every row control is disabled",
+  "ok": true
+ },
+ {
+  "name": "layout at 1280x820 (measured, recorded)",
+  "ok": true,
+  "detail": {
+   "clockPanel": [
+    177,
+    1274
+   ],
+   "transportPanel": [
+    177,
+    771
+   ],
+   "stacksPanel": [
+    783,
+    1042
+   ],
+   "log": [
+    1054,
+    1274
+   ],
+   "program": [
+    1054,
+    1274
+   ],
+   "viewport": [
+    1280,
+    820
+   ],
+   "gridScroll": 466
+  }
+ },
+ {
+  "name": "no script error or console.error during the whole run",
+  "ok": true,
+  "detail": []
+ }
+]

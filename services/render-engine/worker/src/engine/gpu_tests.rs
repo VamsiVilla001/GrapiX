@@ -410,7 +410,8 @@ fn gpu_engine_stage_above_texture_limit_and_clear() {
     );
     assert!(matches!(
         engine.handle(ClientRequest::Clear(ClearRequest {
-            at: TakeAt::NextOpportunity
+            at: TakeAt::NextOpportunity,
+            expected: None,
         })),
         EngineReply::Cleared(_)
     ));
@@ -960,12 +961,16 @@ fn text_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) 
             text_case: Default::default(),
             decoration: Default::default(),
             overflow: Default::default(),
+            max_lines: None,
+            kerning: None,
             align: Default::default(),
             line_height: None,
             letter_spacing: 0.0,
             word_spacing: 0.0,
             paragraph_spacing: 0.0,
             text_indent: 0.0,
+            baseline_shift: None,
+            text_animator: None,
         }
     };
     doc.objects.push(SceneObject::Text(line(
@@ -1350,12 +1355,16 @@ fn mask_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) 
         text_case: Default::default(),
         decoration: Default::default(),
         overflow: Default::default(),
+        max_lines: None,
+        kerning: None,
         align: Default::default(),
         line_height: None,
         letter_spacing: 0.0,
         word_spacing: 0.0,
         paragraph_spacing: 0.0,
         text_indent: 0.0,
+        baseline_shift: None,
+        text_animator: None,
     }));
     // 3.26: lighten and darken fold on the GPU as on the CPU. `blend`: an add,
     // a half-opacity lighten and an 80% darken; `first`: a darken alone sets
@@ -2746,3 +2755,292 @@ fn gpu_engine_mattes_each_other_and_chains_within_one_code_of_the_cpu_reference(
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Task 112 (rows 12.10 and 12.13): several scenes on Program, one per layer.
+//
+// Hardware only: run with `--ignored`, once with `GX_GPU_316_BACKEND=dx12` and once with `=vulkan`. A scene is one full-canvas colour
+// with the authored In (0..20), Hold and Out (80..100) of `animated_scene`, so which scene a pixel shows says which is on air.
+
+use crate::colour_pipeline::WorkingRgba;
+use gx_control_plane::intent::PhaseRequest;
+use gx_control_plane::status::{ProgramLayerPhase, ProgramLayerStatus};
+
+fn plate(id: &str, colour: Rgba, with_out: bool) -> SceneDocument {
+    let mut doc = super::tests::animated_scene();
+    doc.id = id.into();
+    doc.name = id.into();
+    doc.timeline.channels.clear();
+    if !with_out {
+        doc.timeline.phases.retain(|phase| phase.kind != gx_contracts::phases::PhaseKind::Out);
+    }
+    let mut base = ObjectBase::new("fill", "fill");
+    base.width = f64::from(doc.canvas.width);
+    base.height = f64::from(doc.canvas.height);
+    base.fill = Some(ColorValue::Solid { color: colour });
+    doc.objects = vec![SceneObject::Rect(RectObject { base, radius: 0.0 })];
+    doc
+}
+
+const WARM: Rgba = Rgba::srgb(0.8, 0.2, 0.1, 1.0);
+const GLASS: Rgba = Rgba::srgb(0.0, 0.0, 1.0, 0.5);
+const GREEN: Rgba = Rgba::srgb(0.1, 0.9, 0.1, 1.0);
+
+type Pin = (TakeId, Revision, ContentHash);
+
+fn on_layer(engine: &mut Engine, request: ClientRequest, layer: i32) -> EngineReply {
+    gx_control_plane::peer::EnginePeer::handle_on_layer(engine, request, layer).finish()
+}
+
+fn take_on(engine: &mut Engine, pin: &Pin, layer: i32) -> EngineReply {
+    on_layer(
+        engine,
+        ClientRequest::Take(TakeRequest {
+            take_id: pin.0.clone(),
+            revision: pin.1,
+            content_hash: Some(pin.2.clone()),
+            at: TakeAt::NextOpportunity,
+        }),
+        layer,
+    )
+}
+
+fn taken(reply: EngineReply) -> gx_control_plane::intent::TakeCommitted {
+    match reply {
+        EngineReply::Taken(committed) => committed,
+        other => panic!("expected a take, got {other:?}"),
+    }
+}
+
+fn layers_of(engine: &mut Engine) -> Vec<ProgramLayerStatus> {
+    match engine.handle(ClientRequest::Status) {
+        EngineReply::Status(status) => status.layers.expect("the engine reports its layers"),
+        other => panic!("expected a status, got {other:?}"),
+    }
+}
+
+fn summary(layers: &[ProgramLayerStatus]) -> Vec<(i32, &str, ProgramLayerPhase)> {
+    layers.iter().map(|layer| (layer.layer, layer.take_id.0.as_str(), layer.state)).collect()
+}
+
+/// The Program frame the engine delivers at engine frame `at`.
+fn frame_at(engine: &mut Engine, ticks: &Arc<AtomicU64>, at: u64) -> Arc<Frame> {
+    ticks.store(at, Ordering::Relaxed);
+    engine.emit_frame_settled().unwrap().frame
+}
+
+fn shows(frame: &Frame, colour: WorkingRgba, what: &str) {
+    let expected = colour.encode(gx_contracts::color::OutputTransform::Rec709, WorkingColorSpace::LinearSrgb);
+    let pixel = &frame.pixels[(5 * frame.width as usize + 5) * 4..][..4];
+    for channel in 0..4 {
+        assert!(pixel[channel].abs_diff(expected[channel]) <= 1, "{what}: {pixel:?} against {expected:?}");
+    }
+}
+
+fn working(colour: Rgba) -> WorkingRgba {
+    WorkingRgba::from_source(colour, WorkingColorSpace::LinearSrgb)
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_layers_on_air_together_are_composited_in_layer_order() {
+    let (mut engine, ticks) = hardware_engine();
+    let warm = publish(&mut engine, plate("warm", WARM, true));
+    let glass = publish(&mut engine, plate("glass", GLASS, true));
+    assert!(matches!(take_on(&mut engine, &warm, 0), EngineReply::Taken(_)));
+    assert!(matches!(take_on(&mut engine, &glass, 10), EngineReply::Taken(_)));
+    assert_eq!(
+        summary(&layers_of(&mut engine)),
+        [(0, "warm", ProgramLayerPhase::OnAir), (10, "glass", ProgramLayerPhase::OnAir)]
+    );
+    // Layer 0 is what `status.program` has always said, whatever else is on air.
+    match engine.handle(ClientRequest::Status) {
+        EngineReply::Status(status) => assert_eq!(status.program.as_ref().map(|p| p.take_id.0.as_str()), Some("warm")),
+        other => panic!("{other:?}"),
+    }
+    let in_front = frame_at(&mut engine, &ticks, 5);
+    shows(&in_front, working(GLASS).over(working(WARM)), "glass on layer 10 over warm on layer 0");
+
+    // The same two scenes the other way round: a higher layer is in front, whatever the order they were taken in.
+    let (mut other, ticks) = hardware_engine();
+    let warm = publish(&mut other, plate("warm", WARM, true));
+    let glass = publish(&mut other, plate("glass", GLASS, true));
+    assert!(matches!(take_on(&mut other, &glass, -10), EngineReply::Taken(_)));
+    assert!(matches!(take_on(&mut other, &warm, 0), EngineReply::Taken(_)));
+    assert_eq!(
+        summary(&layers_of(&mut other)),
+        [(-10, "glass", ProgramLayerPhase::OnAir), (0, "warm", ProgramLayerPhase::OnAir)]
+    );
+    shows(&frame_at(&mut other, &ticks, 5), working(WARM), "opaque warm on layer 0 hides glass behind it on layer -10");
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_a_take_on_an_occupied_layer_plays_the_out_then_replaces_it() {
+    let (mut engine, ticks) = hardware_engine();
+    let warm = publish(&mut engine, plate("warm", WARM, true));
+    let green = publish(&mut engine, plate("green", GREEN, true));
+    let first = taken(take_on(&mut engine, &warm, 5));
+    assert_eq!(first.start_frame, None, "nothing was on the layer: no delay");
+    // 30 frames in, the scene is mid-Hold; the replacement is taken.
+    ticks.store(first.frame + 30, Ordering::Relaxed);
+    let second = taken(take_on(&mut engine, &green, 5));
+    // warm's authored Out is 20 frames: it plays from the commitment, and green starts when it ends.
+    assert_eq!(second.start_frame, Some(second.frame + 20));
+    let start = second.start_frame.unwrap();
+    assert_eq!(
+        summary(&layers_of(&mut engine)),
+        [(5, "warm", ProgramLayerPhase::Leaving), (5, "green", ProgramLayerPhase::Queued)]
+    );
+    let queued = layers_of(&mut engine);
+    assert_eq!((queued[0].frame, queued[1].frame), (second.frame, start), "status says when each began or will begin");
+    shows(&frame_at(&mut engine, &ticks, start - 1), working(WARM), "warm leaves until its Out ends");
+    shows(&frame_at(&mut engine, &ticks, start), working(GREEN), "green takes the layer at the frame the Out ends");
+    assert_eq!(summary(&layers_of(&mut engine)), [(5, "green", ProgramLayerPhase::OnAir)]);
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_a_scene_with_no_out_is_replaced_by_a_cut() {
+    let (mut engine, ticks) = hardware_engine();
+    let warm = publish(&mut engine, plate("warm", WARM, false));
+    let green = publish(&mut engine, plate("green", GREEN, true));
+    let first = taken(take_on(&mut engine, &warm, 5));
+    ticks.store(first.frame + 30, Ordering::Relaxed);
+    let second = taken(take_on(&mut engine, &green, 5));
+    assert_eq!(second.start_frame, None, "no authored Out: a cut at the commitment");
+    assert_eq!(summary(&layers_of(&mut engine)), [(5, "green", ProgramLayerPhase::OnAir)]);
+    shows(&frame_at(&mut engine, &ticks, second.frame), working(GREEN), "a cut");
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_a_later_take_takes_the_place_of_the_one_queued_and_the_scene_keeps_leaving() {
+    let (mut engine, ticks) = hardware_engine();
+    let warm = publish(&mut engine, plate("warm", WARM, true));
+    let green = publish(&mut engine, plate("green", GREEN, true));
+    let glass = publish(&mut engine, plate("glass", GLASS, true));
+    let first = taken(take_on(&mut engine, &warm, 5));
+    ticks.store(first.frame + 30, Ordering::Relaxed);
+    let second = taken(take_on(&mut engine, &green, 5));
+    ticks.store(second.frame + 5, Ordering::Relaxed);
+    let third = taken(take_on(&mut engine, &glass, 5));
+    assert_eq!(third.start_frame, second.start_frame, "warm's Out is already running, so it ends when it was going to");
+    assert_eq!(
+        summary(&layers_of(&mut engine)),
+        [(5, "warm", ProgramLayerPhase::Leaving), (5, "glass", ProgramLayerPhase::Queued)],
+        "green was never on air"
+    );
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_clear_and_phase_act_on_one_layer() {
+    let (mut engine, ticks) = hardware_engine();
+    let warm = publish(&mut engine, plate("warm", WARM, true));
+    let glass = publish(&mut engine, plate("glass", GLASS, true));
+    let green = publish(&mut engine, plate("green", GREEN, true));
+    for (pin, layer) in [(&warm, 0), (&glass, 10), (&green, 20)] {
+        assert!(matches!(take_on(&mut engine, pin, layer), EngineReply::Taken(_)));
+    }
+    // A phase on layer 10 is a phase of that layer's scene alone.
+    let phase = on_layer(&mut engine, ClientRequest::Phase(PhaseRequest { phase: "out".into(), at: TakeAt::NextOpportunity }), 10);
+    assert!(matches!(phase, EngineReply::PhaseCommitted(ref committed) if committed.phase == "out"), "{phase:?}");
+    let frame = match engine.program.as_ref() {
+        Some(program) => program.clone(),
+        None => panic!("layer zero is still on air"),
+    };
+    assert_eq!(frame.phase.as_deref(), Some("in"), "layer zero keeps its own phase");
+    assert_eq!(engine.layer_programs[&10].phase.as_deref(), Some("out"));
+    assert_eq!(engine.layer_programs[&20].phase.as_deref(), Some("in"));
+    // Clear layer 20: the other two stay on air.
+    let cleared = on_layer(&mut engine, ClientRequest::Clear(gx_control_plane::intent::ClearRequest { at: TakeAt::NextOpportunity, expected: None }), 20);
+    assert!(matches!(cleared, EngineReply::Cleared(_)), "{cleared:?}");
+    assert_eq!(
+        summary(&layers_of(&mut engine)),
+        [(0, "warm", ProgramLayerPhase::OnAir), (10, "glass", ProgramLayerPhase::OnAir)]
+    );
+    shows(&frame_at(&mut engine, &ticks, 5), working(GLASS).over(working(WARM)), "what is left is the two lower layers");
+    // A Clear with no target is layer zero's alone, as no target means layer zero everywhere else.
+    assert!(matches!(
+        engine.handle(ClientRequest::Clear(gx_control_plane::intent::ClearRequest { at: TakeAt::NextOpportunity, expected: None })),
+        EngineReply::Cleared(_)
+    ));
+    assert_eq!(summary(&layers_of(&mut engine)), [(10, "glass", ProgramLayerPhase::OnAir)]);
+    shows(&frame_at(&mut engine, &ticks, 8), working(GLASS), "glass alone on layer 10 draws over nothing");
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_a_clear_of_a_layer_drops_what_was_queued_behind_it() {
+    let (mut engine, ticks) = hardware_engine();
+    let warm = publish(&mut engine, plate("warm", WARM, true));
+    let green = publish(&mut engine, plate("green", GREEN, true));
+    let first = taken(take_on(&mut engine, &warm, 5));
+    ticks.store(first.frame + 30, Ordering::Relaxed);
+    taken(take_on(&mut engine, &green, 5));
+    assert!(matches!(
+        on_layer(&mut engine, ClientRequest::Clear(gx_control_plane::intent::ClearRequest { at: TakeAt::NextOpportunity, expected: None }), 5),
+        EngineReply::Cleared(_)
+    ));
+    assert_eq!(layers_of(&mut engine), Vec::new());
+    // Long after green would have started, nothing comes on air.
+    let frame = frame_at(&mut engine, &ticks, first.frame + 200);
+    assert!(frame.is_black());
+    assert_eq!(layers_of(&mut engine), Vec::new());
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_a_scene_of_another_canvas_is_refused_by_name_and_nothing_changes() {
+    let (mut engine, _ticks) = hardware_engine();
+    let small = publish(&mut engine, plate("small", WARM, true));
+    let mut large_doc = plate("large", GREEN, true);
+    large_doc.canvas.width = 128;
+    large_doc.canvas.height = 64;
+    large_doc.objects.clear();
+    let large = publish(&mut engine, large_doc);
+    assert!(matches!(take_on(&mut engine, &small, 0), EngineReply::Taken(_)));
+    let refused = take_on(&mut engine, &large, 7);
+    assert!(
+        matches!(&refused, EngineReply::Refused(Refusal::LayerCanvasMismatch { layer, scene, .. }) if layer == "7" && scene == "large"),
+        "{refused:?}"
+    );
+    assert_eq!(summary(&layers_of(&mut engine)), [(0, "small", ProgramLayerPhase::OnAir)]);
+    // The layer it was refused on is not left half-taken, and a scene of the right canvas goes there.
+    assert!(matches!(take_on(&mut engine, &small, 7), EngineReply::Taken(_)));
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit task 112 Engine layers gate"]
+fn gpu_engine_one_scene_on_two_layers_is_drawn_at_each_layers_own_time() {
+    // The same published scene on two layers has two clocks: one GPU scene is drawn twice a frame, once per layer.
+    let (mut engine, ticks) = hardware_engine();
+    let mut doc = plate("wipe", WARM, true);
+    // Its single object is a half-canvas plate that moves right across the canvas over the first 40 frames.
+    if let SceneObject::Rect(rect) = &mut doc.objects[0] {
+        rect.base.width = 16.0;
+    }
+    doc.timeline.channels.push(gx_contracts::animation::KeyframeChannel {
+        object_id: "fill".into(),
+        property: "x".into(),
+        keys: vec![
+            gx_contracts::animation::SceneKeyframe { frame: 0, value: 0.0, easing: gx_contracts::animation::SceneEasing::Linear, bezier: None },
+            gx_contracts::animation::SceneKeyframe { frame: 100, value: 48.0, easing: gx_contracts::animation::SceneEasing::Linear, bezier: None },
+        ],
+    });
+    let pin = publish(&mut engine, doc);
+    let first = taken(take_on(&mut engine, &pin, 0));
+    ticks.store(first.frame + 50, Ordering::Relaxed);
+    let second = taken(take_on(&mut engine, &pin, 1));
+    // Replaced?  No: layer 1 was empty, so layer 0's scene is not leaving anything.
+    assert_eq!(second.start_frame, None);
+    assert_eq!(summary(&layers_of(&mut engine)).len(), 2);
+    // Layer 0 began 50 frames ago: its In (0..20) has played and the scene holds at the end of it (frame 19, the plate near x = 9 to 25).
+    // Layer 1 began this frame, at scene frame 0 (the plate at x = 0 to 16). Two clocks: the plates overlap only between x = 9 and 16.
+    let frame = frame_at(&mut engine, &ticks, second.frame);
+    let at = |x: u32| &frame.pixels[(8 * frame.width as usize + x as usize) * 4..][..4];
+    assert!(at(2)[3] > 0, "layer 1's plate is at the left edge, where layer 0's has long left");
+    assert!(at(20)[3] > 0, "layer 0's plate is further right, where layer 1's has not reached");
+    assert_eq!(at(40)[3], 0, "and neither is near the right edge");
+}

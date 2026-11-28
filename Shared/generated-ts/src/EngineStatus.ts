@@ -3,6 +3,7 @@ import type { ClockSource } from "./ClockSource";
 import type { Degradation } from "./Degradation";
 import type { DeviceTier } from "./DeviceTier";
 import type { Epoch } from "./Epoch";
+import type { ProgramLayerStatus } from "./ProgramLayerStatus";
 import type { ProgramState } from "./ProgramState";
 import type { RationalRate } from "./RationalRate";
 import type { ReferenceState } from "./ReferenceState";
@@ -15,7 +16,15 @@ export type EngineStatus = { epoch: Epoch, currentFrame: bigint, timebase: Ratio
  * Derived from ADR-005 conditions. Never inferred from an adapter name
  * (invariant 20).
  */
-liveAllowed: boolean, program: ProgramState | null,
+liveAllowed: boolean,
+/**
+ * The scene on layer zero.
+ */
+program: ProgramState | null,
+/**
+ * Sorted by layer, with the current scene before its queued replacement.
+ */
+layers?: Array<ProgramLayerStatus>,
 /**
  * Empty means healthy. Order is not significant.
  */

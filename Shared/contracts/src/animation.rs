@@ -14,6 +14,9 @@
 //! property, out-of-range frame — rather than leaving an author to infer which
 //! no-op happened.
 
+pub mod colour;
+pub mod dash;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -35,6 +38,13 @@ pub enum SceneEasing {
     EaseIn,
     EaseOut,
     EaseInOut,
+    /// Robert Penner's easeOutBounce: the value arrives at the second key and rebounds with shrinking height, ending exactly on
+    /// it. Never leaves the range between the two keys' values. Not a cubic bezier (11.134).
+    Bounce,
+    /// Robert Penner's easeOutElastic (amplitude 1, period 0.3): the value overshoots the second key and settles through a
+    /// decaying oscillation. It leaves the range between the keys' values by about 37 percent of their distance, so a property
+    /// with a range refuses it where that would break the range. Not a cubic bezier (11.134).
+    Elastic,
     CustomBezier,
 }
 
@@ -45,6 +55,8 @@ impl SceneEasing {
         Self::EaseIn,
         Self::EaseOut,
         Self::EaseInOut,
+        Self::Bounce,
+        Self::Elastic,
         Self::CustomBezier,
     ];
 }
@@ -125,6 +137,16 @@ pub const ANIMATABLE_PROPERTIES: &[&str] = &[
     "scaleZ",
     "width",
     "height",
+    "size",
+    "lineHeight",
+    "letterSpacing",
+    "baselineShift",
+    "radius",
+    "strokeWidth",
+    "strokeStyle.dashOffset",
+    "trimStart",
+    "trimEnd",
+    "trimOffset",
 ];
 /// Discoverable animation vocabulary for the Editor UI. The browser reads
 /// this from Rust rather than maintaining a second list of properties or
@@ -134,26 +156,61 @@ pub const ANIMATABLE_PROPERTIES: &[&str] = &[
 pub struct AnimationSurface {
     pub properties: Vec<String>,
     pub object_kinds: Vec<String>,
+    /// Exact kind allowlist by scalar property. Older clients can use the flat lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub property_kinds: Option<std::collections::BTreeMap<String, Vec<String>>>,
+    /// Solid colour tracks and the object kinds that may own them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub colour_property_kinds: Option<std::collections::BTreeMap<String, Vec<String>>>,
     pub easings: Vec<SceneEasing>,
 }
 
 pub fn animation_surface() -> AnimationSurface {
+    let properties: Vec<_> = ANIMATABLE_PROPERTIES.iter().map(|&property| property.to_owned())
+        .chain((0..crate::scene::MOST_DASH_ENTRIES).map(|index| format!("{}{index}", dash::PREFIX)))
+        .chain(crate::text_animator::ANIMATOR_PROPERTIES.iter().map(|&property| property.to_owned()))
+        .collect();
     AnimationSurface {
-        properties: ANIMATABLE_PROPERTIES
-            .iter()
-            .map(|value| (*value).to_owned())
-            .collect(),
+        properties: properties.clone(),
         object_kinds: ANIMATABLE_OBJECT_KINDS
             .iter()
             .map(|value| (*value).to_owned())
             .collect(),
+        property_kinds: Some(properties.into_iter().map(|property| {
+            let kinds = ANIMATABLE_OBJECT_KINDS.iter().copied()
+                .filter(|kind| is_animatable(kind, &property))
+                .map(str::to_owned)
+                .collect();
+            (property, kinds)
+        }).collect()),
+        colour_property_kinds: Some(
+            [colour::ColourProperty::Fill, colour::ColourProperty::Stroke, colour::ColourProperty::TextAnimatorFill]
+                .into_iter()
+                .map(|property| {
+                    let kinds = ANIMATABLE_OBJECT_KINDS.iter().copied()
+                        .filter(|kind| property.supports(kind)).map(str::to_owned).collect();
+                    (property.name().into(), kinds)
+                }).collect(),
+        ),
         easings: SceneEasing::ALL.to_vec(),
     }
 }
 
 /// Whether a scene channel is one the current evaluator may own.
 pub fn is_animatable(kind: &str, property: &str) -> bool {
-    ANIMATABLE_OBJECT_KINDS.contains(&kind) && ANIMATABLE_PROPERTIES.contains(&property)
+    match property {
+        "size" | "lineHeight" | "letterSpacing" | "baselineShift" => kind == "text",
+        "radius" => kind == "rect",
+        candidate if crate::text_animator::ANIMATOR_PROPERTIES.contains(&candidate) => kind == "text",
+        candidate if dash::index(candidate).is_some() => is_animatable(kind, "strokeWidth"),
+        "strokeWidth" | "strokeStyle.dashOffset" => {
+            matches!(kind, "text" | "rect" | "ellipse" | "line" | "shape")
+        }
+        "trimStart" | "trimEnd" | "trimOffset" => kind == "shape",
+        _ => ANIMATABLE_OBJECT_KINDS.contains(&kind) && ANIMATABLE_PROPERTIES.contains(&property),
+    }
 }
 
 /// The domain of an effect parameter channel (3.22): `None` when `property`
@@ -181,6 +238,13 @@ pub fn effect_parameter_domain(
 /// parameter of one of its effects.
 pub fn is_animatable_on(object: &crate::scene::SceneObject, property: &str) -> bool {
     let kind = object.kind();
+    if crate::text_animator::ANIMATOR_PROPERTIES.contains(&property) {
+        return matches!(object, crate::scene::SceneObject::Text(text) if text.text_animator.is_some());
+    }
+    if let Some(index) = dash::index(property) {
+        return is_animatable(kind, property)
+            && object.base().stroke_style.as_ref().is_some_and(|style| index < style.dash.len());
+    }
     is_animatable(kind, property)
         || (ANIMATABLE_OBJECT_KINDS.contains(&kind)
             && matches!(effect_parameter_domain(object, property), Some(Some(_))))
@@ -322,8 +386,17 @@ fn validate_property_domain(
     value: f64,
 ) -> Result<(), Refusal> {
     let allowed = match property {
-        "opacity" if !value.is_finite() || !(0.0..=1.0).contains(&value) => "0..=1",
-        "width" | "height" if !value.is_finite() || value < 0.0 => "finite and >= 0",
+        name if dash::index(name).is_some() && (!value.is_finite() || value < 0.0) => "finite and >= 0",
+        "opacity" | "textAnimator.opacity" | "textAnimator.selector.start" | "textAnimator.selector.end"
+            if !(0.0..=1.0).contains(&value) => "0..=1",
+        "width" | "height" | "radius" | "strokeWidth" | "textAnimator.scale" if !value.is_finite() || value < 0.0 => {
+            "finite and >= 0"
+        }
+        "size" | "lineHeight" if !value.is_finite() || value <= 0.0 => "finite and > 0",
+        "baselineShift" if !value.is_finite() || value.abs() > f64::from(f32::MAX) => {
+            "finite and representable as f32"
+        }
+        "trimStart" | "trimEnd" if !(0.0..=100.0).contains(&value) => "0..=100",
         _ => return Ok(()),
     };
     Err(Refusal::KeyframeValueOutOfDomain {
@@ -345,12 +418,45 @@ fn validate_segments(
 ) -> Result<(), Refusal> {
     let effect = effect_domain_in(scene, object, property)
         .filter(|domain| matches!(domain, crate::effect::Domain::Range { .. }));
-    if effect.is_none() && !matches!(property, "opacity" | "width" | "height") {
+    if effect.is_none()
+        && dash::index(property).is_none()
+        && !matches!(
+            property,
+            "opacity" | "width" | "height" | "radius" | "strokeWidth" | "size"
+                | "lineHeight" | "baselineShift" | "trimStart" | "trimEnd" | "textAnimator.scale"
+                | "textAnimator.selector.start" | "textAnimator.selector.end" | "textAnimator.opacity"
+        )
+    {
         return Ok(());
     }
     for pair in keys.windows(2) {
         let (from, to) = (&pair[0], &pair[1]);
-        if from.easing != SceneEasing::CustomBezier || from.value == to.value {
+        if from.value == to.value {
+            continue;
+        }
+        // Elastic leaves the range between its two keys. It has no closed-form extremum worth the risk of a wrong one, so it is
+        // checked along the whole curve at a resolution far finer than one frame; the first overshoot of about 37 percent is far
+        // from any boundary a sampled error could matter at. Bounce stays inside 0 to 1 by construction (a test pins that).
+        if from.easing == SceneEasing::Elastic {
+            for step in 1..4096 {
+                let y = elastic_out(f64::from(step) / 4096.0);
+                let value = from.value + (to.value - from.value) * y;
+                validate_property_domain(object, property, from.frame, value)?;
+                if let Some(domain) = effect {
+                    if !domain.admits(value) {
+                        return Err(Refusal::KeyframeValueOutOfDomain {
+                            object: object.into(),
+                            property: property.into(),
+                            frame: from.frame,
+                            value: value.to_string(),
+                            allowed: domain.describe(),
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+        if from.easing != SceneEasing::CustomBezier {
             continue;
         }
         let Some(points) = from.bezier else {
@@ -404,6 +510,7 @@ fn validate_segments(
 /// and the evaluator's binary search requires strictly increasing frames.
 pub fn validate_scene_animation(scene: &SceneDocument) -> Result<(), Refusal> {
     refuse_duplicate_object_ids(scene)?;
+    colour::validate(scene)?;
     let mut channels = std::collections::BTreeSet::new();
     for channel in &scene.timeline.channels {
         let index = object_index(scene, &channel.object_id)?;
@@ -440,6 +547,61 @@ pub fn validate_scene_animation(scene: &SceneDocument) -> Result<(), Refusal> {
             }
         }
         validate_segments(scene, &channel.object_id, &channel.property, &channel.keys)?;
+    }
+    let dash_objects: std::collections::BTreeSet<_> = scene.timeline.channels.iter()
+        .filter(|channel| dash::index(&channel.property).is_some())
+        .map(|channel| channel.object_id.as_str()).collect();
+    for object in dash_objects {
+        dash::validate_pattern(scene, object, None)?;
+    }
+    Ok(())
+}
+
+/// Add, replace or remove an animator on every target as one edit.
+pub(crate) fn set_text_animator(
+    scene: &mut SceneDocument,
+    object_ids: &[String],
+    animator: Option<&crate::text_animator::TextAnimator>,
+) -> Result<(), Refusal> {
+    use crate::scene::SceneObject;
+
+    if object_ids.is_empty() {
+        return Err(Refusal::EditTargetsEmpty);
+    }
+    refuse_duplicate_object_ids(scene)?;
+    let mut indices = Vec::with_capacity(object_ids.len());
+    for id in object_ids {
+        let index = object_index(scene, id)?;
+        if !matches!(scene.objects[index], SceneObject::Text(_)) {
+            return Err(Refusal::AnimationPropertyUnsupported {
+                object: id.clone(), property: "textAnimator".into(),
+            });
+        }
+        indices.push(index);
+    }
+    if let Some(detail) = animator.and_then(|animator| animator.validate().err()) {
+        return Err(Refusal::ScenePropertyNotDrawable {
+            object: object_ids[0].clone(),
+            property: format!("textAnimator: {detail}"),
+            owner: "11.61".into(),
+        });
+    }
+    for index in indices {
+        let SceneObject::Text(text) = &mut scene.objects[index] else { unreachable!() };
+        text.text_animator = animator.cloned();
+    }
+    if animator.is_none() {
+        if let Some(channels) = &mut scene.timeline.colour_channels {
+            channels.retain(|channel| channel.property != colour::ColourProperty::TextAnimatorFill
+                || !object_ids.contains(&channel.object_id));
+            if channels.is_empty() {
+                scene.timeline.colour_channels = None;
+            }
+        }
+        scene.timeline.channels.retain(|channel| {
+            !object_ids.contains(&channel.object_id)
+                || !crate::text_animator::ANIMATOR_PROPERTIES.contains(&channel.property.as_str())
+        });
     }
     Ok(())
 }
@@ -495,8 +657,54 @@ pub fn set_base_property(
         instance.set(path, value);
         return Ok(());
     }
-    let base = scene.objects[index].base_mut();
+    use crate::scene::SceneObject;
+
+    let object = &mut scene.objects[index];
+    match (&mut *object, property) {
+        (SceneObject::Text(text), "size") => text.size = value,
+        (SceneObject::Text(text), "lineHeight") => text.line_height = Some(value),
+        (SceneObject::Text(text), "letterSpacing") => text.letter_spacing = value,
+        (SceneObject::Text(text), "baselineShift") => text.baseline_shift = Some(value),
+        (SceneObject::Text(text), name) if crate::text_animator::ANIMATOR_PROPERTIES.contains(&name) => {
+            let animator = text.text_animator.as_mut().expect("channel requires an authored animator");
+            match name {
+                "textAnimator.selector.start" => animator.selector.start = value,
+                "textAnimator.selector.end" => animator.selector.end = value,
+                "textAnimator.selector.offset" => animator.selector.offset = value,
+                "textAnimator.x" => animator.x = value,
+                "textAnimator.y" => animator.y = value,
+                "textAnimator.scale" => animator.scale = value,
+                "textAnimator.rotation" => animator.rotation = value,
+                "textAnimator.opacity" => animator.opacity = Some(value),
+                "textAnimator.tracking" => animator.tracking = Some(value),
+                _ => unreachable!(),
+            }
+        }
+        (SceneObject::Rect(rect), "radius") => rect.radius = value,
+        (SceneObject::Shape(shape), "trimStart") => shape.trim_start = Some(value),
+        (SceneObject::Shape(shape), "trimEnd") => shape.trim_end = Some(value),
+        (SceneObject::Shape(shape), "trimOffset") => shape.trim_offset = Some(value),
+        _ => return set_transform_property(object, object_id, property, value),
+    }
+    Ok(())
+}
+
+fn set_transform_property(
+    object: &mut crate::scene::SceneObject,
+    object_id: &str,
+    property: &str,
+    value: f64,
+) -> Result<(), Refusal> {
+    let base = object.base_mut();
     match property {
+        name if dash::index(name).is_some() => {
+            let index = dash::index(name).expect("dash address was checked");
+            let entry = base.stroke_style.as_mut().and_then(|style| style.dash.get_mut(index))
+                .ok_or_else(|| Refusal::AnimationPropertyUnsupported {
+                    object: object_id.into(), property: property.into(),
+                })?;
+            *entry = value;
+        }
         "opacity" => base.opacity = value,
         "x" => base.x = value,
         "y" => base.y = value,
@@ -508,6 +716,10 @@ pub fn set_base_property(
         "scaleY" => base.scale_y = value,
         "scaleZ" => base.scale_z = value,
         "width" => base.width = value,
+        "strokeWidth" => base.stroke_width = value,
+        "strokeStyle.dashOffset" => {
+            base.stroke_style.get_or_insert_with(Default::default).dash_offset = value;
+        }
         "height" => base.height = value,
         // `is_animatable` already gates the set, so an unmatched name here is a
         // vocabulary that grew without a field to write — a bug, not input.
@@ -548,6 +760,19 @@ pub fn apply_property_edit(
     frame: u64,
     auto_key: AutoKey,
 ) -> Result<(), Refusal> {
+    if dash::index(property).is_some() {
+        let mut candidate = scene.clone();
+        let easing = existing_easing(&candidate, object_id, property, frame);
+        let bezier = existing_bezier(&candidate, object_id, property, frame, easing);
+        set_base_property(&mut candidate, object_id, property, value)?;
+        if auto_key == AutoKey::On {
+            set_keyframe(&mut candidate, object_id, property, SceneKeyframe { frame, value, easing, bezier })?;
+        } else {
+            dash::validate_pattern(&candidate, object_id, None)?;
+        }
+        *scene = candidate;
+        return Ok(());
+    }
     if auto_key == AutoKey::On {
         // Validate the key before writing the base, so a refused edit leaves
         // the object exactly as it was rather than half-applied.
@@ -686,13 +911,17 @@ pub fn set_keyframe(
                 keys.sort_by_key(|key| key.frame);
             }
             validate_segments(scene, object_id, property, &keys)?;
+            validate_dash_edit(scene, object_id, property, &keys)?;
             scene.timeline.channels[index].keys = keys;
         }
-        None => scene.timeline.channels.push(KeyframeChannel {
-            object_id: object_id.to_owned(),
-            property: property.to_owned(),
-            keys: vec![key],
-        }),
+        None => {
+            validate_dash_edit(scene, object_id, property, std::slice::from_ref(&key))?;
+            scene.timeline.channels.push(KeyframeChannel {
+                object_id: object_id.to_owned(),
+                property: property.to_owned(),
+                keys: vec![key],
+            });
+        }
     }
     Ok(())
 }
@@ -742,6 +971,7 @@ pub fn move_keyframe(
     keys[key_index].frame = to_frame;
     keys.sort_by_key(|key| key.frame);
     validate_segments(scene, object_id, property, &keys)?;
+    validate_dash_edit(scene, object_id, property, &keys)?;
     scene.timeline.channels[index].keys = keys;
     Ok(())
 }
@@ -796,6 +1026,7 @@ fn remove_keyframe_inner(
     // Removing a middle key joins two formerly separate segments.
     if validate_join {
         validate_segments(scene, object_id, property, &keys)?;
+        validate_dash_edit(scene, object_id, property, &keys)?;
     }
     let now_empty = keys.is_empty();
     scene.timeline.channels[index].keys = keys;
@@ -803,6 +1034,13 @@ fn remove_keyframe_inner(
         scene.timeline.channels.remove(index);
     }
     Ok(removed)
+}
+
+fn validate_dash_edit(scene: &SceneDocument, object: &str, property: &str, keys: &[SceneKeyframe]) -> Result<(), Refusal> {
+    if dash::index(property).is_some() {
+        dash::validate_pattern(scene, object, Some((property, keys)))?;
+    }
+    Ok(())
 }
 
 /// The scene property a preset's property path names.
@@ -866,6 +1104,8 @@ pub fn easing_token_for_scene_easing(easing: SceneEasing) -> Option<Option<Token
         SceneEasing::EaseIn => "ease-in",
         SceneEasing::EaseOut => "ease-out",
         SceneEasing::EaseInOut => "ease-in-out",
+        SceneEasing::Bounce => "bounce",
+        SceneEasing::Elastic => "elastic",
         SceneEasing::Hold => "hold",
         SceneEasing::CustomBezier => return None,
     };
@@ -885,6 +1125,8 @@ pub fn scene_easing_for_token(token: Option<&TokenRef>) -> SceneEasing {
         Some("ease-in") => SceneEasing::EaseIn,
         Some("ease-out") => SceneEasing::EaseOut,
         Some("ease-in-out") => SceneEasing::EaseInOut,
+        Some("bounce") => SceneEasing::Bounce,
+        Some("elastic") => SceneEasing::Elastic,
         Some("hold") => SceneEasing::Hold,
         _ => SceneEasing::Linear,
     }
@@ -1198,6 +1440,14 @@ pub const fn easing_control_points(easing: SceneEasing) -> CubicBezier {
             x2: 0.58,
             y2: 1.0,
         },
+        // Bounce and Elastic are not cubic beziers and have no control points: `ease_at` solves them by their own formulas before this
+        // is reached. The straight line here is only the total answer a caller that asks anyway gets, never what is drawn.
+        SceneEasing::Bounce | SceneEasing::Elastic => CubicBezier {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+        },
         // Meaningless without its stored points, which `ease_at` requires: a
         // custom easing with none is refused, never solved as this line.
         SceneEasing::CustomBezier => CubicBezier {
@@ -1245,6 +1495,11 @@ pub fn ease_at(easing: SceneEasing, bezier: Option<CubicBezier>, t: f64) -> Opti
     if easing == SceneEasing::Hold {
         return Some(0.0);
     }
+    match easing {
+        SceneEasing::Bounce => return Some(bounce_out(t)),
+        SceneEasing::Elastic => return Some(elastic_out(t)),
+        _ => {}
+    }
     let points = match (easing, bezier) {
         (SceneEasing::CustomBezier, Some(points)) => points,
         // The edit operations and the Editor's and engine's document readers
@@ -1254,6 +1509,38 @@ pub fn ease_at(easing: SceneEasing, bezier: Option<CubicBezier>, t: f64) -> Opti
         (named, _) => easing_control_points(named),
     };
     Some(solve_bezier(points, t))
+}
+
+/// Penner's easeOutBounce on 0–1: four parabolic arcs, ending exactly on 1 and never above it.
+fn bounce_out(t: f64) -> f64 {
+    const N1: f64 = 7.5625;
+    const D1: f64 = 2.75;
+    if t >= 1.0 {
+        1.0
+    } else if t < 1.0 / D1 {
+        N1 * t * t
+    } else if t < 2.0 / D1 {
+        let t = t - 1.5 / D1;
+        N1 * t * t + 0.75
+    } else if t < 2.5 / D1 {
+        let t = t - 2.25 / D1;
+        N1 * t * t + 0.9375
+    } else {
+        let t = t - 2.625 / D1;
+        N1 * t * t + 0.984375
+    }
+}
+
+/// Penner's easeOutElastic on 0–1 (amplitude 1, period 0.3): a decaying oscillation about 1, exactly 0 at the start and 1 at the end.
+fn elastic_out(t: f64) -> f64 {
+    if t <= 0.0 {
+        0.0
+    } else if t >= 1.0 {
+        1.0
+    } else {
+        let c4 = std::f64::consts::TAU / 3.0;
+        2.0_f64.powf(-10.0 * t) * ((t * 10.0 - 0.75) * c4).sin() + 1.0
+    }
 }
 
 /// Eased progress along one resolved curve, `t` already clamped to 0–1.
@@ -1367,6 +1654,39 @@ mod tests {
     use crate::design_system::MotionChannel;
     use crate::scene::{ObjectBase, RectObject, SceneCanvas, SceneObject, SceneTimeline};
     use crate::{RationalRate, Revision};
+
+    #[test]
+    fn dash_keys_require_existing_entries_and_a_positive_pattern() {
+        let mut scene = scene_with(vec![rect("card")]);
+        let first = "strokeStyle.dash.0";
+        let second = "strokeStyle.dash.1";
+        let key = |frame, value| SceneKeyframe {
+            frame, value, easing: SceneEasing::Linear, bezier: None,
+        };
+        assert!(set_keyframe(&mut scene, "card", first, key(0, 0.0)).is_err());
+        scene.objects[0].base_mut().stroke_style = Some(crate::scene::StrokeStyle {
+            dash: vec![2.0, 4.0],
+            ..Default::default()
+        });
+        assert!(set_keyframe(&mut scene, "card", "strokeStyle.dash.2", key(0, 3.0)).is_err());
+        assert!(set_keyframe(&mut scene, "card", first, key(0, -1.0)).is_err());
+        set_keyframe(&mut scene, "card", first, key(0, 2.0)).unwrap();
+        set_keyframe(&mut scene, "card", first, key(5, 0.0)).unwrap();
+        set_keyframe(&mut scene, "card", first, key(10, 2.0)).unwrap();
+        set_keyframe(&mut scene, "card", second, key(0, 4.0)).unwrap();
+        set_keyframe(&mut scene, "card", second, key(10, 4.0)).unwrap();
+        let before = scene.clone();
+        assert!(matches!(
+            set_keyframe(&mut scene, "card", second, key(5, 0.0)),
+            Err(Refusal::KeyframeValueOutOfDomain { property, frame: 5, .. })
+                if property == "strokeStyle.dash"
+        ));
+        assert_eq!(scene, before);
+        assert!(validate_scene_animation(&scene).is_ok());
+        let kinds = animation_surface().property_kinds.unwrap();
+        assert!(kinds[first].iter().any(|kind| kind == "rect"));
+        assert!(!kinds[first].iter().any(|kind| kind == "image"));
+    }
 
     fn scene_with(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
@@ -1673,6 +1993,116 @@ mod tests {
         // A descending curve can undershoot a non-negative size.
         set_keyframe(&mut scene, "card", "width", overshoot_key(0, 10.0)).unwrap();
         assert!(set_keyframe(&mut scene, "card", "width", key(100, 0.0)).is_err());
+    }
+
+    #[test]
+    fn bounce_is_penners_ease_out_bounce_and_never_leaves_zero_to_one() {
+        for (t, expected) in [
+            (0.0, 0.0),
+            (0.25, 0.47265625),
+            (0.5, 0.765625),
+            (0.9, 0.988125),
+            // The fourth and last arc, which the other samples do not reach.
+            (0.95, 0.98453125),
+            (1.0, 1.0),
+        ] {
+            let got = ease_at(SceneEasing::Bounce, None, t).unwrap();
+            assert!((got - expected).abs() < 1e-9, "t={t}: {got} vs {expected}");
+        }
+        // Every sampled step stays inside 0..=1 (this is what lets a property with a range take it without a check), and it
+        // touches 1 at each rebound.
+        let mut touches = 0;
+        for step in 0..=10_000 {
+            let y = ease_at(SceneEasing::Bounce, None, f64::from(step) / 10_000.0).unwrap();
+            assert!((0.0..=1.0 + 1e-12).contains(&y), "step {step}: {y}");
+            touches += usize::from((y - 1.0).abs() < 1e-3);
+        }
+        assert!(touches >= 4, "the rebounds reach 1 again ({touches} samples near 1)");
+    }
+
+    #[test]
+    fn elastic_is_penners_ease_out_elastic_and_overshoots_by_about_37_percent() {
+        for (t, expected) in [(0.0, 0.0), (0.5, 1.015625), (1.0, 1.0)] {
+            let got = ease_at(SceneEasing::Elastic, None, t).unwrap();
+            assert!((got - expected).abs() < 1e-9, "t={t}: {got} vs {expected}");
+        }
+        let (mut peak, mut trough_after_peak) = (0.0_f64, f64::MAX);
+        for step in 0..=10_000 {
+            let y = ease_at(SceneEasing::Elastic, None, f64::from(step) / 10_000.0).unwrap();
+            if y > peak {
+                peak = y;
+            } else {
+                trough_after_peak = trough_after_peak.min(y);
+            }
+            assert!(y >= 0.0, "it never goes below its start: {y}");
+        }
+        assert!((1.36..1.38).contains(&peak), "first overshoot {peak}");
+        assert!(trough_after_peak < 1.0, "it swings back under 1 after the first peak");
+    }
+
+    #[test]
+    fn bounce_and_elastic_have_wire_names_tokens_and_no_control_points_of_their_own() {
+        assert_eq!(serde_json::to_string(&SceneEasing::Bounce).unwrap(), "\"bounce\"");
+        assert_eq!(serde_json::to_string(&SceneEasing::Elastic).unwrap(), "\"elastic\"");
+        assert_eq!(serde_json::from_str::<SceneEasing>("\"elastic\"").unwrap(), SceneEasing::Elastic);
+        for easing in [SceneEasing::Bounce, SceneEasing::Elastic] {
+            assert!(SceneEasing::ALL.contains(&easing));
+            let token = easing_token_for_scene_easing(easing).unwrap();
+            assert_eq!(scene_easing_for_token(token.as_ref()), easing, "{easing:?} survives capture and instantiate");
+            // A stray bezier on a named easing is still refused, as for every named easing.
+            let scene = scene_with(vec![rect("card")]);
+            let with_bezier = SceneKeyframe { easing, bezier: Some(CubicBezier { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 }), ..key(0, 0.0) };
+            assert!(matches!(validate_key(&scene, "card", "x", &with_bezier), Err(Refusal::InvalidKeyframeEasing { .. })));
+        }
+    }
+
+    #[test]
+    fn elastic_is_refused_where_its_overshoot_leaves_a_property_range_and_bounce_never_is() {
+        let elastic = |frame, value| SceneKeyframe { easing: SceneEasing::Elastic, ..key(frame, value) };
+        let bounce = |frame, value| SceneKeyframe { easing: SceneEasing::Bounce, ..key(frame, value) };
+        let mut scene = scene_with(vec![rect("card")]);
+        // Opacity 0 to 1 would pass 1 by about 37 percent: refused at the key that leaves, naming it, and nothing changes.
+        set_keyframe(&mut scene, "card", "opacity", elastic(0, 0.0)).unwrap();
+        let before = scene_bytes(&scene);
+        assert!(matches!(
+            set_keyframe(&mut scene, "card", "opacity", key(20, 1.0)),
+            Err(Refusal::KeyframeValueOutOfDomain { frame: 0, .. })
+        ));
+        assert_eq!(scene_bytes(&scene), before);
+        // With room it is fine: 0 to 0.6 peaks near 0.82, and 0.5 to 0.6 near 0.637.
+        set_keyframe(&mut scene, "card", "opacity", key(20, 0.6)).unwrap();
+        set_keyframe(&mut scene, "card", "opacity", elastic(0, 0.5)).unwrap();
+        set_keyframe(&mut scene, "card", "opacity", key(20, 0.6)).unwrap();
+        validate_scene_animation(&scene).unwrap();
+        // A property with no range overshoots freely, and so may a size that stays positive.
+        set_keyframe(&mut scene, "card", "x", elastic(0, 0.0)).unwrap();
+        set_keyframe(&mut scene, "card", "x", key(20, 500.0)).unwrap();
+        set_keyframe(&mut scene, "card", "width", elastic(0, 100.0)).unwrap();
+        set_keyframe(&mut scene, "card", "width", key(20, 400.0)).unwrap();
+        // A size falling to nothing swings under it: refused.
+        set_keyframe(&mut scene, "card", "height", elastic(0, 100.0)).unwrap();
+        assert!(set_keyframe(&mut scene, "card", "height", key(20, 0.0)).is_err());
+        // Bounce stays inside the two values, so opacity 0 to 1 is allowed.
+        let mut other = scene_with(vec![rect("card")]);
+        set_keyframe(&mut other, "card", "opacity", bounce(0, 0.0)).unwrap();
+        set_keyframe(&mut other, "card", "opacity", key(20, 1.0)).unwrap();
+        validate_scene_animation(&other).unwrap();
+    }
+
+    #[test]
+    fn a_channel_keyed_with_bounce_or_elastic_is_evaluated_by_those_curves_between_its_frames() {
+        let channel = |easing| KeyframeChannel {
+            object_id: "card".into(),
+            property: "x".into(),
+            keys: vec![SceneKeyframe { easing, ..key(0, 100.0) }, key(100, 300.0)],
+        };
+        // Frame 50 is t = 0.5: the value is 100 plus 200 times the easing, so the evaluator really uses these curves.
+        let bounce = evaluate_channel(&channel(SceneEasing::Bounce), 50).unwrap().unwrap();
+        assert!((bounce - (100.0 + 200.0 * 0.765625)).abs() < 1e-9, "{bounce}");
+        let elastic = evaluate_channel(&channel(SceneEasing::Elastic), 50).unwrap().unwrap();
+        assert!((elastic - (100.0 + 200.0 * 1.015625)).abs() < 1e-9, "{elastic}");
+        // It arrives exactly on the second key, and holds there.
+        assert_eq!(evaluate_channel(&channel(SceneEasing::Elastic), 100).unwrap(), Some(300.0));
     }
 
     #[test]

@@ -1,0 +1,161 @@
+[
+ {
+  "name": "the mock engine is listening on 4400",
+  "ok": true
+ },
+ {
+  "name": "the page is served by the real shell, not a file or a server",
+  "ok": true,
+  "detail": "http://tauri.localhost/"
+ },
+ {
+  "name": "the Stacks panel and the Stack field exist in the real window",
+  "ok": true
+ },
+ {
+  "name": "the module imports loaded: the table drew its header",
+  "ok": true
+ },
+ {
+  "name": "the window attached to the mock engine on its own",
+  "ok": true,
+  "detail": "127.0.0.1:4400 · Genlocked · T0"
+ },
+ {
+  "name": "signed in through the real shell",
+  "ok": true,
+  "detail": "signed in"
+ },
+ {
+  "name": "an engine that sends no list: one row, stack 0, and the page says so",
+  "ok": true,
+  "detail": {
+   "r": [
+    {
+     "stack": "0",
+     "scene": "empty",
+     "chips": [],
+     "disabled": [
+      true,
+      true,
+      true
+     ]
+    }
+   ],
+   "note": "This engine reports Stack 0 only."
+  }
+ },
+ {
+  "name": "a TAKE on stack 0 goes on air: the row shows the scene and ON AIR, from program",
+  "ok": true,
+  "detail": [
+   {
+    "stack": "0",
+    "scene": "bug · revision 1",
+    "chips": [
+     "ON AIR"
+    ],
+    "disabled": [
+     false,
+     false,
+     false
+    ]
+   }
+  ]
+ },
+ {
+  "name": "the Stacks panel carries the engine's committed result",
+  "ok": true,
+  "detail": "TAKE · engine committed frame 1 · 29.97 (30000/1001) · Genlocked"
+ },
+ {
+  "name": "its row controls are enabled",
+  "ok": true,
+  "detail": [
+   false,
+   false,
+   false
+  ]
+ },
+ {
+  "name": "TAKE on +60 reaches the engine through the shell and is refused by name, naming the stack",
+  "ok": true,
+  "detail": "TAKE · refused: layerNotSupported (layer=60, request=take) · take is aimed at the unsupported Program layer \"60\" [po-a362eb74-31] · stack +60"
+ },
+ {
+  "name": "and the main stack is still on air (nothing landed on layer zero)",
+  "ok": true,
+  "detail": [
+   {
+    "stack": "60",
+    "scene": "empty",
+    "chips": [],
+    "disabled": [
+     true,
+     true,
+     true
+    ]
+   },
+   {
+    "stack": "0",
+    "scene": "bug · revision 1",
+    "chips": [
+     "ON AIR"
+    ],
+    "disabled": [
+     false,
+     false,
+     false
+    ]
+   }
+  ]
+ },
+ {
+  "name": "CLEAR on +60 is a named refusal too, and stack 0 stays on air",
+  "ok": true,
+  "detail": "CLEAR · refused: layerNotSupported (layer=60, request=clear) · clear is aimed at the unsupported Program layer \"60\" [po-3fa66f5a-37] · stack +60"
+ },
+ {
+  "name": "a hold released at 0.5 s sends nothing",
+  "ok": true
+ },
+ {
+  "name": "a row Clear held for a second is accepted by the shell with its expected page and the engine commits it",
+  "ok": true,
+  "detail": "CLEAR · engine committed frame 1 · 29.97 (30000/1001) · Genlocked"
+ },
+ {
+  "name": "and the table reads the engine's answer: stack 0 is empty again",
+  "ok": true,
+  "detail": [
+   {
+    "stack": "0",
+    "scene": "empty",
+    "chips": [],
+    "disabled": [
+     true,
+     true,
+     true
+    ]
+   }
+  ]
+ },
+ {
+  "name": "Cue out held on a row reaches the engine and its answer is shown, named",
+  "ok": true,
+  "detail": "OUT · refused: timelinePhaseUnknown (phase=out) · the timeline has no phase out [po-07678e7e-69]"
+ },
+ {
+  "name": "no script error, console error or CSP violation in the real window",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "ended engine by PID 638212",
+  "ok": true
+ },
+ {
+  "name": "ended shell by PID 638768",
+  "ok": true
+ }
+]

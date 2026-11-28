@@ -1,0 +1,8 @@
+1 colours shows assets tab CAUGHT
+2 fonts shows text styles CAUGHT
+3 unknown falls to last CAUGHT
+4 panel lookup wrong CAUGHT
+5 assets ignores its tab CAUGHT
+6 tab accepted that is not assets panel CAUGHT
+7 order changed CAUGHT
+7 of 7 caught

@@ -82,13 +82,32 @@ pub struct RecoveryState {
     /// declared assets.
     pub verified_assets: BTreeSet<ContentHash>,
     pub cued: Option<ProgramState>,
+    /// Cues outside layer zero. Older journals omit this field.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layer_cues: BTreeMap<i32, ProgramState>,
     pub program: Option<ProgramState>,
+    /// Scenes on air outside layer zero (task 112). Older journals omit this field.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layer_programs: BTreeMap<i32, ProgramState>,
+    /// A scene waiting on each layer for the one leaving it to finish its Out (task 112). A restart must not turn a replacement
+    /// into a cut, so it is journaled with the frame it starts at. Older journals omit this field.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub replacements: BTreeMap<i32, Replacement>,
     /// The revision each dropped take last had (5.11), so publishing it again
     /// continues from there and a revision number is never reused for other
     /// content (invariant 61). A take has a floor only while it is not
     /// published.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub revision_floors: BTreeMap<TakeId, Revision>,
+}
+
+/// A scene queued onto a layer: it takes the layer when the engine clock reaches `start_frame`, the frame the scene on it finishes
+/// leaving (its authored Out). `state` is how it will be on air from then (its committed frame is `start_frame`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Replacement {
+    pub state: ProgramState,
+    pub start_frame: u64,
 }
 
 /// A journaled scene a restore dropped because its asset bytes were missing,
@@ -153,7 +172,10 @@ impl RecoveryState {
             prepared_scenes: Vec::new(),
             verified_assets: BTreeSet::new(),
             cued: None,
+            layer_cues: BTreeMap::new(),
             program: None,
+            layer_programs: BTreeMap::new(),
+            replacements: BTreeMap::new(),
             revision_floors: BTreeMap::new(),
         }
     }
@@ -245,37 +267,69 @@ impl RecoveryState {
             });
         }
 
-        for (name, state) in [("cued", &self.cued), ("program", &self.program)] {
-            if let Some(state) = state {
-                let latest = self.published.get(&state.take_id).map(|held| held.revision);
-                match latest {
-                    Some(latest) if state.revision == latest => {}
-                    // An earlier revision of a published take, which the
-                    // journal must be able to rebuild (5.12).
-                    Some(latest)
-                        if state.revision < latest
-                            && self.prepared_scenes.iter().any(|scene| {
-                                scene.take_id == state.take_id && scene.revision == state.revision
-                            }) => {}
-                    _ => {
-                        return Err(RecoveryError::InvalidState {
-                            detail: format!(
-                                "{name} state {}/{} is not a published revision the journal holds",
-                                state.take_id, state.revision.0
-                            ),
-                        });
-                    }
+        use gx_control_plane::message::{MAIN_LAYER, MAX_PROGRAM_LAYER, MIN_PROGRAM_LAYER};
+        let in_range = |layer: i32| (MIN_PROGRAM_LAYER..=MAX_PROGRAM_LAYER).contains(&layer);
+        for &layer in self.layer_cues.keys() {
+            if layer == MAIN_LAYER || !in_range(layer) {
+                return Err(RecoveryError::InvalidState {
+                    detail: format!("invalid layer cue target {layer}"),
+                });
+            }
+        }
+        for &layer in self.layer_programs.keys() {
+            if layer == MAIN_LAYER || !in_range(layer) {
+                return Err(RecoveryError::InvalidState {
+                    detail: format!("invalid on-air layer {layer}"),
+                });
+            }
+        }
+        // A replacement waits on a layer that has a scene leaving it; one with nothing on air under it was never made.
+        for &layer in self.replacements.keys() {
+            let occupied = if layer == MAIN_LAYER { self.program.is_some() } else { self.layer_programs.contains_key(&layer) };
+            if !in_range(layer) || !occupied {
+                return Err(RecoveryError::InvalidState {
+                    detail: format!("a replacement is queued on layer {layer}, which has no scene on air to leave it"),
+                });
+            }
+        }
+        let states = [("cued", &self.cued), ("program", &self.program)]
+            .into_iter()
+            .filter_map(|(name, state)| state.as_ref().map(|state| (name, state)))
+            .chain(self.layer_cues.values().map(|state| ("layer cue", state)))
+            .chain(self.layer_programs.values().map(|state| ("layer program", state)))
+            .chain(self.replacements.values().map(|queued| ("queued replacement", &queued.state)));
+        for (name, state) in states {
+            let latest = self.published.get(&state.take_id).map(|held| held.revision);
+            match latest {
+                Some(latest) if state.revision == latest => {}
+                // An earlier revision of a published take, which the
+                // journal must be able to rebuild (5.12).
+                Some(latest)
+                    if state.revision < latest
+                        && self.prepared_scenes.iter().any(|scene| {
+                            scene.take_id == state.take_id && scene.revision == state.revision
+                        }) => {}
+                _ => {
+                    return Err(RecoveryError::InvalidState {
+                        detail: format!(
+                            "{name} state {}/{} is not a published revision the journal holds",
+                            state.take_id, state.revision.0
+                        ),
+                    });
                 }
             }
         }
         Ok(())
     }
 
-    /// Whether Program or the cue names this revision of this take.
+    /// Whether a scene on any layer, a cue or a queued replacement names this revision of this take.
     pub fn names(&self, take_id: &TakeId, revision: Revision) -> bool {
         [&self.program, &self.cued]
             .into_iter()
             .flatten()
+            .chain(self.layer_cues.values())
+            .chain(self.layer_programs.values())
+            .chain(self.replacements.values().map(|queued| &queued.state))
             .any(|state| state.take_id == *take_id && state.revision == revision)
     }
 
@@ -658,6 +712,86 @@ mod tests {
         plain.as_object_mut().unwrap().remove("revisionFloors");
         let read: RecoveryState = serde_json::from_value(plain).unwrap();
         assert!(read.revision_floors.is_empty());
+    }
+
+    // --- Program layers and queued replacements (task 112) ---------------------------------------------------------------------
+
+    fn on_air(take: &str, from: u64) -> ProgramState {
+        ProgramState {
+            take_id: TakeId(take.into()),
+            revision: Revision(1),
+            committed_frame: from,
+            scene_frame: 0,
+            playing: true,
+            phase: None,
+            stop_frame: None,
+        }
+    }
+
+    fn publishing(take: &str, state: &mut RecoveryState) {
+        state.published.insert(
+            TakeId(take.into()),
+            gx_control_plane::intent::HeldRevision { revision: Revision(1), content_hash: ContentHash("0".repeat(64)) },
+        );
+    }
+
+    #[test]
+    fn scenes_on_layers_and_queued_replacements_are_kept_and_named_by_the_journal_rule() {
+        let mut state = RecoveryState::empty(Epoch(3));
+        for take in ["a", "b", "c"] {
+            publishing(take, &mut state);
+        }
+        state.program = Some(on_air("a", 10));
+        state.layer_programs.insert(60, on_air("b", 12));
+        state.replacements.insert(60, Replacement { state: on_air("c", 40), start_frame: 40 });
+        state.replacements.insert(0, Replacement { state: on_air("c", 50), start_frame: 50 });
+        state.validate().expect("layers, and a replacement behind each occupied layer, are consistent");
+        for take in ["a", "b", "c"] {
+            assert!(state.names(&TakeId(take.into()), Revision(1)), "{take} is named by a layer or a queued replacement");
+        }
+        // It reads back as it was written.
+        let read: RecoveryState = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+        assert_eq!(read, state);
+    }
+
+    #[test]
+    fn a_layer_replacement_or_scene_that_cannot_exist_refuses_recovery_by_name() {
+        let base = || {
+            let mut state = RecoveryState::empty(Epoch(3));
+            for take in ["a", "b"] {
+                publishing(take, &mut state);
+            }
+            state
+        };
+        // Layer zero is `program`, never a map entry; and a layer outside the range is not a layer.
+        for layer in [0, 100_000, -100_000] {
+            let mut state = base();
+            state.layer_programs.insert(layer, on_air("a", 1));
+            assert!(matches!(state.validate(), Err(RecoveryError::InvalidState { .. })), "layer {layer}");
+        }
+        // A replacement waits for a scene to leave: with nothing on the layer there was nothing to leave.
+        let mut orphan = base();
+        orphan.replacements.insert(60, Replacement { state: on_air("b", 9), start_frame: 9 });
+        assert!(matches!(orphan.validate(), Err(RecoveryError::InvalidState { .. })));
+        let mut empty_zero = base();
+        empty_zero.replacements.insert(0, Replacement { state: on_air("b", 9), start_frame: 9 });
+        assert!(matches!(empty_zero.validate(), Err(RecoveryError::InvalidState { .. })));
+        // A scene on a layer that is not published has no business in the journal.
+        let mut unpublished = base();
+        unpublished.layer_programs.insert(60, on_air("ghost", 1));
+        assert!(matches!(unpublished.validate(), Err(RecoveryError::InvalidState { .. })));
+        let mut queued_ghost = base();
+        queued_ghost.layer_programs.insert(60, on_air("a", 1));
+        queued_ghost.replacements.insert(60, Replacement { state: on_air("ghost", 9), start_frame: 9 });
+        assert!(matches!(queued_ghost.validate(), Err(RecoveryError::InvalidState { .. })));
+    }
+
+    #[test]
+    fn a_journal_written_before_layers_still_reads_with_none() {
+        let mut plain = serde_json::to_value(RecoveryState::empty(Epoch(4))).unwrap();
+        assert!(plain.get("layerPrograms").is_none() && plain.get("replacements").is_none());
+        let read: RecoveryState = serde_json::from_value(plain.take()).unwrap();
+        assert!(read.layer_programs.is_empty() && read.replacements.is_empty());
     }
 
     fn state_with_a_scene_of_version(version: u32) -> RecoveryState {

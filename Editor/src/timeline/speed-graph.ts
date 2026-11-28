@@ -57,6 +57,12 @@ export interface GraphKey {
   readonly inSegment?: number;
 }
 
+/// A segment has bezier handles to draw and drag unless it is a hold or one of the easings that are not cubic beziers (Bounce, Elastic):
+/// a handle on those would suggest a curve that is not there, and dragging it would silently replace the easing.
+function hasBezierHandles(easing: string): boolean {
+  return easing !== "hold" && easing !== "bounce" && easing !== "elastic";
+}
+
 /// Which handle of a segment is being edited.
 export type HandleSide = "out" | "in";
 
@@ -169,10 +175,10 @@ export function buildSpeedGraph(
       frame,
       value: key.value,
       at,
-      ...(next && key.easing !== "hold"
+      ...(next && hasBezierHandles(key.easing)
         ? { outHandle: handlePoint(key, next, "out", viewport, min, max, height) }
         : {}),
-      ...(previous && previous.easing !== "hold"
+      ...(previous && hasBezierHandles(previous.easing)
         ? {
             inHandle: handlePoint(previous, key, "in", viewport, min, max, height),
             inSegment: Number(previous.frame),

@@ -21,7 +21,7 @@ use gx_control_plane::bind::{
 use gx_control_plane::framing::{
     decode_body, decode_length, encode, LENGTH_PREFIX, MAX_FRAME_BYTES,
 };
-use gx_control_plane::message::{ClientRequest, EngineReply, Envelope};
+use gx_control_plane::message::{ClientRequest, EngineReply, Envelope, OutputTarget, MAIN_LAYER};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::sequence::{Admission, MessageId, Sequence, SequenceTracker};
 
@@ -550,13 +550,11 @@ struct Named {
     phase: Option<String>,
 }
 
-fn named_by(
-    request: &ClientRequest,
-    target: Option<&gx_control_plane::message::OutputTarget>,
-) -> Named {
-    let layer = target
-        .map(|target| target.layer.clone())
-        .unwrap_or_else(|| gx_control_plane::message::MAIN_LAYER.to_owned());
+fn named_by(request: &ClientRequest, layer: i32) -> Named {
+    let layer = match layer {
+        MAIN_LAYER => "main".to_owned(),
+        layer => layer.to_string(),
+    };
     Named {
         layer,
         ..named_page(request)
@@ -650,10 +648,7 @@ fn record_as_run(
 
 /// 12.10: the verdict on the channel and layer a targeted command is aimed at. No target is the
 /// Program channel's main layer.
-fn target_refusal(
-    request: &ClientRequest,
-    target: Option<&gx_control_plane::message::OutputTarget>,
-) -> Option<Refusal> {
+fn target_refusal(request: &ClientRequest, target: Option<&OutputTarget>) -> Option<Refusal> {
     if !request.is_targeted() {
         return None;
     }
@@ -825,8 +820,8 @@ fn handle_connection<P: EnginePeer>(
                 log_refusal(request.name(), &refusal, authentication.as_ref());
                 (EngineReply::Refused(refusal), Vec::new())
             }
-            // 12.10: a command aimed at a channel or a layer the engine does not have is
-            // refused by name, before the engine sees it.
+            // 12.10: a non-Program channel or an out-of-range layer is refused by name
+            // before the engine sees the request.
             request if target_refusal(&request, envelope.target.as_ref()).is_some() => {
                 let refusal = target_refusal(&request, envelope.target.as_ref())
                     .expect("the guard saw a refusal");
@@ -837,18 +832,28 @@ fn handle_connection<P: EnginePeer>(
                 if matches!(request, ClientRequest::Stop) {
                     log_stop_request(authentication.as_ref());
                 }
+                let targeted = request.is_targeted();
+                let layer = envelope
+                    .target
+                    .as_ref()
+                    .filter(|_| targeted)
+                    .map_or(MAIN_LAYER, |target| target.layer);
                 let program = request.is_program_command().then(|| {
                     (
                         request.name(),
                         envelope.operator.clone(),
-                        named_by(&request, envelope.target.as_ref()),
+                        named_by(&request, layer),
                     )
                 });
                 // The engine is held only to validate and to drain events. A
                 // render's work runs after the lock is released, so Program's
                 // render loop is never queued behind it (invariant 14).
                 let mut engine = peer.lock().expect("engine mutex poisoned");
-                let handled = engine.handle_detached(request);
+                let handled = if targeted {
+                    engine.handle_on_layer(request, layer)
+                } else {
+                    engine.handle_detached(request)
+                };
                 let events = engine.drain_events();
                 drop(engine);
                 let reply = handled.finish();

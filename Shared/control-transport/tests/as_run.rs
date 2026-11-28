@@ -109,6 +109,7 @@ fn every_program_command_is_a_record_with_who_what_and_the_committed_frame() {
     };
     let cleared = client.handle(ClientRequest::Clear(ClearRequest {
         at: TakeAt::NextOpportunity,
+        expected: None,
     }));
     let EngineReply::Cleared(clear_frame) = cleared else {
         panic!("clear: {cleared:?}")
@@ -202,6 +203,7 @@ fn an_edited_record_is_found_at_its_line() {
     let _ = client.handle(take(1));
     let _ = client.handle(ClientRequest::Clear(ClearRequest {
         at: TakeAt::NextOpportunity,
+        expected: None,
     }));
     let _ = client.handle(take(1));
     let path = file(&root);

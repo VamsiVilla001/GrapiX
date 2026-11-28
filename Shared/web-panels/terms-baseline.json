@@ -1,0 +1,12 @@
+{
+  "note": "Old product names still shown by each page; may only fall. See terms.test.mjs.",
+  "counts": {
+    "Editor/web/index.html": {
+      "Take": 4
+    },
+    "Playout/web/index.html": {
+      "Take": 2,
+      "TAKE": 2
+    }
+  }
+}

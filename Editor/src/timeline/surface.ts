@@ -17,10 +17,22 @@
 import { rowWindow, clampViewport, type TimelineViewport } from "./viewport";
 import type { TimelineSnapshot } from "./repaint-plan";
 
-/// The header column's width in CSS pixels: `grid-template-columns: 240px 1fr`
-/// in `web/style.css`. The stage gets the rest of the container. Widened from
-/// 210 for the 11.63 layer switches, swatch and index.
+/// The header column's width in CSS pixels when the PARENT, BLEND and MATTE
+/// columns are hidden: `grid-template-columns: 240px 1fr` in `web/style.css`.
+/// The stage gets the rest of the container. Widened from 210 for the 11.63
+/// layer switches, swatch and index.
 export const TIMELINE_HEADER_WIDTH = 240;
+
+/// The header column's width with the three columns (the new Figma UI, B3),
+/// and the container width from which they are shown. A Timeline docked at the
+/// side (about 530) keeps the narrow header and the whole stage: columns that
+/// left the canvas no width would trade the keys for three dropdowns.
+export const TIMELINE_HEADER_WIDTH_WITH_COLUMNS = 570;
+export const COLUMNS_FROM_WIDTH = 900;
+
+export const showsColumns = (containerWidth: number): boolean => containerWidth >= COLUMNS_FROM_WIDTH;
+export const headerWidthFor = (containerWidth: number): number =>
+  showsColumns(containerWidth) ? TIMELINE_HEADER_WIDTH_WITH_COLUMNS : TIMELINE_HEADER_WIDTH;
 
 export interface SurfaceSize {
   readonly width: number;
@@ -38,7 +50,7 @@ export function viewportForBounds(
   return clampViewport(
     {
       ...viewport,
-      width: Math.max(0, bounds.width - TIMELINE_HEADER_WIDTH),
+      width: Math.max(0, bounds.width - headerWidthFor(bounds.width)),
       height: Math.max(0, bounds.height),
     },
     durationFrames,

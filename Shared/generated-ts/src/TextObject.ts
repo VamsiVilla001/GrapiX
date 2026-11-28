@@ -7,6 +7,7 @@ import type { Mask } from "./Mask";
 import type { MaterialBinding } from "./MaterialBinding";
 import type { StrokeStyle } from "./StrokeStyle";
 import type { TextAlign } from "./TextAlign";
+import type { TextAnimator } from "./TextAnimator";
 import type { TextAutoFit } from "./TextAutoFit";
 import type { TextCase } from "./TextCase";
 import type { TextDecoration } from "./TextDecoration";
@@ -32,7 +33,15 @@ fontId: string,
 /**
  * Em size in scene units.
  */
-size: number, layout: TextLayout, autoFit: TextAutoFit, writingMode: WritingMode, verticalAlign: VerticalAlign, direction: TextDirection, textCase: TextCase, decoration: TextDecoration, overflow: TextOverflow, align: TextAlign,
+size: number, layout: TextLayout, autoFit: TextAutoFit, writingMode: WritingMode, verticalAlign: VerticalAlign, direction: TextDirection, textCase: TextCase, decoration: TextDecoration, overflow: TextOverflow,
+/**
+ * Maximum number of laid-out lines to draw. Absent leaves every line visible.
+ */
+maxLines?: number,
+/**
+ * OpenType pair kerning. Absent uses the font's default.
+ */
+kerning?: boolean, align: TextAlign,
 /**
  * Line height as a multiple of `size`. Absent means the font's own
  * metrics, which is not the same as 1.0.
@@ -41,7 +50,11 @@ lineHeight?: number,
 /**
  * Tracking, in thousandths of an em — After Effects' unit.
  */
-letterSpacing: number, wordSpacing: number,
+letterSpacing: number,
+/**
+ * Extra advance on spaces, in scene units.
+ */
+wordSpacing: number,
 /**
  * Space between paragraphs, in scene units.
  */
@@ -49,7 +62,11 @@ paragraphSpacing: number,
 /**
  * First-line indent, in scene units.
  */
-textIndent: number, id: string, name: string, visible: boolean, locked: boolean,
+textIndent: number,
+/**
+ * Baseline offset in scene units. Positive values raise the glyphs.
+ */
+baselineShift?: number, textAnimator?: TextAnimator, id: string, name: string, visible: boolean, locked: boolean,
 /**
  * 0–1.
  */
@@ -104,6 +121,12 @@ strokeStyle?: StrokeStyle,
  * the binding contract owns the grammar.
  */
 bindings?: { [key in string]?: JsonValue },
+/**
+ * Hide when empty (11.153): when a text or image binding of this object resolves to a missing, null or blank value, the object is
+ * not drawn. Absent means false. It is meaningful only with such a binding, and `ObjectField::HideWhenEmpty` refuses to turn it on
+ * without one.
+ */
+hideWhenEmpty?: boolean,
 /**
  * Material slot assignments: slot name → the material bound to it
  * (1.3). A `BTreeMap` so the wire order is the slot order and two

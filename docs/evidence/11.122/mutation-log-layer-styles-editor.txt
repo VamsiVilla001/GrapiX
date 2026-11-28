@@ -1,0 +1,55 @@
+1 words not capitalised -> CAUGHT by is its wire tag as words when the catalogue's name is n; lists a card for each style with its effects and its sw
+2 mask limits kept -> CAUGHT by does not keep the limits to an object's own masks, and ; ignores the ids an object gave the effects and the limi
+3 kept effects shared, not copied -> CAUGHT by keeps the effects, their order, ids, switches and setti
+4 an empty mask list counted -> CAUGHT by does not keep the limits to an object's own masks, and 
+5 fresh ids list includes the old stack -> CAUGHT by gives an applied effect a fresh id where the object alr
+6 applied effects shared with the style -> CAUGHT by never changes the stack it was given, and gives the obj
+7 key order matters -> CAUGHT by ignores the ids an object gave the effects and the limi
+8 ids count in a stack's identity -> CAUGHT by counts the objects of the open graphic with exactly thi; ignores the ids an object gave the effects and the limi
+9 mask limits count in identity -> CAUGHT by ignores the ids an object gave the effects and the limi
+10 two objects can be selected -> SURVIVED
+11 32 effects refused -> CAUGHT by refuses an object with more effects than a style holds,
+12 no effects allowed -> CAUGHT by makes a style from the selected object's effects, dimme; needs exactly one selected object with effects
+13 any channel blocks replace -> CAUGHT by replaces the effects of an object that has none of them
+14 another object's keys block replace -> CAUGHT by will not replace effects that are keyframed, naming the
+15 add allowed with nothing selected -> CAUGHT by can be added to any selection, and says to select an ob; gives an agent the same reasons a person sees
+16 on and off swapped -> CAUGHT by shows no card until a style is selected, then its effec
+17 a switched-off effect not marked on the card -> CAUGHT by lists a card for each style with its effects and its sw; uses the catalogue's names when it is given them
+18 plural of use wrong -> CAUGHT by shows no card until a style is selected, then its effec
+19 no-use sentence lost -> CAUGHT by shows no card until a style is selected, then its effec
+20 selected style not marked -> CAUGHT by lists a card for each style with its effects and its sw
+21 maker not dimmed outside a project -> CAUGHT by says a graphic that is not in a project cannot keep lay; says the styles are being read, or why they could not b
+22 catalogue names ignored -> CAUGHT by passes the selection, the selected style and the catalo; uses the catalogue's names when it is given them
+23 update not dimmed -> CAUGHT by offers Add, Replace and Update to the selection, dimmed
+24 tab does not render -> CAUGHT by passes the selection, the selected style and the catalo; says so when the graphic is not in a project
+25 selection not passed -> CAUGHT by passes the selection, the selected style and the catalo
+26 catalogue names not passed -> CAUGHT by passes the selection, the selected style and the catalo
+
+SUMMARY
+ 1 words not capitalised                          CAUGHT by is its wire tag as words when the catalogue's name is n; lists a card for each style with its effects and its sw
+ 2 mask limits kept                               CAUGHT by does not keep the limits to an object's own masks, and ; ignores the ids an object gave the effects and the limi
+ 3 kept effects shared, not copied                CAUGHT by keeps the effects, their order, ids, switches and setti
+ 4 an empty mask list counted                     CAUGHT by does not keep the limits to an object's own masks, and 
+ 5 fresh ids list includes the old stack          CAUGHT by gives an applied effect a fresh id where the object alr
+ 6 applied effects shared with the style          CAUGHT by never changes the stack it was given, and gives the obj
+ 7 key order matters                              CAUGHT by ignores the ids an object gave the effects and the limi
+ 8 ids count in a stack's identity                CAUGHT by counts the objects of the open graphic with exactly thi; ignores the ids an object gave the effects and the limi
+ 9 mask limits count in identity                  CAUGHT by ignores the ids an object gave the effects and the limi
+10 two objects can be selected                    SURVIVED
+11 32 effects refused                             CAUGHT by refuses an object with more effects than a style holds,
+12 no effects allowed                             CAUGHT by makes a style from the selected object's effects, dimme; needs exactly one selected object with effects
+13 any channel blocks replace                     CAUGHT by replaces the effects of an object that has none of them
+14 another object's keys block replace            CAUGHT by will not replace effects that are keyframed, naming the
+15 add allowed with nothing selected              CAUGHT by can be added to any selection, and says to select an ob; gives an agent the same reasons a person sees
+16 on and off swapped                             CAUGHT by shows no card until a style is selected, then its effec
+17 a switched-off effect not marked on the card   CAUGHT by lists a card for each style with its effects and its sw; uses the catalogue's names when it is given them
+18 plural of use wrong                            CAUGHT by shows no card until a style is selected, then its effec
+19 no-use sentence lost                           CAUGHT by shows no card until a style is selected, then its effec
+20 selected style not marked                      CAUGHT by lists a card for each style with its effects and its sw
+21 maker not dimmed outside a project             CAUGHT by says a graphic that is not in a project cannot keep lay; says the styles are being read, or why they could not b
+22 catalogue names ignored                        CAUGHT by passes the selection, the selected style and the catalo; uses the catalogue's names when it is given them
+23 update not dimmed                              CAUGHT by offers Add, Replace and Update to the selection, dimmed
+24 tab does not render                            CAUGHT by passes the selection, the selected style and the catalo; says so when the graphic is not in a project
+25 selection not passed                           CAUGHT by passes the selection, the selected style and the catalo
+26 catalogue names not passed                     CAUGHT by passes the selection, the selected style and the catalo
+25 of 26 caught

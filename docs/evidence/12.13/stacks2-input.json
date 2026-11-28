@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "Follow-up to docs/evidence/12.13/jev-laya-stacks.json (claude-grapix-f1, 25 Nov 2026): what the Transport's own CLEAR and phase buttons do once a Stack is chosen. Same facts as the first round; Jev chose A, A, A, A, A, A there and the owner's design (Figma P7) fixes the names.",
+  "facts": "Decided in round one: a Stack field in Transport plus a Stacks table; Cue out and Clear on a stack row are armed by holding one second; a Clear on a stack ROW names the page the row shows (expected takeId and revision) and the engine refuses by name if that page is no longer on the stack (ClearExpectationUnmet) and changes nothing. The engine status the page reads is polled every 500 ms, so a row can be up to half a second old, and a refused Clear costs the operator a second try. The Transport's CLEAR button today clears layer zero with no expected page and is a single click; the owner's decision (24 Nov) is that Cue out and Clear are separate and armed in the design's stack rows. Transport HOLD, CONTINUE, UPDATE and TAKE OUT send a named phase to the scene on the chosen stack (cmd_phase with a layer); the engine refuses a phase when nothing is on that stack, by name.",
+  "built": "Nothing yet."
+ },
+ "questions": {
+  "transportClear": {
+   "type": "choice",
+   "instructions": "What should the Transport's own CLEAR button send when the Stack field holds a stack other than zero?",
+   "criteria": {
+    "A": "The chosen stack and NO expected page, as a single click like today: it clears whatever is on that stack, and a stale table can never make it refuse.",
+    "B": "The chosen stack and the expected page the table shows for it, so it can refuse by name when the table is stale.",
+    "C": "Refuse on the page (send nothing) unless the chosen stack is on air in the table."
+   }
+  },
+  "transportPhase": {
+   "type": "choice",
+   "instructions": "What should HOLD, CONTINUE, UPDATE and TAKE OUT do when the chosen stack shows nothing on air in the table?",
+   "criteria": {
+    "A": "Send the command to that stack anyway and show the engine's named refusal verbatim, because the engine, not the page, knows what is on a stack.",
+    "B": "Disable the four buttons while the chosen stack shows nothing on air.",
+    "C": "Send nothing and say on the page that the stack is empty."
+   }
+  },
+  "stackReset": {
+   "type": "choice",
+   "instructions": "After a command is sent to a stack other than zero, which stack should the Stack field hold?",
+   "criteria": {
+    "A": "Keep it: the operator stays on that stack until they change it, and the field always says which stack the next command goes to.",
+    "B": "Return to zero after every command, so the default is always the main stack.",
+    "C": "Return to zero after a Clear only."
+   }
+  }
+ }
+}

@@ -176,6 +176,9 @@ pub struct SceneTimeline {
     /// ids. Empty on a scene with none, and then absent from its JSON.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_channels: Vec<crate::path_anim::PathChannel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub colour_channels: Option<Vec<crate::animation::colour::ColourChannel>>,
 }
 
 /// The live data a scene's bindings resolve against. Opaque here — the
@@ -299,6 +302,12 @@ pub struct ObjectBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bindings: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Hide when empty (11.153): when a text or image binding of this object resolves to a missing, null or blank value, the object is
+    /// not drawn. Absent means false. It is meaningful only with such a binding, and `ObjectField::HideWhenEmpty` refuses to turn it on
+    /// without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hide_when_empty: Option<bool>,
     /// Material slot assignments: slot name → the material bound to it
     /// (1.3). A `BTreeMap` so the wire order is the slot order and two
     /// equal scenes serialise to equal bytes.
@@ -658,6 +667,7 @@ impl ObjectBase {
             stroke_width: 0.0,
             stroke_style: None,
             bindings: None,
+            hide_when_empty: None,
             material_slots: None,
             blend_mode: None,
             masks: None,
@@ -809,6 +819,14 @@ pub struct TextObject {
     pub decoration: TextDecoration,
     #[serde(default)]
     pub overflow: TextOverflow,
+    /// Maximum number of laid-out lines to draw. Absent leaves every line visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_lines: Option<u32>,
+    /// OpenType pair kerning. Absent uses the font's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kerning: Option<bool>,
     #[serde(default)]
     pub align: TextAlign,
     /// Line height as a multiple of `size`. Absent means the font's own
@@ -819,6 +837,7 @@ pub struct TextObject {
     /// Tracking, in thousandths of an em — After Effects' unit.
     #[serde(default)]
     pub letter_spacing: f64,
+    /// Extra advance on spaces, in scene units.
     #[serde(default)]
     pub word_spacing: f64,
     /// Space between paragraphs, in scene units.
@@ -827,6 +846,13 @@ pub struct TextObject {
     /// First-line indent, in scene units.
     #[serde(default)]
     pub text_indent: f64,
+    /// Baseline offset in scene units. Positive values raise the glyphs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub baseline_shift: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text_animator: Option<crate::text_animator::TextAnimator>,
 }
 
 /// A rectangle filling the base box. `radius` is the corner radius.
@@ -2543,12 +2569,16 @@ mod tests {
                     strikethrough: false,
                 },
                 overflow: TextOverflow::Clip,
+                max_lines: None,
+                kerning: None,
                 align: TextAlign::Center,
                 line_height: Some(1.2),
                 letter_spacing: 20.0,
                 word_spacing: 5.0,
                 paragraph_spacing: 12.0,
                 text_indent: 8.0,
+                baseline_shift: None,
+                text_animator: None,
             }),
             SceneObject::Rect(RectObject {
                 base: populated_base("rect"),
@@ -2746,12 +2776,16 @@ mod tests {
                     text_case: TextCase::Original,
                     decoration: TextDecoration::default(),
                     overflow: TextOverflow::Visible,
+                    max_lines: None,
+                    kerning: None,
                     align: TextAlign::Left,
                     line_height: None,
                     letter_spacing: 0.0,
                     word_spacing: 0.0,
                     paragraph_spacing: 0.0,
                     text_indent: 0.0,
+                    baseline_shift: None,
+                    text_animator: None,
                 }),
                 SceneObject::Image(ImageObject {
                     base: logo,

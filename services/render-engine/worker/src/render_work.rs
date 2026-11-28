@@ -19,6 +19,10 @@ pub struct RenderWork {
     /// footprint and the previous layer's on the tile, not the whole tile
     /// (3.21).
     pub gpu_layer_pixels: u64,
+    /// 11.61: texts shaped (font lookup, line layout and glyph outlines for
+    /// one text object). A frame that only moves a text animator shapes none:
+    /// it places the outlines that were shaped at prepare.
+    pub cpu_text_shapings: u64,
 }
 
 thread_local! { static WORK: Cell<RenderWork> = Cell::new(RenderWork::default()); }
@@ -38,6 +42,7 @@ impl RenderWork {
             gpu_output_dispatches: self.gpu_output_dispatches - before.gpu_output_dispatches,
             gpu_effect_dispatches: self.gpu_effect_dispatches - before.gpu_effect_dispatches,
             gpu_layer_pixels: self.gpu_layer_pixels - before.gpu_layer_pixels,
+            cpu_text_shapings: self.cpu_text_shapings - before.cpu_text_shapings,
         }
     }
 }
@@ -69,6 +74,9 @@ pub(crate) fn gpu_effect_dispatch(count: usize) {
 }
 pub(crate) fn gpu_layer_area(pixels: u64) {
     record(|w| w.gpu_layer_pixels += pixels);
+}
+pub(crate) fn text_shaping() {
+    record(|w| w.cpu_text_shapings += 1);
 }
 
 #[derive(Debug, Clone, Serialize)]

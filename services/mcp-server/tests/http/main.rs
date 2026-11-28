@@ -3,6 +3,7 @@
 //! handshake, and the two request shapes a local-only endpoint must refuse.
 
 mod client;
+mod spec_probe;
 
 use std::net::SocketAddr;
 

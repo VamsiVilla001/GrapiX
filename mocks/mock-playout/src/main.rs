@@ -229,7 +229,7 @@ fn run((engine, token, op): (SocketAddr, Option<String>, Operation)) -> Result<(
             content_hash: pin.content_hash,
             at,
         })),
-        Operation::Clear(at) => client.handle(ClientRequest::Clear(ClearRequest { at })),
+        Operation::Clear(at) => client.handle(ClientRequest::Clear(ClearRequest { at, expected: None })),
         Operation::Output(config) => client.handle(ClientRequest::ConfigureOutput(config)),
     };
     match reply {

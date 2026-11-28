@@ -19,10 +19,12 @@
 //! scene — that is one Editor command (invariant 60).
 
 pub mod container;
+pub mod convert;
 pub mod css;
 pub mod cssgen;
 pub mod ingest;
 pub mod link;
 pub mod manager;
 pub mod metadata;
+pub mod system;
 pub mod validate;

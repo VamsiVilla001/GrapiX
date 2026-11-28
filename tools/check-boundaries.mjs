@@ -61,17 +61,17 @@ const SKIPPED_DIRECTORIES = ["node_modules", "target", "dist", ".git", ".claude"
  *  one `OpenScene` through the executor; it carries no document. */
 const SHELL_MUTATE = ["cmd_execute", "cmd_import_file"];
 const SHELL_READ = [
-  "cmd_session_view", "cmd_session_history", "cmd_publish", "cmd_engine_preview", "cmd_take_page_preview",
-  "cmd_object_kinds", "cmd_animation_surface", "cmd_effect_surface", "cmd_control_properties",
+  "cmd_session_view", "cmd_session_history", "cmd_publish", "cmd_scene_preflight", "cmd_engine_preview", "cmd_fit_report", "cmd_take_page_preview",
+  "cmd_object_kinds", "cmd_animation_surface", "cmd_text_choices", "cmd_effect_surface", "cmd_control_properties",
   "cmd_starter_presets", "cmd_motion_presets", "cmd_default_endpoint", "cmd_project_list",
   "cmd_scene_list", "cmd_scene_read", "cmd_take_page_list", "cmd_take_page_read",
-  "cmd_font_bytes", "cmd_project_assets", "cmd_asset_bytes",
+  "cmd_font_bytes", "cmd_system_fonts_list", "cmd_project_assets", "cmd_project_asset_usage", "cmd_library_folders", "cmd_library_colours", "cmd_library_layer_styles", "cmd_library_import_folder_plan", "cmd_asset_bytes",
 ];
 /** Font ingest (11.13) and asset import (11.39): write only the
  *  content-addressed asset cache and return a batch that reaches a scene as
  *  one `addFonts` or `addAssets` edit. Held to the read rule: no authoring
  *  document or command parameter. */
-const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link", "cmd_asset_prepare_files", "cmd_project_assets_adopt"];
+const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link", "cmd_font_prepare_system", "cmd_font_prepare_default", "cmd_asset_prepare_files", "cmd_project_assets_adopt"];
 /** The front end's own log (2.13): one command that writes a bounded, sanitised
  *  entry of one of four kinds to the shell's log (`gx_telemetry::ui`), and the
  *  page's Help ▸ Export diagnostic bundle (2.14; the Editor has no native menu).
@@ -84,13 +84,16 @@ const SHELL_PROJECT = [
   "cmd_new_project", "cmd_open_project", "cmd_open_project_folder", "cmd_save_project_as", "cmd_exit", "cmd_close_project", "cmd_settings_get", "cmd_settings_set", "cmd_settings_reset",
   "cmd_workspace_get", "cmd_workspace_put", "cmd_workspace_delete", "cmd_workspace_list", "cmd_workspace_active", "cmd_workspace_set_active", "cmd_workspace_order", "cmd_workspace_set_order",
   "cmd_current_project", "cmd_recent_projects", "cmd_forget_recent_project", "cmd_default_location_projects",
+  "cmd_library_folder_create", "cmd_library_folder_rename", "cmd_library_folder_move", "cmd_library_folder_delete", "cmd_library_asset_move",
+  "cmd_library_colour_create", "cmd_library_colour_rename", "cmd_library_colour_set", "cmd_library_colour_delete", "cmd_library_layer_style_create", "cmd_library_layer_style_rename", "cmd_library_layer_style_set", "cmd_library_layer_style_delete",
+  "cmd_library_import_folder_apply", "cmd_project_csv_source", "cmd_import_project_csv",
 ];
 const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG, ...SHELL_PROJECT]);
 /** Playout's shell (2.26): the operator's reads and Program commands, the operator's sign-in (2.15), the
  *  endpoint default and the front end's own log. There is no command that authors, edits or publishes, and
  *  none takes an authoring document or a time (ADR-002: the engine chooses the frame). */
 const PLAYOUT_SHELL_SURFACE = new Set([
-  "cmd_log", "cmd_connect", "cmd_status", "cmd_performance", "cmd_cue", "cmd_take", "cmd_clear", "cmd_phase",
+  "cmd_log", "cmd_connect", "cmd_status", "cmd_performance", "cmd_cue", "cmd_cues_suggest", "cmd_cues_apply", "cmd_take", "cmd_clear", "cmd_phase",
   "cmd_configure_output", "cmd_sign_in", "cmd_sign_out", "cmd_operator", "cmd_default_endpoint",
 ]);
 const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE, ...SHELL_LOG, ...SHELL_PROJECT]);

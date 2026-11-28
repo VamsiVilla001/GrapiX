@@ -229,6 +229,282 @@
         { "objectId": "crest", "property": "assetId", "path": "match.away", "detail": "match.away names image asset ghost, which the scene does not carry" },
         { "objectId": "badge", "property": "assetId", "path": "match.font", "detail": "match.font names image asset inter, which the scene does not carry" }
       ]
+    },
+    {
+      "name": "hide when empty: a blank, null or missing text binding hides the element without an issue, and the authored text stays",
+      "scene": {
+        "id": "hide-fixture",
+        "name": "Hide when empty fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "colorDepth": "32",
+        "canvas": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": {
+            "num": 50,
+            "den": 1
+          }
+        },
+        "timeline": {
+          "durationFrames": 1,
+          "channels": []
+        },
+        "dataContext": {
+          "p": {
+            "name": "   ",
+            "role": null,
+            "team": "Soul"
+          }
+        },
+        "assets": [],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "text",
+            "id": "blank",
+            "name": "blank",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored blank",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.name"
+            },
+            "hideWhenEmpty": true
+          },
+          {
+            "type": "text",
+            "id": "empty",
+            "name": "empty",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored empty",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.role"
+            },
+            "hideWhenEmpty": true
+          },
+          {
+            "type": "text",
+            "id": "missing",
+            "name": "missing",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored missing",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.nickname"
+            },
+            "hideWhenEmpty": true
+          },
+          {
+            "type": "text",
+            "id": "full",
+            "name": "full",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored full",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.team"
+            },
+            "hideWhenEmpty": true
+          }
+        ]
+      },
+      "issues": [],
+      "resolved": {
+        "blank": {
+          "visible": false,
+          "text": "Authored blank"
+        },
+        "empty": {
+          "visible": false,
+          "text": "Authored empty"
+        },
+        "missing": {
+          "visible": false,
+          "text": "Authored missing"
+        },
+        "full": {
+          "visible": true,
+          "text": "Soul"
+        }
+      }
+    },
+    {
+      "name": "hide when empty off: a blank string is a value (it binds), a missing path is still an issue",
+      "scene": {
+        "id": "hide-fixture",
+        "name": "Hide when empty fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "colorDepth": "32",
+        "canvas": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": {
+            "num": 50,
+            "den": 1
+          }
+        },
+        "timeline": {
+          "durationFrames": 1,
+          "channels": []
+        },
+        "dataContext": {
+          "p": {
+            "name": ""
+          }
+        },
+        "assets": [],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "text",
+            "id": "plain",
+            "name": "plain",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored plain",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.name"
+            }
+          },
+          {
+            "type": "text",
+            "id": "gone",
+            "name": "gone",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored gone",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.absent"
+            },
+            "hideWhenEmpty": false
+          }
+        ]
+      },
+      "issues": [
+        {
+          "objectId": "gone",
+          "property": "text",
+          "path": "p.absent",
+          "detail": "p.absent is absent from the scene data context"
+        }
+      ]
+    },
+    {
+      "name": "hide when empty looks only at text and image bindings: a number binding to nothing is still an issue, and a path through a scalar is still a fault",
+      "scene": {
+        "id": "hide-fixture",
+        "name": "Hide when empty fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "colorDepth": "32",
+        "canvas": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": {
+            "num": 50,
+            "den": 1
+          }
+        },
+        "timeline": {
+          "durationFrames": 1,
+          "channels": []
+        },
+        "dataContext": {
+          "p": {
+            "name": "Soul",
+            "score": 7
+          }
+        },
+        "assets": [],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "text",
+            "id": "fault",
+            "name": "fault",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored fault",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.name.first"
+            },
+            "hideWhenEmpty": true
+          },
+          {
+            "type": "text",
+            "id": "num",
+            "name": "num",
+            "visible": true,
+            "x": 10,
+            "y": 20,
+            "width": 600,
+            "height": 90,
+            "text": "Authored num",
+            "fontId": "inter",
+            "size": 48,
+            "bindings": {
+              "text": "p.name",
+              "x": "p.missing"
+            },
+            "hideWhenEmpty": true
+          }
+        ]
+      },
+      "issues": [
+        {
+          "objectId": "fault",
+          "property": "text",
+          "path": "p.name.first",
+          "detail": "p.name.first continues through a string value"
+        },
+        {
+          "objectId": "num",
+          "property": "x",
+          "path": "p.missing",
+          "detail": "p.missing is absent from the scene data context"
+        }
+      ]
     }
   ]
 }

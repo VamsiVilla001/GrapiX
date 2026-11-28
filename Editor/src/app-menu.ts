@@ -45,11 +45,13 @@ export type NativeAction =
   | "new-project"
   | "open-project"
   | "open-settings"
+  | "open-shortcuts"
   | "exit"
   | "view-fit"
   | "view-zoom-in"
   | "view-zoom-out"
   | "view-zoom-100"
+  | "add-key"
   | "easy-ease"
   | "easy-ease-in"
   | "easy-ease-out"
@@ -178,6 +180,8 @@ export const APP_MENUS: readonly Menu[] = [
     id: "edit",
     label: "Edit",
     items: [
+      cmd("edit.search", "Search everything…", "grapix", { invoke: "search-open", shortcut: "Ctrl K" }),
+      SEP,
       cmd("edit.history", "Change history…", "screen", { invoke: "history-open", basedOn: "Undo/Redo History" }),
       cmd("edit.undo", "Undo", "screen", { invoke: "undo", shortcut: "Ctrl Z", basedOn: "Undo" }),
       cmd("edit.redo", "Redo", "screen", { invoke: "redo", shortcut: "Ctrl Shift Z", basedOn: "Redo" }),
@@ -229,7 +233,8 @@ export const APP_MENUS: readonly Menu[] = [
       cmd("edit.devices", "Control devices", "screen", { row: "6.8", basedOn: "Human Interface Devices" }),
       cmd("edit.scripts", "Scripts", "screen", { row: "16.4", basedOn: "Scripting" }),
       cmd("edit.media-link", "Media library link…", "screen", { row: "16.18", basedOn: "OpenMAM Setup" }),
-      cmd("edit.shortcuts", "Shortcuts and triggers…", "screen", { row: "11.84", basedOn: "Keyboard / GPI Mapping" }),
+      // Opens the Settings window on its Shortcuts page. Trigger inputs and outside controls (6.8) are not built, so the name does not promise them.
+      cmd("edit.shortcuts", "Shortcuts…", "screen", { native: "open-shortcuts", basedOn: "Keyboard / GPI Mapping" }),
       cmd("edit.tracked-camera", "Tracked camera", "screen", { row: "16.20", basedOn: "Tessera" }),
       cmd("edit.outputs", "Outputs and devices…", "v12", { row: "11.87", basedOn: "Hardware Setup" }),
       cmd("edit.settings", "Settings…", "v12", { native: "open-settings", basedOn: "Preferences" }),
@@ -249,7 +254,7 @@ export const APP_MENUS: readonly Menu[] = [
     items: [
       cmd("motion.controls", "Motion controls", "legacy", { focusPanel: "animation", basedOn: "Animation Controller" }),
       cmd("motion.curves", "Curve editor", "legacy", { invoke: "timeline-graph-mode", basedOn: "Key Graph Editor" }),
-      cmd("motion.add-key", "Add key", "legacy", { row: "11.68", basedOn: "Set Keyframe" }),
+      cmd("motion.add-key", "Add key", "grapix", { native: "add-key", shortcut: "K" }),
       SEP,
       // The timeline's keys, which each had a shortcut and no menu item. Every key the Editor handles is here (11.31).
       cmd("motion.play", "Play or pause preview", "grapix", { invoke: "preview-play", shortcut: "Space" }),
@@ -260,6 +265,10 @@ export const APP_MENUS: readonly Menu[] = [
       cmd("motion.copy-keys", "Copy selected keys", "grapix", { native: "copy-keys", shortcut: "Ctrl C" }),
       cmd("motion.paste-keys", "Paste keys", "grapix", { native: "paste-keys", shortcut: "Ctrl V" }),
       SEP,
+      // The timeline's on-demand groups (visibility decision of 26 Nov 2026): each opens its popover over the timeline.
+      cmd("motion.easing", "Easing…", "grapix", { invoke: "timeline-keys-open" }),
+      cmd("motion.presets", "Motion presets…", "grapix", { invoke: "timeline-presets-open" }),
+      cmd("motion.phases", "Phases…", "grapix", { invoke: "timeline-phases-open" }),
       cmd("motion.preset-in", "Apply entry preset", "grapix", { invoke: "timeline-preset-apply" }),
       cmd("motion.preset-out", "Apply exit preset", "grapix", { invoke: "timeline-preset-apply-out" }),
       cmd("motion.play-phase", "Play this phase", "grapix", { invoke: "phase-play" }),
@@ -273,7 +282,9 @@ export const APP_MENUS: readonly Menu[] = [
     items: [
       cmd("panels.project-files", "Project files", "screen", { row: "11.52", basedOn: "Project Manager" }),
       cmd("panels.scenes", "Scenes", "screen", { focusPanel: "scene-manager", basedOn: "Scene Manager" }),
-      cmd("panels.objects", "Objects", "screen", { focusPanel: "object-manager", basedOn: "Object Manager" }),
+      cmd("panels.objects", "Elements", "screen", { focusPanel: "object-manager", basedOn: "Object Manager" }),
+      cmd("panels.library", "Library", "screen", { invoke: "status-library", basedOn: "Object Library" }),
+      cmd("panels.data", "Data", "grapix", { invoke: "data-screen-open" }),
       cmd("panels.materials", "Materials", "screen", { focusPanel: "materials", basedOn: "Material Manager" }),
       cmd("panels.properties", "Properties", "screen", { focusPanel: "inspector", basedOn: "Object Inspector" }),
       cmd("panels.timeline", "Timeline", "screen", { focusPanel: "timeline", basedOn: "Scene Directors" }),
@@ -308,8 +319,8 @@ export const APP_MENUS: readonly Menu[] = [
       SEP,
       cmd("layout.reset", "Reset layout", "grapix", { invoke: "workspace-reset" }),
       SEP,
-      cmd("layout.save", "Save this layout…", "grapix", { row: "11.76" }),
-      cmd("layout.named", "My layouts", "grapix", { row: "11.76" }),
+      cmd("layout.save", "Save this layout as…", "grapix", { invoke: "layouts-save-as-open" }),
+      cmd("layout.named", "Layouts…", "grapix", { invoke: "layouts-open" }),
     ],
   },
   {

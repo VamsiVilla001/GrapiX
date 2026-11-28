@@ -192,6 +192,10 @@ From `docs/research/market-scan-2026-11-18.md` (features by vendor) plus these U
 - XPression: menu inventory in `docs/reference/xpression-menu-bar.md`; Scene Directors for
   transition logic.
 
+## Editor UI v2, 26 Nov 2026
+
+What stays on screen and what is called on demand, with the updated screens and their node ids: `docs/design/ui-visibility-2026-11-26.md` (section 94:7118 on page GrapiX UI; MenuBar now eight menus, the ribbon's step chips hidden).
+
 ## Resume ledger (Figma node ids, 24 Nov 2026)
 
 ```json
@@ -208,7 +212,18 @@ From `docs/research/market-scan-2026-11-18.md` (features by vendor) plus these U
     "EditorMenuBar": "13:28", "EditorActivityBar": "13:505", "ModuleToggle": "28:2125",
     "EditorToolbar": "28:3224", "iconsHolder": "10:6"
   },
-  "screens": {},
+  "screens": {
+    "B1 Start": "56:3342", "B2 Editor main screen": "78:6599", "B3 Timeline": "67:4965", "B3c Graph": "71:5135",
+    "B3d Properties": "73:5216", "B4 Data": "54:2574", "B5 Style": "57:3217", "B6 Publish": "56:2933",
+    "B9 Formats": "57:3568", "B12 Logic": "55:2554", "B13 Library": "55:3018", "B14 Figma import": "84:6847",
+    "E1 Search": "59:3531", "E2 Layouts": "59:3832", "E3 Ask": "59:4129", "E4 Settings": "59:4425",
+    "S1 Empty graphic": "59:4760", "S2 Font missing": "59:5032",
+    "C1 Add element": "81:6088", "C2 Chart selected": "81:6419", "C3 Chart data": "82:5785", "C4 Effects shortcut": "82:6227", "C5 Plugin manager": "82:6550",
+    "D1 Sources": "37:463", "D2 Add a source": "38:597", "D3 Adapter editor": "38:772",
+    "P1 Playout sequence": "78:6902", "P3 Inputs": "50:1135", "P4 Cue Control": "51:1456", "P5 Airview": "51:1129", "P6 Monitoring": "83:6606",
+    "P7 Stacks": "50:750", "P8 Play Rules": "52:1497", "P9 Outputs": "83:6266", "P10 Show files": "83:7054", "PD Diagnostics": "52:1852",
+    "PS1 Engine lost": "53:1895", "PS2 Empty show": "53:2198"
+  },
   "grid": "idx = number - 1; x = 160 + (idx % 3) * 2080; y = 260 + floor(idx / 3) * 1400 (inside section 7:2)",
   "layout": "EffectCraft default: MenuBar 28, Toolbar 40, body, ActivityBar 28 (1080 total); left 300 / viewer / right 300; Timeline 300-330 high under left + viewer"
 }

@@ -704,6 +704,7 @@ mod tests {
         fn handle(&mut self, request: ClientRequest) -> EngineReply {
             let committed = TakeCommitted {
                 frame: self.committed,
+                start_frame: None,
                 timebase: gx_contracts::RationalRate::P50,
                 clock: gx_contracts::ClockSource::FreeRun,
             };

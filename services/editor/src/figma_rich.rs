@@ -515,6 +515,8 @@ impl Builder<'_> {
                 strikethrough: spec.decoration == "strikethrough",
             },
             overflow: Default::default(),
+            max_lines: None,
+            kerning: None,
             align,
             line_height: spec.line_height_px.map(|px| px / size),
             // Figma pixels to thousandths of an em.
@@ -522,6 +524,8 @@ impl Builder<'_> {
             word_spacing: 0.0,
             paragraph_spacing: 0.0,
             text_indent: 0.0,
+            baseline_shift: None,
+            text_animator: None,
         });
         self.objects.push(text);
         Self::effects(node, &mut subs);

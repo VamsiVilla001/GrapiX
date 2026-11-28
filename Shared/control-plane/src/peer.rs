@@ -7,9 +7,9 @@
 //! protocol.
 
 use crate::capability::EngineCapability;
-use crate::message::{ClientRequest, EngineEvent, EngineReply};
+use crate::message::{ClientRequest, EngineEvent, EngineReply, MAIN_LAYER};
 use crate::status::EngineStatus;
-use gx_contracts::ReferenceState;
+use gx_contracts::{ReferenceState, Refusal};
 
 /// A request's outcome when part of its work may run after the engine is
 /// released (11.41).
@@ -51,6 +51,18 @@ pub trait EnginePeer {
     /// reply. A peer with no long-running work answers in place.
     fn handle_detached(&mut self, request: ClientRequest) -> Handled {
         Handled::Reply(self.handle(request))
+    }
+
+    /// Handle a targeted request on a validated Program layer. A single-layer peer
+    /// must refuse other layers so a request cannot accidentally change layer zero.
+    fn handle_on_layer(&mut self, request: ClientRequest, layer: i32) -> Handled {
+        if layer == MAIN_LAYER {
+            return self.handle_detached(request);
+        }
+        Handled::Reply(EngineReply::Refused(Refusal::LayerNotSupported {
+            request: request.name().to_owned(),
+            layer: layer.to_string(),
+        }))
     }
 
     /// Collect events emitted since the last drain.

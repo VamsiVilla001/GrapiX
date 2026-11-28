@@ -89,7 +89,8 @@ export function parseBindingPath(path: string): BindingPathResult {
 
 export type DataPathResult =
   | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly reason: string };
+  /** `absent` is set when the path is fine and the data has nothing there (a key or an index that is not there): Hide when empty reads that as empty. */
+  | { readonly ok: false; readonly reason: string; readonly absent?: true };
 
 export function resolveDataPath(data: SceneDocument["dataContext"], path: string): DataPathResult {
   const parsed = parseBindingPath(path);
@@ -102,7 +103,7 @@ export function resolveDataPath(data: SceneDocument["dataContext"], path: string
         return { ok: false, reason: `${path} addresses array ${segment} by a non-index` };
       }
       const index = Number(segment);
-      if (index >= value.length) return { ok: false, reason: `${path} has no value at index ${segment}` };
+      if (index >= value.length) return { ok: false, reason: `${path} has no value at index ${segment}`, absent: true };
       value = value[index];
       continue;
     }
@@ -110,7 +111,7 @@ export function resolveDataPath(data: SceneDocument["dataContext"], path: string
       return { ok: false, reason: `${path} continues through a ${typeof value} value` };
     }
     if (!Object.prototype.hasOwnProperty.call(value, segment)) {
-      return { ok: false, reason: `${path} is absent from the scene data context` };
+      return { ok: false, reason: `${path} is absent from the scene data context`, absent: true };
     }
     value = (value as Record<string, unknown>)[segment];
   }
@@ -161,6 +162,14 @@ function valueIssue(
   return undefined;
 }
 
+/** The bound properties Hide when empty (11.153) looks at: the string-valued ones. The Rust twin has the same list. */
+const EMPTINESS_PROPERTIES: readonly string[] = ["text", "assetId"];
+
+/** Whether a resolved value counts as empty: null, or a string of only whitespace. */
+function emptyValue(value: unknown): boolean {
+  return value === null || (typeof value === "string" && value.trim() === "");
+}
+
 /** A binding map's entries in the order Rust walks them: by property name. */
 function bindingEntries(object: SceneObject): readonly [string, unknown][] {
   return Object.entries(object.bindings ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -171,6 +180,8 @@ export function resolveSceneBindings(document: SceneDocument): BindingResolution
   const issues: BindingIssue[] = [];
   const objects = document.objects.map((object) => {
     let resolved: SceneObject = object;
+    // Hide when empty (11.153): set when one of the element's text or image bindings is empty; the element is then not drawn.
+    let emptied = false;
 
     for (const [property, rawPath] of bindingEntries(object)) {
       if (typeof rawPath !== "string") {
@@ -194,6 +205,12 @@ export function resolveSceneBindings(document: SceneDocument): BindingResolution
         continue;
       }
       const found = resolveDataPath(document.dataContext, rawPath);
+      const hides = object.hideWhenEmpty === true && EMPTINESS_PROPERTIES.includes(property);
+      // An empty value is the point of Hide when empty, not a fault: the element is not drawn and keeps its authored value.
+      if (hides && (found.ok ? emptyValue(found.value) : found.absent === true)) {
+        emptied = true;
+        continue;
+      }
       if (!found.ok) {
         issues.push({
           objectId: object.id,
@@ -214,7 +231,7 @@ export function resolveSceneBindings(document: SceneDocument): BindingResolution
       resolved = { ...resolved };
       (resolved as unknown as Record<string, unknown>)[property] = found.value;
     }
-    return resolved;
+    return emptied ? ({ ...resolved, visible: false } as SceneObject) : resolved;
   });
 
   return issues.length === 0 ? { ok: true, document: { ...document, objects } } : { ok: false, issues };
@@ -295,22 +312,15 @@ export function bindingPanel(document: SceneDocument, selectedIds: readonly stri
     };
   });
 
-  const sourceNodes: UiNode[] = dataFields(document.dataContext).map((field) => ({
-    id: `binding/data/${field.path}`,
-    role: "listitem",
-    label: field.path,
-    value: `${typeof field.value}: ${formatValue(field.value)}`,
-  }));
+  const fieldCount = dataFields(document.dataContext).length;
 
   return {
     id: "bindings",
     role: "region",
     label: "Data bindings",
-    description: `${object.name} (${object.type}); ${sourceNodes.length} data field(s)`,
-    children: [
-      { id: "binding/properties", role: "group", label: "Bindable properties", children: propertyNodes },
-      { id: "binding/data", role: "list", label: "Scene data fields", children: sourceNodes },
-    ],
+    // The scene's data fields are listed by the Data panel (Fields found), with what is bound to each.
+    description: `${object.name} (${object.type}); ${fieldCount} data field(s)`,
+    children: [{ id: "binding/properties", role: "group", label: "Bindable properties", children: propertyNodes }],
   };
 }
 

@@ -1,0 +1,21 @@
+1 mix in encoded space CAUGHT
+2 progress not clamped CAUGHT
+3 result in linear space CAUGHT
+4 hold ignored CAUGHT
+5 always static CAUGHT
+6 auto-key ignored CAUGHT
+7 always create CAUGHT
+8 alpha lost CAUGHT
+9 space lost CAUGHT
+10 toggle never removes CAUGHT
+11 gradient allowed CAUGHT
+12 row for any kind CAUGHT
+13 no Mixed CAUGHT
+14 prev goes forward CAUGHT
+15 field fill not stroke CAUGHT
+16 colour moves as number CAUGHT
+17 colour deletes as number CAUGHT
+18 colour easing as number CAUGHT
+19 draft ignores colour CAUGHT
+20 card ignores colour CAUGHT
+20 of 20 caught

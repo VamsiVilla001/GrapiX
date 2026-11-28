@@ -26,8 +26,9 @@ use std::time::Instant;
 
 use gx_asset_plane::package::MAX_PACKAGE_BYTES;
 use gx_asset_plane::{
-    AssetPublishPeer, AssetStore, PreviewImage, PreviewJob, PublishRefusal, PublishReply,
+    AssetPublishPeer, AssetStore, FitJob, PreviewImage, PreviewJob, PublishRefusal, PublishReply,
 };
+use gx_contracts::fit_report::{FitFailure, FitRequest};
 #[cfg(test)]
 use gx_contracts::color::OutputTransform;
 use gx_contracts::material::MaterialSupport;
@@ -39,14 +40,20 @@ use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapabilit
 use gx_control_plane::intent::{
     check_reference, HeldRevision, Lead, PhaseCommitted, TakeAt, TakeCommitted,
 };
-use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
+use gx_control_plane::message::{
+    ClientRequest, EngineEvent, EngineReply, OutputConfig, MAIN_LAYER, MAX_PROGRAM_LAYER,
+    MIN_PROGRAM_LAYER,
+};
 use gx_control_plane::peer::{EnginePeer, Handled};
 use gx_control_plane::render::check_render;
-use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
+use gx_control_plane::status::{
+    Degradation, EngineStatus, ProgramLayerPhase, ProgramLayerStatus, ProgramState,
+};
 
 use crate::clock::ProgramClock;
 use crate::compositor::output::{Delivered, Submitted};
-use crate::compositor::scene::{GpuScene, SourceTrace};
+use crate::compositor::scene::{compositor_refusal, GpuScene, SourceTrace};
+use crate::compositor::stack::LayerStack;
 use crate::emission::{FrameEmitter, ProgramEmission};
 use crate::governor::{Level, LoadGovernor, NonLiveGate, Observation};
 use crate::gpu::{self, Gpu};
@@ -58,7 +65,7 @@ use crate::prepared::PreparedScene;
 use crate::rasterizer::{key_for_take, Frame, SoftwareRasterizer, FRAME_HEIGHT, FRAME_WIDTH};
 use crate::recovery::{
     DropReport, DroppedScene, PreparedSceneRecord, RecoveryError, RecoveryJournal, RecoveryState,
-    DROP_REPORT_SCHEMA_VERSION,
+    Replacement, DROP_REPORT_SCHEMA_VERSION,
 };
 use crate::render_work::{ProgramFrameTrace, RenderWork};
 
@@ -66,6 +73,12 @@ use crate::render_work::{ProgramFrameTrace, RenderWork};
 /// The newest GPU delivery: the pinned revision it belongs to, and its Program
 /// and Preview frames (3.21).
 type GpuDelivered = ((TakeId, Revision), Arc<Frame>, Arc<Frame>);
+
+/// The newest delivery of the layer stack (task 112): the layers it was composited from, lowest first, and its two frames.
+type StackDelivered = (Vec<(i32, TakeId, Revision)>, Arc<Frame>, Arc<Frame>);
+
+/// How long a settled frame waits for the GPU outside the live loop.
+const SETTLED_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct Engine {
     gpu: Gpu,
@@ -133,6 +146,15 @@ pub struct Engine {
     revision_floors: BTreeMap<TakeId, Revision>,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
+    layer_cues: BTreeMap<i32, ProgramState>,
+    /// Scenes on air outside layer zero (task 112); layer zero's scene is `program`. Higher layers are in front.
+    layer_programs: BTreeMap<i32, ProgramState>,
+    /// A scene waiting on a layer for the one leaving it to finish its authored Out, with the frame it takes the layer at.
+    replacements: BTreeMap<i32, Replacement>,
+    /// The layer stack the frame path composites through while a layer other than zero is on air, built for the stage of the scenes
+    /// on it and kept while they still fit it.
+    stack: Option<LayerStack>,
+    stack_delivered: Option<StackDelivered>,
     rasterizer: SoftwareRasterizer,
     preview_rasterizer: SoftwareRasterizer,
     emitter: FrameEmitter,
@@ -233,6 +255,11 @@ impl Engine {
             revision_floors: BTreeMap::new(),
             program: None,
             cued: None,
+            layer_cues: BTreeMap::new(),
+            layer_programs: BTreeMap::new(),
+            replacements: BTreeMap::new(),
+            stack: None,
+            stack_delivered: None,
             rasterizer,
             preview_rasterizer,
             emitter: FrameEmitter::new(),
@@ -346,7 +373,10 @@ impl Engine {
             prepared_scenes: Vec::new(),
             verified_assets: self.assets.iter().cloned().collect(),
             cued: self.cued.clone(),
+            layer_cues: self.layer_cues.clone(),
             program: self.program.clone(),
+            layer_programs: self.layer_programs.clone(),
+            replacements: self.replacements.clone(),
             revision_floors: self.revision_floors.clone(),
         };
         // One rule for what the journal keeps, shared with its validation
@@ -406,6 +436,9 @@ impl Engine {
         let mut published = state.published;
         let mut revision_floors = state.revision_floors;
         let (mut cued, mut program) = (state.cued, state.program);
+        let mut layer_cues = state.layer_cues;
+        let mut layer_programs = state.layer_programs;
+        let mut replacements = state.replacements;
         let mut dropped = Vec::new();
         let mut prepared = HashMap::new();
         let mut gpu_prepared = HashMap::new();
@@ -446,11 +479,19 @@ impl Engine {
             let names = |state: &Option<ProgramState>| {
                 state.as_ref().is_some_and(|state| state.take_id == take_id)
             };
-            let (was_program, was_cued) = (names(&program), names(&cued));
-            if was_program {
+            let main_program = names(&program);
+            let had_main_cue = names(&cued);
+            let layer_cue_count = layer_cues.len();
+            layer_cues.retain(|_, cue| cue.take_id != take_id);
+            let was_cued = had_main_cue || layer_cues.len() != layer_cue_count;
+            let layer_program_count = layer_programs.len();
+            layer_programs.retain(|_, on_air| on_air.take_id != take_id);
+            replacements.retain(|_, queued| queued.state.take_id != take_id);
+            let was_program = main_program || layer_programs.len() != layer_program_count;
+            if main_program {
                 program = None;
             }
-            if was_cued {
+            if had_main_cue {
                 cued = None;
             }
             revision_floors.insert(take_id.clone(), held.revision);
@@ -463,6 +504,11 @@ impl Engine {
                 was_cued,
             });
         }
+        // A replacement waits for a scene to leave its layer; with that scene dropped there is nothing to wait for and the layer is
+        // clear, as it is for any dropped scene (the replacement's own scene, if it is intact, is cued again by the operator).
+        replacements.retain(|layer, _| {
+            if *layer == MAIN_LAYER { program.is_some() } else { layer_programs.contains_key(layer) }
+        });
         for record in state.prepared_scenes {
             if dropped.iter().any(|scene| scene.take_id == record.take_id) {
                 continue;
@@ -504,6 +550,11 @@ impl Engine {
         self.assets = asset_bytes.keys().cloned().collect();
         self.asset_bytes = asset_bytes;
         self.cued = cued;
+        self.layer_cues = layer_cues;
+        self.layer_programs = layer_programs;
+        self.replacements = replacements;
+        self.stack = None;
+        self.stack_delivered = None;
         self.program = program;
         self.revision_floors = revision_floors;
         self.dropped = dropped
@@ -512,6 +563,121 @@ impl Engine {
             .collect();
         Ok(dropped)
     }
+    /// The scene on air on one layer (layer zero's is `program`).
+    fn program_on(&self, layer: i32) -> Option<&ProgramState> {
+        if layer == MAIN_LAYER { self.program.as_ref() } else { self.layer_programs.get(&layer) }
+    }
+
+    fn set_program_on(&mut self, layer: i32, state: Option<ProgramState>) {
+        if layer == MAIN_LAYER {
+            self.program = state;
+        } else if let Some(state) = state {
+            self.layer_programs.insert(layer, state);
+        } else {
+            self.layer_programs.remove(&layer);
+        }
+    }
+
+    /// Every scene on air, lowest layer first: the order they are composited in, a higher layer in front.
+    fn on_air(&self) -> Vec<(i32, &ProgramState)> {
+        let mut layers: Vec<(i32, &ProgramState)> = self.layer_programs.iter().map(|(layer, state)| (*layer, state)).collect();
+        if let Some(program) = &self.program {
+            layers.push((MAIN_LAYER, program));
+        }
+        layers.sort_by_key(|(layer, _)| *layer);
+        layers
+    }
+
+    fn anything_on_air(&self) -> bool {
+        self.program.is_some() || !self.layer_programs.is_empty()
+    }
+
+    /// The authored Out of a scene on air: what it plays when something replaces it.
+    fn out_phase_of(&self, state: &ProgramState) -> Option<gx_contracts::phases::TimelinePhase> {
+        self.prepared
+            .get(&(state.take_id.clone(), state.revision))?
+            .phases_of(gx_contracts::phases::PhaseKind::Out)
+            .next()
+            .cloned()
+    }
+
+    /// Put each queued replacement on its layer once the engine clock has reached the frame the scene leaving it finishes its Out.
+    /// Time alone decides this, so a restart, a reconnect or a late frame pump gives the same layers for the same frame.
+    fn settle_replacements(&mut self) {
+        let frame = self.clock.frame();
+        let due: Vec<i32> = self
+            .replacements
+            .iter()
+            .filter(|(_, queued)| queued.start_frame <= frame)
+            .map(|(layer, _)| *layer)
+            .collect();
+        for layer in due {
+            if let Some(queued) = self.replacements.remove(&layer) {
+                self.set_program_on(layer, Some(queued.state));
+                if layer == MAIN_LAYER && !self.output_inhibited {
+                    self.activate_program_base();
+                }
+            }
+        }
+    }
+
+    /// A scene taken onto a layer must have the canvas of the scenes on the other layers, queued ones included: the layers of one
+    /// Program are composited together. A scene with no GPU compositor behind it (an identifier-only fixture) has no canvas to compare.
+    fn check_layer_canvas(&self, layer: i32, take_id: &TakeId, revision: Revision) -> Result<(), Refusal> {
+        let canvas = |key: (u32, u32, gx_contracts::color::WorkingColorSpace, gx_contracts::color::ColorDepth)| {
+            format!("{}x{} {:?} {:?}", key.0, key.1, key.2, key.3)
+        };
+        let Some(incoming) = self.gpu_prepared.get(&(take_id.clone(), revision)).map(GpuScene::stack_key) else {
+            return Ok(());
+        };
+        let others = self
+            .on_air()
+            .into_iter()
+            .filter(|(other, _)| *other != layer)
+            .map(|(other, state)| (other, state))
+            .chain(self.replacements.iter().filter(|(other, _)| **other != layer).map(|(other, queued)| (*other, &queued.state)));
+        for (other, state) in others {
+            let Some(held) = self.gpu_prepared.get(&(state.take_id.clone(), state.revision)).map(GpuScene::stack_key) else {
+                continue;
+            };
+            if held != incoming {
+                return Err(Refusal::LayerCanvasMismatch {
+                    layer: layer.to_string(),
+                    scene: take_id.to_string(),
+                    canvas: canvas(incoming),
+                    on_air: format!("layer {other} is {}", canvas(held)),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// The layers a Program status reports: each scene on air, then the one queued behind it. A scene with a replacement queued is
+    /// leaving.
+    fn layer_status(&self) -> Vec<ProgramLayerStatus> {
+        let mut out = Vec::new();
+        for (layer, state) in self.on_air() {
+            let queued = self.replacements.get(&layer);
+            out.push(ProgramLayerStatus {
+                layer,
+                take_id: state.take_id.clone(),
+                revision: state.revision,
+                state: if queued.is_some() { ProgramLayerPhase::Leaving } else { ProgramLayerPhase::OnAir },
+                frame: state.committed_frame,
+            });
+            if let Some(queued) = queued {
+                out.push(ProgramLayerStatus {
+                    layer,
+                    take_id: queued.state.take_id.clone(),
+                    revision: queued.state.revision,
+                    state: ProgramLayerPhase::Queued,
+                    frame: queued.start_frame,
+                });
+            }
+        }
+        out
+    }
+
     fn activate_program_base(&mut self) {
         let Some(program) = self.program.clone() else {
             self.rasterizer.clear();
@@ -539,8 +705,7 @@ impl Engine {
     ///
     /// The scene frame is relative to the engine's committed take frame, never
     /// to wall time. This keeps reconnects and frame-pump catch-up deterministic.
-    fn program_scene_frame(&self, engine_frame: u64) -> Option<u64> {
-        let program = self.program.as_ref()?;
+    fn program_scene_frame(&self, program: &ProgramState, engine_frame: u64) -> Option<u64> {
         let prepared = self
             .prepared
             .get(&(program.take_id.clone(), program.revision))?;
@@ -770,9 +935,21 @@ impl Engine {
         let frame_number = self.clock.frame();
         let started = Instant::now();
         let work_before = RenderWork::snapshot();
-        let scene_frame = self.program_scene_frame(frame_number);
-        let (program, preview, backend) =
-            if let (Some(scene_frame), false) = (scene_frame, self.output_inhibited) {
+        // A layer other than zero on air sends the frame through the stack (task 112); with only layer zero, the path is exactly as it was.
+        let stacked = self.stack_layers(frame_number);
+        if stacked.is_none() {
+            self.stack_delivered = None;
+        }
+        let scene_frame = match &stacked {
+            Some(layers) => layers.first().map(|layer| layer.2),
+            None => self
+                .program
+                .as_ref()
+                .and_then(|program| self.program_scene_frame(program, frame_number)),
+        };
+        let (program, preview, backend) = if let Some(layers) = stacked {
+            self.emit_stacked(layers, settled, frame_number)?
+        } else if let (Some(scene_frame), false) = (scene_frame, self.output_inhibited) {
                 let state = self.program.as_ref().expect("scene time requires Program");
                 self.ensure_program_backend(&state.take_id, state.revision)
                     .map_err(|cause| OutputAdapterError::Render { cause })?;
@@ -933,10 +1110,129 @@ impl Engine {
         })
     }
 
+    /// The scenes on air that have a GPU compositor behind them, lowest layer first, with the scene frame each is drawn at; `None`
+    /// unless a layer other than zero is on air and output is allowed. Layer zero alone is the single-scene path.
+    fn stack_layers(&self, engine_frame: u64) -> Option<Vec<(i32, (TakeId, Revision), u64)>> {
+        if self.layer_programs.is_empty() || self.output_inhibited {
+            return None;
+        }
+        let layers: Vec<_> = self
+            .on_air()
+            .into_iter()
+            .filter(|(_, state)| self.gpu_prepared.contains_key(&(state.take_id.clone(), state.revision)))
+            .filter_map(|(layer, state)| {
+                let frame = self.program_scene_frame(state, engine_frame)?;
+                Some((layer, (state.take_id.clone(), state.revision), frame))
+            })
+            .collect();
+        (!layers.is_empty()).then_some(layers)
+    }
+
+    /// One frame of several scenes (task 112): each is drawn into its own working-space tiles at its own scene frame, the stack puts
+    /// them over each other lowest first, and the result is encoded once through the stack's output ring. Live frames never wait: a
+    /// full ring skips the drawing, and a delivery that has not come back repeats the picture before it.
+    fn emit_stacked(
+        &mut self,
+        layers: Vec<(i32, (TakeId, Revision), u64)>,
+        settled: bool,
+        frame_number: u64,
+    ) -> Result<(Arc<Frame>, Arc<Frame>, &'static str), OutputAdapterError> {
+        let failed = |cause: Refusal| OutputAdapterError::Render { cause };
+        for (_, key, _) in &layers {
+            self.ensure_program_backend(&key.0, key.1).map_err(failed)?;
+        }
+        let shape = self.gpu_prepared.get(&layers[0].1).expect("backend checked before rendering").stack_key();
+        for (layer, key, _) in &layers {
+            let own = self.gpu_prepared.get(key).expect("backend checked before rendering").stack_key();
+            if own != shape {
+                // `Take` refuses this before a scene can be on air; here it can only be a state that should not exist.
+                return Err(failed(Refusal::LayerCanvasMismatch {
+                    layer: layer.to_string(),
+                    scene: key.0.to_string(),
+                    canvas: format!("{}x{} {:?} {:?}", own.0, own.1, own.2, own.3),
+                    on_air: format!("the lowest layer on air is {}x{} {:?} {:?}", shape.0, shape.1, shape.2, shape.3),
+                }));
+            }
+        }
+        if !self.stack.as_ref().is_some_and(|stack| stack.fits_key(shape.0, shape.1, shape.2, shape.3)) {
+            let built = self.gpu_prepared.get(&layers[0].1).expect("backend checked before rendering").new_stack();
+            self.stack = Some(built.map_err(failed)?);
+            self.stack_delivered = None;
+        }
+        let signature: Vec<(i32, TakeId, Revision)> = layers.iter().map(|(layer, key, _)| (*layer, key.0.clone(), key.1)).collect();
+        self.gpu_delivered = None;
+        let stack = self.stack.as_mut().expect("the stack was built above");
+        let recycle = &mut self.recycle;
+        let mut i = 0;
+        while i < recycle.len() {
+            if Arc::strong_count(&recycle[i]) == 1 {
+                if let Some(Ok(frame)) = recycle.remove(i).map(Arc::try_unwrap) {
+                    stack.recycle(frame.pixels);
+                }
+            } else {
+                i += 1;
+            }
+        }
+        let scenes = &mut self.gpu_prepared;
+        let mut draw = |stack: &mut LayerStack| -> Result<(), Refusal> {
+            stack.begin();
+            for (_, key, scene_frame) in &layers {
+                let scene = scenes.get_mut(key).expect("backend checked before rendering");
+                scene.compose(*scene_frame)?;
+                stack.add(scene.composed_tiles().expect("the scene was just composed")).map_err(compositor_refusal)?;
+            }
+            Ok(())
+        };
+        if settled {
+            const SETTLED: u64 = u64::MAX;
+            stack.drain(SETTLED_WAIT).map_err(|cause| failed(compositor_refusal(cause)))?;
+            draw(stack).map_err(failed)?;
+            if stack.submit(SETTLED).map_err(|cause| failed(compositor_refusal(cause)))? == Submitted::RingFull {
+                return Err(failed(compositor_refusal(crate::compositor::CompositorError::Readback("no readback slot became idle".into()))));
+            }
+            let delivered = stack.wait_for(SETTLED, SETTLED_WAIT).map_err(|cause| failed(compositor_refusal(cause)))?;
+            let (program, preview) = (Arc::new(delivered.program), Arc::new(delivered.preview));
+            self.stack_delivered = Some((signature, Arc::clone(&program), Arc::clone(&preview)));
+            return Ok((program, preview, "gpu-compositor-stack"));
+        }
+        if stack.has_idle_slot() {
+            draw(stack).map_err(failed)?;
+            if stack.submit(frame_number).map_err(|cause| failed(compositor_refusal(cause)))? == Submitted::RingFull {
+                self.readback.ring_full += 1;
+            }
+        } else {
+            stack.note_ring_full();
+            self.readback.ring_full += 1;
+        }
+        if let Some(delivered) = stack.collect().map_err(|cause| failed(compositor_refusal(cause)))? {
+            self.readback.record(frame_number, &delivered);
+            self.stack_delivered = Some((signature.clone(), Arc::new(delivered.program), Arc::new(delivered.preview)));
+        }
+        self.readback.superseded = stack.ring_counters().1;
+        Ok(match &self.stack_delivered {
+            Some((held, program, preview)) if *held == signature => (Arc::clone(program), Arc::clone(preview), "gpu-compositor-stack"),
+            // The first readback of this set of layers is still in flight: the previous picture repeats for the pipeline's latency.
+            _ => {
+                self.readback.awaiting_first += 1;
+                let (program, preview) = match self.last_frames.clone() {
+                    Some(frames) => frames,
+                    None => {
+                        let clear = match self.gpu_clear_frame.clone() {
+                            Some(clear) => clear,
+                            None => Arc::new(self.rasterizer.render(frame_number)),
+                        };
+                        (Arc::clone(&clear), clear)
+                    }
+                };
+                (program, preview, "gpu-compositor-stack-awaiting-readback")
+            }
+        })
+    }
+
     /// 3.24: feed the frame to the load governor and apply what it decides. An
     /// empty Program sheds nothing (an idle engine has nothing at risk).
     fn govern(&mut self, sample: &FrameSample) {
-        let transition = if self.program.is_none() {
+        let transition = if !self.anything_on_air() {
             self.governor.program_empty()
         } else {
             let on_ring = self.gpu.has_hardware() && self.readback.delivered > 0;
@@ -1127,6 +1423,7 @@ impl Engine {
             // unbounded time.
             self.clock.advance_to(target);
         }
+        self.settle_replacements();
     }
 
     fn degradations(&self) -> Vec<Degradation> {
@@ -1208,7 +1505,7 @@ impl Engine {
             }
         }
         if self.output_inhibited {
-            if let Some(program) = &self.program {
+            for (_, program) in self.on_air() {
                 if let Err(cause) = self.ensure_program_backend(&program.take_id, program.revision)
                 {
                     return EngineReply::Refused(cause);
@@ -1327,6 +1624,32 @@ impl AssetPublishPeer for Engine {
         }))
     }
 
+    /// 11.153: check a scene against records, on the asset plane. Like a preview it is non-live work: the font bytes the scene names are
+    /// taken here, under the peer's lock, and the shaping runs outside it, behind the detached gate. Nothing is drawn, no revision is
+    /// made and nothing on Program changes.
+    fn prepare_fit(&mut self, request: FitRequest) -> Result<FitJob, FitFailure> {
+        if let Some(refusal) = self.shed("fit") {
+            return Err(FitFailure::Refused(refusal));
+        }
+        let wanted: HashSet<ContentHash> = request
+            .scene
+            .assets
+            .iter()
+            .filter_map(|asset| asset.checksum.clone())
+            .collect();
+        let bytes: AssetBytes = self
+            .asset_bytes
+            .iter()
+            .filter(|(hash, _)| wanted.contains(*hash))
+            .map(|(hash, bytes)| (hash.clone(), bytes.clone()))
+            .collect();
+        let gate = Arc::clone(&self.gate);
+        Ok(Box::new(move || {
+            let _slot = gate.acquire();
+            crate::fit::fit_report(&request, &bytes)
+        }))
+    }
+
     // 5.9: the asset plane re-hashed these bytes before handing them over.
     // 5.11: held means in memory and in the store, so an entry removed from
     // the store while the engine runs is reported missing and sent again.
@@ -1377,7 +1700,7 @@ impl Engine {
     /// A stop request (2.19): refused by name while a scene is on Program,
     /// otherwise passed to whoever owns the process, and answered `Stopping`.
     fn stop_requested(&mut self) -> EngineReply {
-        if let Some(program) = &self.program {
+        if let Some((_, program)) = self.on_air().first() {
             return EngineReply::Refused(Refusal::StopRefusedProgramOnAir {
                 take_id: program.take_id.clone(),
                 revision: program.revision,
@@ -1435,11 +1758,27 @@ impl EnginePeer for Engine {
         // control transport reaches it there without passing through here.
         let render = matches!(request, ClientRequest::Render(_));
         let note = crate::log::RequestNote::of(&request);
-        let reply = self.handle_unlogged(request);
+        let reply = self.handle_unlogged(request, MAIN_LAYER);
         if !render {
             crate::log::request(&note, &reply, self.clock.epoch().0);
         }
         reply
+    }
+
+    fn handle_on_layer(&mut self, request: ClientRequest, layer: i32) -> Handled {
+        if layer == MAIN_LAYER || !request.is_targeted() {
+            return self.handle_detached(request);
+        }
+        if !(MIN_PROGRAM_LAYER..=MAX_PROGRAM_LAYER).contains(&layer) {
+            return Handled::Reply(EngineReply::Refused(Refusal::LayerNotSupported {
+                request: request.name().to_owned(),
+                layer: layer.to_string(),
+            }));
+        }
+        let note = crate::log::RequestNote::of(&request);
+        let reply = self.handle_unlogged(request, layer);
+        crate::log::request(&note, &reply, self.clock.epoch().0);
+        Handled::Reply(reply)
     }
 
     /// A headless render is validated while the engine is held and drawn
@@ -1497,7 +1836,7 @@ impl EnginePeer for Engine {
 
 impl Engine {
     /// Answer one request; [`EnginePeer::handle`] logs it (2.12).
-    fn handle_unlogged(&mut self, request: ClientRequest) -> EngineReply {
+    fn handle_unlogged(&mut self, request: ClientRequest, layer: i32) -> EngineReply {
         let persists = matches!(
             &request,
             ClientRequest::Cue(_)
@@ -1532,6 +1871,7 @@ impl Engine {
                     device_tier: self.gpu.tier(),
                     live_allowed: !self.output_inhibited && self.live_is_allowed(false),
                     program: self.program.clone(),
+                    layers: Some(self.layer_status()),
                     degradations: self.degradations(),
                 })
             }
@@ -1544,7 +1884,7 @@ impl Engine {
                 }
                 match self.commit(req.at) {
                     Ok(committed) => {
-                        self.cued = Some(ProgramState {
+                        let cue = ProgramState {
                             take_id: req.take_id,
                             revision: req.revision,
                             committed_frame: committed.frame,
@@ -1552,7 +1892,12 @@ impl Engine {
                             playing: true,
                             phase: None,
                             stop_frame: None,
-                        });
+                        };
+                        if layer == MAIN_LAYER {
+                            self.cued = Some(cue);
+                        } else {
+                            self.layer_cues.insert(layer, cue);
+                        }
                         EngineReply::Cued(committed)
                     }
                     Err(refusal) => EngineReply::Refused(refusal),
@@ -1568,6 +1913,9 @@ impl Engine {
                 if let Err(refusal) = self.ensure_program_backend(&req.take_id, req.revision) {
                     return EngineReply::Refused(refusal);
                 }
+                if let Err(refusal) = self.check_layer_canvas(layer, &req.take_id, req.revision) {
+                    return EngineReply::Refused(refusal);
+                }
                 let in_phase = self
                     .prepared
                     .get(&(req.take_id.clone(), req.revision))
@@ -1578,11 +1926,12 @@ impl Engine {
                     })
                     .cloned();
                 match self.commit(req.at) {
-                    Ok(committed) => {
-                        self.program = Some(ProgramState {
+                    Ok(mut committed) => {
+                        // The scene as it is on air from `from`: its authored In plays first, when it has one.
+                        let incoming = |from: u64| ProgramState {
                             take_id: req.take_id.clone(),
                             revision: req.revision,
-                            committed_frame: committed.frame,
+                            committed_frame: from,
                             scene_frame: in_phase
                                 .as_ref()
                                 .map(|phase| phase.start_frame)
@@ -1592,10 +1941,44 @@ impl Engine {
                             stop_frame: in_phase
                                 .as_ref()
                                 .map(|phase| phase.end_frame.saturating_sub(1)),
-                        });
-                        self.cued = None;
-                        if !self.output_inhibited {
-                            self.activate_program_base();
+                        };
+                        let occupant = self.program_on(layer).cloned();
+                        let leaving = occupant
+                            .as_ref()
+                            .and_then(|state| self.out_phase_of(state).map(|out| (state.clone(), out)));
+                        if let Some(queued) = self.replacements.get(&layer) {
+                            // A scene is already leaving this layer: it keeps leaving, and this take takes the place of the one queued.
+                            let start = queued.start_frame;
+                            self.replacements.insert(layer, Replacement { state: incoming(start), start_frame: start });
+                            committed.start_frame = Some(start);
+                        } else if let Some((state, out)) = leaving {
+                            // An occupied layer: the scene on it plays its authored Out from this commitment, and the new scene takes
+                            // the layer when that ends. Without an Out it is a cut (the branch below).
+                            let start = committed.frame + out.frame_count();
+                            self.set_program_on(
+                                layer,
+                                Some(ProgramState {
+                                    committed_frame: committed.frame,
+                                    scene_frame: out.start_frame,
+                                    playing: true,
+                                    phase: Some(out.address()),
+                                    stop_frame: Some(out.end_frame.saturating_sub(1)),
+                                    ..state
+                                }),
+                            );
+                            self.replacements.insert(layer, Replacement { state: incoming(start), start_frame: start });
+                            committed.start_frame = Some(start);
+                        } else {
+                            self.set_program_on(layer, Some(incoming(committed.frame)));
+                            if layer == MAIN_LAYER && !self.output_inhibited {
+                                self.activate_program_base();
+                            }
+                        }
+                        // The cue on this layer is used up by the take.
+                        if layer == MAIN_LAYER {
+                            self.cued = None;
+                        } else {
+                            self.layer_cues.remove(&layer);
                         }
                         self.events.push(EngineEvent::Committed(committed));
                         EngineReply::Taken(committed)
@@ -1604,18 +1987,42 @@ impl Engine {
                 }
             }
 
-            ClientRequest::Clear(req) => match self.commit(req.at) {
-                Ok(committed) => {
-                    self.program = None;
-                    self.rasterizer.clear();
-                    self.preview_rasterizer.clear();
-                    EngineReply::Cleared(committed)
+            ClientRequest::Clear(req) => {
+                // A Clear that names the page it expects takes the layer's scene off only if that is the page on it (12.10,
+                // decision Q8). The scene on the layer is the one still leaving while a replacement waits behind it, so an
+                // expectation of the leaving scene holds until the replacement starts and one of the replacement only after.
+                if let Some(expected) = &req.expected {
+                    let holds = self
+                        .program_on(layer)
+                        .is_some_and(|on_air| on_air.take_id == expected.take_id && on_air.revision == expected.revision);
+                    if !holds {
+                        let named = |take: &TakeId, revision: Revision| format!("{} r{}", take.0, revision.0);
+                        return EngineReply::Refused(Refusal::ClearExpectationUnmet {
+                            layer: layer.to_string(),
+                            expected: named(&expected.take_id, expected.revision),
+                            on_air: self
+                                .program_on(layer)
+                                .map_or_else(|| "nothing".to_owned(), |on_air| named(&on_air.take_id, on_air.revision)),
+                        });
+                    }
                 }
-                Err(refusal) => EngineReply::Refused(refusal),
-            },
+                match self.commit(req.at) {
+                    Ok(committed) => {
+                        // Only this layer: anything waiting to replace what was on it goes too, and the other layers stay on air.
+                        self.replacements.remove(&layer);
+                        self.set_program_on(layer, None);
+                        if layer == MAIN_LAYER {
+                            self.rasterizer.clear();
+                            self.preview_rasterizer.clear();
+                        }
+                        EngineReply::Cleared(committed)
+                    }
+                    Err(refusal) => EngineReply::Refused(refusal),
+                }
+            }
 
             ClientRequest::Phase(req) => {
-                let Some(program) = self.program.clone() else {
+                let Some(program) = self.program_on(layer).cloned() else {
                     return EngineReply::Refused(Refusal::TimelinePhaseUnknown {
                         phase: req.phase,
                     });
@@ -1633,16 +2040,19 @@ impl Engine {
                 match self.commit(req.at) {
                     Ok(committed) => {
                         let playing = true;
-                        self.program = Some(ProgramState {
-                            take_id: program.take_id,
-                            revision: program.revision,
-                            committed_frame: committed.frame,
-                            scene_frame: phase.start_frame,
-                            playing,
-                            phase: Some(phase.address()),
-                            stop_frame: Some(phase.end_frame.saturating_sub(1)),
-                        });
-                        if !self.output_inhibited {
+                        self.set_program_on(
+                            layer,
+                            Some(ProgramState {
+                                take_id: program.take_id,
+                                revision: program.revision,
+                                committed_frame: committed.frame,
+                                scene_frame: phase.start_frame,
+                                playing,
+                                phase: Some(phase.address()),
+                                stop_frame: Some(phase.end_frame.saturating_sub(1)),
+                            }),
+                        );
+                        if layer == MAIN_LAYER && !self.output_inhibited {
                             self.activate_program_base();
                         }
                         self.events.push(EngineEvent::Committed(committed));
@@ -2162,6 +2572,27 @@ mod tests {
         }
     }
 
+    /// 11.153: an engine checks records with the font bytes it holds, answers in the order asked, and names a font it was never given.
+    #[test]
+    fn a_fit_check_uses_the_fonts_the_engine_holds_and_names_one_it_does_not() {
+        use crate::fit::tests::{hash, plate, record, scene, INTER};
+        use gx_contracts::fit_report::{FitAxis, FitRequest, FitResult};
+        let request = || FitRequest {
+            scene: scene(vec![plate("point", 400.0, 60.0, false)]),
+            records: vec![record("1", serde_json::json!("ARJUN RAO")), record("17", serde_json::json!("VENKATASUBRAMANIAN IYER SUBRAMANIAM"))],
+        };
+        let mut e = engine();
+        // The engine was never given the font's bytes: it says so by name instead of guessing a fit.
+        let job = AssetPublishPeer::prepare_fit(&mut e, request()).expect("the request is accepted");
+        assert!(matches!(job(), Err(FitFailure::Refused(_))), "no font bytes, no measuring");
+        e.record_verified_asset_bytes(hash(), INTER.to_vec());
+        let report = AssetPublishPeer::prepare_fit(&mut e, request()).expect("accepted")().expect("measured");
+        assert_eq!(report.records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(), ["1", "17"]);
+        assert_eq!(report.records[0].elements[0].fit, FitResult::Fits);
+        assert!(matches!(report.records[1].elements[0].fit, FitResult::Overflows { axis: FitAxis::Width, .. }));
+        assert_eq!(report.tally(), (1, 1));
+    }
+
     /// 11.65: a preview is non-live work. Under load, with the throttle on and the
     /// only slot held, it waits at the same gate headless renders do and is drawn
     /// when the slot frees: late, never lost, and never competing with Program.
@@ -2403,6 +2834,7 @@ mod tests {
             let _ = e.handle(ClientRequest::Status);
             let _ = e.handle(ClientRequest::Clear(ClearRequest {
                 at: TakeAt::NextOpportunity,
+                expected: None,
             }));
         });
         let taken = find(&records, "program.take", "committed");
@@ -2739,6 +3171,7 @@ mod tests {
                     ],
                 }],
                 path_channels: Vec::new(),
+                colour_channels: None,
                 phases: vec![
                     TimelinePhase {
                         kind: PhaseKind::In,
@@ -2825,6 +3258,7 @@ mod tests {
         }));
         let _ = e.handle(ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }));
         assert!(e.render_program().is_black());
     }
@@ -2932,6 +3366,7 @@ mod tests {
         // After Program is cleared it is accepted.
         let _ = e.handle(ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }));
         assert!(e.status().unwrap().program.is_none());
         assert_eq!(e.handle(ClientRequest::Stop), EngineReply::Stopping);
@@ -3159,6 +3594,257 @@ mod tests {
                 ..
             }) if phase == "hold"
         ));
+    }
+
+    #[test]
+    fn cues_on_separate_layers_keep_independent_revision_pins_in_recovery() {
+        let mut engine = engine();
+        let (take_id, revision) = published(&mut engine);
+        let cue = || {
+            ClientRequest::Cue(CueRequest {
+                take_id: take_id.clone(),
+                revision,
+                content_hash: Some(pin()),
+                at: TakeAt::NextOpportunity,
+            })
+        };
+        for layer in [-99_999, 60] {
+            assert!(matches!(
+                engine.handle_on_layer(cue(), layer).finish(),
+                EngineReply::Cued(_)
+            ));
+        }
+        assert!(matches!(
+            engine.handle_on_layer(cue(), 100_000).finish(),
+            EngineReply::Refused(Refusal::LayerNotSupported { .. })
+        ));
+        let state = engine.recovery_state();
+        assert!(state.cued.is_none());
+        assert!(state.program.is_none());
+        let take = ClientRequest::Take(TakeRequest {
+            take_id: take_id.clone(),
+            revision,
+            content_hash: Some(pin()),
+            at: TakeAt::NextOpportunity,
+        });
+        // A take on a layer is accepted (task 112): it is on air on that layer, layer zero stays empty, and the cue it used is spent.
+        assert!(matches!(
+            engine.handle_on_layer(take, 60).finish(),
+            EngineReply::Taken(_)
+        ));
+        assert!(engine.recovery_state().program.is_none());
+        assert_eq!(engine.layer_programs.keys().copied().collect::<Vec<_>>(), [60]);
+        assert_eq!(engine.layer_cues.keys().copied().collect::<Vec<_>>(), [-99_999]);
+        assert_eq!(
+            state.layer_cues.keys().copied().collect::<Vec<_>>(),
+            [-99_999, 60]
+        );
+        assert!(state.names(&take_id, revision));
+        let json = serde_json::to_vec(&state).unwrap();
+        let decoded: RecoveryState = serde_json::from_slice(&json).unwrap();
+        decoded.validate().unwrap();
+        let mut restored = self::engine();
+        let store = AssetStore::at_root(std::env::temp_dir());
+        assert!(restored.restore_state(decoded, &store).unwrap().is_empty());
+        assert_eq!(restored.layer_cues, state.layer_cues);
+    }
+
+    /// Identifier-only scenes have no authored Out, so a replacement on a layer is a cut and the state machine is visible without a GPU.
+    fn layers_taking(engine: &mut Engine, take_id: &TakeId, revision: Revision, layer: i32) -> EngineReply {
+        engine
+            .handle_on_layer(
+                ClientRequest::Take(TakeRequest {
+                    take_id: take_id.clone(),
+                    revision,
+                    content_hash: Some(pin()),
+                    at: TakeAt::NextOpportunity,
+                }),
+                layer,
+            )
+            .finish()
+    }
+
+    fn layer_summary(engine: &mut Engine) -> Vec<(i32, String, ProgramLayerPhase)> {
+        match engine.handle(ClientRequest::Status) {
+            EngineReply::Status(status) => status
+                .layers
+                .expect("layers are reported")
+                .into_iter()
+                .map(|layer| (layer.layer, layer.take_id.0, layer.state))
+                .collect(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_take_a_clear_and_a_replacement_on_one_layer_leave_the_others_on_air() {
+        let mut engine = engine();
+        let (a, revision) = published(&mut engine);
+        let b = TakeId("b".into());
+        engine.publish_identifier(b.clone(), Revision(1), pin());
+        let clear = |engine: &mut Engine, layer: i32| {
+            engine
+                .handle_on_layer(ClientRequest::Clear(gx_control_plane::intent::ClearRequest { at: TakeAt::NextOpportunity, expected: None }), layer)
+                .finish()
+        };
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 0), EngineReply::Taken(_)));
+        assert!(matches!(layers_taking(&mut engine, &b, Revision(1), 60), EngineReply::Taken(_)));
+        assert!(matches!(layers_taking(&mut engine, &b, Revision(1), -5), EngineReply::Taken(_)));
+        // Sorted by layer, layer zero among them; `program` is still layer zero's scene.
+        assert_eq!(
+            layer_summary(&mut engine),
+            [(-5, "b".into(), ProgramLayerPhase::OnAir), (0, a.0.clone(), ProgramLayerPhase::OnAir), (60, "b".into(), ProgramLayerPhase::OnAir)]
+        );
+        assert!(matches!(engine.handle(ClientRequest::Status), EngineReply::Status(EngineStatus { program: Some(ProgramState { ref take_id, .. }), .. }) if *take_id == a));
+        // Another take on an occupied layer with no authored Out is a cut, and says so on the wire.
+        let cut = layers_taking(&mut engine, &a, revision, 60);
+        assert!(matches!(cut, EngineReply::Taken(committed) if committed.start_frame.is_none()), "{cut:?}");
+        assert_eq!(layer_summary(&mut engine)[2], (60, a.0.clone(), ProgramLayerPhase::OnAir));
+        // Clear one layer: the others stay.
+        assert!(matches!(clear(&mut engine, 60), EngineReply::Cleared(_)));
+        assert_eq!(layer_summary(&mut engine).len(), 2);
+        // Clear with no target is layer zero.
+        assert!(matches!(engine.handle(ClientRequest::Clear(gx_control_plane::intent::ClearRequest { at: TakeAt::NextOpportunity, expected: None })), EngineReply::Cleared(_)));
+        assert_eq!(layer_summary(&mut engine), [(-5, "b".into(), ProgramLayerPhase::OnAir)]);
+        // A phase asked of a layer with a scene that has none is refused by name, on that layer.
+        let phase = engine.handle_on_layer(ClientRequest::Phase(gx_control_plane::intent::PhaseRequest { phase: "out".into(), at: TakeAt::NextOpportunity }), -5).finish();
+        assert!(matches!(phase, EngineReply::Refused(Refusal::TimelinePhaseUnknown { .. })), "{phase:?}");
+        let empty = engine.handle_on_layer(ClientRequest::Phase(gx_control_plane::intent::PhaseRequest { phase: "out".into(), at: TakeAt::NextOpportunity }), 33).finish();
+        assert!(matches!(empty, EngineReply::Refused(Refusal::TimelinePhaseUnknown { .. })), "nothing on layer 33");
+        // Out of range stays refused by name, taking nothing.
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 100_000), EngineReply::Refused(Refusal::LayerNotSupported { .. })));
+        assert_eq!(layer_summary(&mut engine).len(), 1);
+    }
+
+    fn clear_expecting(engine: &mut Engine, layer: i32, take: &TakeId, revision: Revision) -> EngineReply {
+        engine
+            .handle_on_layer(
+                ClientRequest::Clear(gx_control_plane::intent::ClearRequest {
+                    at: TakeAt::NextOpportunity,
+                    expected: Some(gx_control_plane::intent::ExpectedProgram { take_id: take.clone(), revision }),
+                }),
+                layer,
+            )
+            .finish()
+    }
+
+    #[test]
+    fn a_clear_that_names_its_page_clears_only_when_that_page_is_on_the_layer() {
+        let mut engine = engine();
+        let (a, revision) = published(&mut engine);
+        let b = TakeId("b".into());
+        engine.publish_identifier(b.clone(), Revision(1), pin());
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 60), EngineReply::Taken(_)));
+        assert!(matches!(layers_taking(&mut engine, &b, Revision(1), 61), EngineReply::Taken(_)));
+        // The wrong take, the wrong revision and another layer's page are each refused by name, saying what is there, and nothing changes.
+        for (take, rev) in [(&b, revision), (&a, Revision(revision.0 + 1))] {
+            let refused = clear_expecting(&mut engine, 60, take, rev);
+            match refused {
+                EngineReply::Refused(Refusal::ClearExpectationUnmet { layer, expected, on_air }) => {
+                    assert_eq!(layer, "60");
+                    assert_eq!(expected, format!("{} r{}", take.0, rev.0));
+                    assert_eq!(on_air, format!("{} r{}", a.0, revision.0));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(layer_summary(&mut engine).len(), 2, "a refused Clear took nothing off");
+        // The right page clears its layer and only that one.
+        assert!(matches!(clear_expecting(&mut engine, 60, &a, revision), EngineReply::Cleared(_)));
+        assert_eq!(layer_summary(&mut engine), [(61, "b".into(), ProgramLayerPhase::OnAir)]);
+        // An empty layer has no page to match: refused, saying nothing is on it.
+        match clear_expecting(&mut engine, 60, &a, revision) {
+            EngineReply::Refused(Refusal::ClearExpectationUnmet { on_air, .. }) => assert_eq!(on_air, "nothing"),
+            other => panic!("{other:?}"),
+        }
+        // No expectation is today's Clear: whatever is there goes.
+        let plain = engine.handle_on_layer(ClientRequest::Clear(gx_control_plane::intent::ClearRequest { at: TakeAt::NextOpportunity, expected: None }), 61).finish();
+        assert!(matches!(plain, EngineReply::Cleared(_)));
+        assert!(layer_summary(&mut engine).is_empty());
+    }
+
+    #[test]
+    fn an_expectation_of_the_leaving_scene_holds_until_its_replacement_starts_and_one_of_the_replacement_only_after() {
+        let frames = Arc::new(AtomicU64::new(0));
+        let mut engine = Engine::new(Arc::clone(&frames), Locality::CoLocated);
+        let (a, revision) = published(&mut engine);
+        let b = TakeId("b".into());
+        engine.publish_identifier(b.clone(), Revision(1), pin());
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 60), EngineReply::Taken(_)));
+        let state = |take_id: &TakeId, revision, from| ProgramState { take_id: take_id.clone(), revision, committed_frame: from, scene_frame: 0, playing: true, phase: None, stop_frame: None };
+        engine.replacements.insert(60, Replacement { state: state(&b, Revision(1), 40), start_frame: 40 });
+        frames.store(10, Ordering::Relaxed);
+        // While `a` leaves, the replacement is queued, not the layer's page.
+        assert!(matches!(clear_expecting(&mut engine, 60, &b, Revision(1)), EngineReply::Refused(Refusal::ClearExpectationUnmet { .. })));
+        assert!(engine.replacements.contains_key(&60), "the refused Clear left the queue alone");
+        // Expecting the leaving scene clears the layer and what was queued behind it.
+        assert!(matches!(clear_expecting(&mut engine, 60, &a, revision), EngineReply::Cleared(_)));
+        assert!(engine.replacements.is_empty());
+        // After the replacement starts it is the page, and the old one no longer is.
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 60), EngineReply::Taken(_)));
+        engine.replacements.insert(60, Replacement { state: state(&b, Revision(1), 40), start_frame: 40 });
+        frames.store(40, Ordering::Relaxed);
+        let _ = layer_summary(&mut engine);
+        assert!(matches!(clear_expecting(&mut engine, 60, &a, revision), EngineReply::Refused(Refusal::ClearExpectationUnmet { .. })));
+        assert!(matches!(clear_expecting(&mut engine, 60, &b, Revision(1)), EngineReply::Cleared(_)));
+    }
+
+    #[test]
+    fn the_engine_will_not_stop_while_only_a_layer_is_on_air() {
+        let mut engine = engine();
+        let (a, revision) = published(&mut engine);
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 7), EngineReply::Taken(_)));
+        assert!(engine.program.is_none());
+        assert!(matches!(engine.handle(ClientRequest::Stop), EngineReply::Refused(Refusal::StopRefusedProgramOnAir { .. })));
+    }
+
+    #[test]
+    fn scenes_on_layers_and_a_queued_replacement_are_journaled_and_restored() {
+        let mut engine = engine();
+        let (a, revision) = published(&mut engine);
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 60), EngineReply::Taken(_)));
+        assert!(matches!(layers_taking(&mut engine, &a, revision, -3), EngineReply::Taken(_)));
+        // A replacement queued on layer 60 (made directly: an identifier-only scene has no Out to wait for).
+        let queued = Replacement {
+            state: ProgramState { take_id: a.clone(), revision, committed_frame: 500, scene_frame: 0, playing: true, phase: None, stop_frame: None },
+            start_frame: 500,
+        };
+        engine.replacements.insert(60, queued.clone());
+        let state = engine.recovery_state();
+        state.validate().expect("a consistent state validates");
+        assert_eq!(state.layer_programs.keys().copied().collect::<Vec<_>>(), [-3, 60]);
+        assert!(state.names(&a, revision));
+        let json = serde_json::to_vec(&state).unwrap();
+        let decoded: RecoveryState = serde_json::from_slice(&json).unwrap();
+        let mut restored = self::engine();
+        let store = AssetStore::at_root(std::env::temp_dir());
+        assert!(restored.restore_state(decoded, &store).unwrap().is_empty());
+        assert_eq!(restored.layer_programs, engine.layer_programs);
+        assert_eq!(restored.replacements.get(&60), Some(&queued));
+        assert_eq!(layer_summary(&mut restored), [(-3, a.0.clone(), ProgramLayerPhase::OnAir), (60, a.0.clone(), ProgramLayerPhase::Leaving), (60, a.0, ProgramLayerPhase::Queued)]);
+    }
+
+    #[test]
+    fn a_queued_replacement_takes_its_layer_when_the_clock_reaches_its_frame_and_not_before() {
+        let frames = Arc::new(AtomicU64::new(0));
+        let mut engine = Engine::new(Arc::clone(&frames), Locality::CoLocated);
+        let (a, revision) = published(&mut engine);
+        let b = TakeId("b".into());
+        engine.publish_identifier(b.clone(), Revision(1), pin());
+        assert!(matches!(layers_taking(&mut engine, &a, revision, 60), EngineReply::Taken(_)));
+        let state = |take_id: &TakeId, revision, from| ProgramState { take_id: take_id.clone(), revision, committed_frame: from, scene_frame: 0, playing: true, phase: None, stop_frame: None };
+        engine.replacements.insert(60, Replacement { state: state(&b, Revision(1), 40), start_frame: 40 });
+        frames.store(39, Ordering::Relaxed);
+        assert_eq!(layer_summary(&mut engine)[1], (60, "b".into(), ProgramLayerPhase::Queued));
+        frames.store(40, Ordering::Relaxed);
+        assert_eq!(layer_summary(&mut engine), [(60, "b".into(), ProgramLayerPhase::OnAir)]);
+        assert_eq!(engine.layer_programs[&60].committed_frame, 40, "it began at the frame the Out ended, not when the clock was looked at");
+        assert!(engine.replacements.is_empty());
+        // A late clock gives the same layers for the same frame.
+        engine.replacements.insert(60, Replacement { state: state(&a, revision, 90), start_frame: 90 });
+        frames.store(500, Ordering::Relaxed);
+        assert_eq!(layer_summary(&mut engine), [(60, a.0, ProgramLayerPhase::OnAir)]);
+        assert_eq!(engine.layer_programs[&60].committed_frame, 90);
     }
 
     #[test]

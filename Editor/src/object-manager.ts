@@ -287,7 +287,7 @@ export function objectManagerPanel(
   return {
     id: "object-manager",
     role: "treegrid",
-    label: "Objects",
+    label: "Elements",
     description: `${rows.length} object(s) in ${document.name}`,
     children: rows,
   };

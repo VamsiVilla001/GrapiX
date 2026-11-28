@@ -15,7 +15,8 @@ use gx_contracts::scene::{resolve_hierarchy, ResolvedObject, SceneDocument, Scen
 use gx_contracts::Refusal;
 
 use crate::rasterise::{PathRasteriser, PreparedPaths, RasterSurface, VelloCpuRasteriser};
-use crate::text::PreparedTexts;
+use crate::mesh::AssetBytes;
+use crate::text::{prepare_text_object, PreparedTexts};
 
 /// One effect's mask weights (3.28): the coverage of the masks the effect
 /// references over the layer's pixels, drawn as the layer's own masks are.
@@ -202,10 +203,90 @@ pub fn animates_a_path(doc: &SceneDocument, object_id: &str) -> bool {
         .any(|c| c.object_id == object_id && !c.keys.is_empty())
 }
 
-/// Grow `point`'s bounds to hold every shape an animated path of the object
-/// takes: each key's drawn bounds, grown by how far its control polygon passes
-/// its curve, since a blend of two keys stays inside their control polygons
-/// (11.112).
+fn scalar_source_property(property: &str) -> bool {
+    gx_contracts::animation::dash::index(property).is_some()
+        || gx_contracts::text_animator::ANIMATOR_PROPERTIES.contains(&property)
+        || matches!(
+        property,
+        "size" | "lineHeight" | "letterSpacing" | "baselineShift"
+            | "radius" | "strokeWidth" | "strokeStyle.dashOffset" | "trimStart" | "trimEnd" | "trimOffset"
+    )
+}
+
+fn animates_colour(doc: &SceneDocument, id: &str) -> bool {
+    doc.timeline.colour_channels.iter().flatten().any(|channel| {
+        channel.object_id == id && !channel.keys.is_empty()
+    })
+}
+
+pub(crate) fn animates_source(doc: &SceneDocument, id: &str) -> bool {
+    animates_a_path(doc, id) || animates_colour(doc, id) || doc.timeline.channels.iter().any(|channel| {
+        channel.object_id == id && !channel.keys.is_empty() && scalar_source_property(&channel.property)
+    })
+}
+
+fn scalar_extent(
+    local: &SceneDocument,
+    id: &str,
+    texts: &PreparedTexts,
+    font_bytes: &AssetBytes,
+    point: &mut dyn FnMut(f64, f64),
+) -> Result<bool, Refusal> {
+    use gx_contracts::animation::{evaluate_channel, set_base_property};
+
+    let channels: Vec<_> = local.timeline.channels.iter().filter(|channel| {
+        channel.object_id == id && !channel.keys.is_empty() && scalar_source_property(&channel.property)
+    }).collect();
+    let colour = animates_colour(local, id);
+    if channels.is_empty() && !colour {
+        return Ok(false);
+    }
+    let mut sampled = local.clone();
+    sampled.timeline.path_channels.retain(|channel| channel.object_id == id);
+    if let Some(channels) = &mut sampled.timeline.colour_channels {
+        channels.retain(|channel| channel.object_id == id);
+    }
+    // Paint changes can introduce a fill or stroke absent from the base object,
+    // but later RGBA values cannot change the paint geometry.
+    if colour {
+        gx_contracts::animation::colour::apply(&mut sampled, 0)?;
+    }
+    let key_frames = channels.iter().flat_map(|channel| channel.keys.iter().map(|key| key.frame))
+        .chain(sampled.timeline.path_channels.iter().flat_map(|channel| channel.keys.iter().map(|key| key.frame)));
+    let (first, last) = key_frames.fold((u64::MAX, 0), |(first, last), frame| {
+        (first.min(frame), last.max(frame))
+    });
+    let first = first.min(last);
+    let mut previous = local.objects[0].clone();
+    let mut shaped = None;
+    for frame in first..=last {
+        for channel in &channels {
+            if let Some(value) = evaluate_channel(channel, frame)? {
+                set_base_property(&mut sampled, id, &channel.property, value)?;
+            }
+        }
+        gx_contracts::path_anim::apply_path_channels(&mut sampled, frame)?;
+        if sampled.objects[0] == previous {
+            continue; // The base or last evaluated bounds already cover this source.
+        }
+        if let (SceneObject::Text(text), SceneObject::Text(old)) = (&sampled.objects[0], &previous) {
+            if crate::prepared::text_layout_changed(text, old) {
+                shaped = Some(PreparedTexts { objects: vec![prepare_text_object(&sampled, text, font_bytes)?] });
+            }
+        }
+        let effective = resolve_hierarchy(&sampled.objects).effective;
+        let paths = PreparedPaths::prepare(&sampled, &effective, Some(shaped.as_ref().unwrap_or(texts)))?;
+        for path in paths.paths() {
+            let bounds = path.bounds();
+            point(f64::from(bounds.min_x), f64::from(bounds.min_y));
+            point(f64::from(bounds.max_x), f64::from(bounds.max_y));
+        }
+        previous.clone_from(&sampled.objects[0]);
+    }
+    Ok(true)
+}
+
+/// Grow the bounds by each path key and its control polygon (11.112).
 fn animated_extent(
     local: &SceneDocument,
     doc: &SceneDocument,
@@ -334,6 +415,7 @@ pub fn prepare_layer_source(
     limit: u32,
     gpu: Option<&crate::gpu::Gpu>,
     images: &crate::image::PreparedImages,
+    animated_font_bytes: Option<&AssetBytes>,
 ) -> Result<LayerSource, Refusal> {
     let object = &doc.objects[index];
     // 3.17: an image is its box raster, built from its fit plan in the
@@ -406,7 +488,12 @@ pub fn prepare_layer_source(
         point(f64::from(b.min_x), f64::from(b.min_y));
         point(f64::from(b.max_x), f64::from(b.max_y));
     }
-    if animates_a_path(doc, &id) {
+    let scalar = match animated_font_bytes {
+        Some(bytes) => scalar_extent(&local, &id, texts, bytes, &mut point)?,
+        None => false,
+    };
+    let path_animated = animates_a_path(doc, &id);
+    if path_animated {
         animated_extent(&local, doc, &id, texts, &mut point)?;
     }
     let b = bounds.unwrap_or([0.0, 0.0, 0.0, 0.0]);
@@ -442,7 +529,7 @@ pub fn prepare_layer_source(
     if let Some(gpu) = gpu {
         if let Some(drawn) = gpu.draw_paths(&id, &object_paths, origin, width, height, &masks) {
             let drawn = drawn?;
-            let redraw = animates_a_path(doc, &id).then(|| SourceRedraw {
+            let redraw = (path_animated || scalar).then(|| SourceRedraw {
                 target: drawn.clone(),
                 origin,
                 phase,

@@ -1,0 +1,22 @@
+1 hidden empty needs fixing CAUGHT
+2 overflow needs nothing CAUGHT
+3 integers shown with decimal CAUGHT
+4 decimals dropped CAUGHT
+5 hidden not said CAUGHT
+6 missing path dropped CAUGHT
+7 NEEDS never CAUGHT
+8 tally counts elements CAUGHT
+9 axis wrong CAUGHT
+10 lines plural CAUGHT
+11 check for fits SURVIVED
+12 stale unsaid CAUGHT
+13 rows not capped CAUGHT
+14 button live while checking CAUGHT
+15 button live without text CAUGHT
+16 no records unsaid CAUGHT
+17 ok tone with lines CAUGHT
+18 notes uncapped CAUGHT
+19 more unsaid CAUGHT
+20 notes dropped CAUGHT
+21 records block missing CAUGHT
+20 of 21 caught

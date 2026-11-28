@@ -32,6 +32,8 @@
 import { createBridge, corrOf, installCapture } from "./shell-bridge.js";
 import { createTelemetryPanel } from "./telemetry-panel.js";
 import { describeNameFault, parseOperatorName } from "./operator.js";
+import { createStacksView } from "./screens/stacks-view.js";
+import { describeStackFault, formatStack, pageOf, parseStack, stackArgs, stackRows, stepStack } from "./screens/stacks.js";
 
 const rawBridge = globalThis.__TAURI__ && globalThis.__TAURI__.core;
 const inShell = typeof rawBridge?.invoke === "function";
@@ -267,6 +269,13 @@ const ui = {
   programSceneFrame: id("programSceneFrame"),
   programPlaybackMode: id("programPlaybackMode"),
 
+  stackInput: id("stackInput"),
+  stackMinus: id("stackMinus"),
+  stackPlus: id("stackPlus"),
+  stackNote: id("stackNote"),
+  stacksList: id("stacksList"),
+  stacksResult: id("stacksResult"),
+
   transportPanel: id("transportPanel"),
   takeIdInput: id("takeIdInput"),
   revisionInput: id("revisionInput"),
@@ -344,7 +353,91 @@ const session = {
   pollTimer: null,
   polling: false,
   busy: false,
+  /** The engine status as last read, or null when there is none (12.13: the Stacks table is drawn from it). */
+  status: null,
+  /** The last valid stack in the Stack field. The field's own text is what a command reads (`readStack`). */
+  stack: 0,
 };
+
+// ---------------------------------------------------------------------------
+// Stacks (build plan 12.10 and 12.13, Figma P7). The rules are in screens/stacks.js; the table is drawn by screens/stacks-view.js.
+// A row's controls go through the same gate and the same one-command-at-a-time rule as the Transport's buttons.
+// ---------------------------------------------------------------------------
+
+const stacks = createStacksView(ui.stacksList, {
+  onSelect: (stack) => selectStack(stack),
+  onContinue: (stack) => void runOnStack("CONTINUE", () => doPhase("continue", "CONTINUE", stack)),
+  onCueOut: (stack) => void runOnStack("OUT", () => doPhase("out", "OUT", stack)),
+  onClear: (stack, page) => void runOnStack("CLEAR", () => doClearStack(stack, page)),
+});
+
+/** The stack the Stack field names, or why it does not name one. The field's text is the one source: a command reads it afresh. */
+function readStack() {
+  const parsed = parseStack(ui.stackInput.value);
+  if (!parsed.ok) {
+    ui.stackInput.setAttribute("aria-invalid", "true");
+    return { ok: false, reason: describeStackFault(parsed.reason) };
+  }
+  ui.stackInput.removeAttribute("aria-invalid");
+  return { ok: true, stack: parsed.stack };
+}
+
+function updateStackNote() {
+  const stack = readStack();
+  ui.stackNote.textContent = stack.ok
+    ? `Every command here goes to stack ${formatStack(stack.stack)}${stack.stack === 0 ? ", the main stack" : ""}.`
+    : stack.reason;
+}
+
+/** Write a stack into the field, remember it and redraw the table. */
+function selectStack(stack) {
+  ui.stackInput.value = formatStack(stack);
+  session.stack = stack;
+  updateStackNote();
+  refreshTransportGate();
+}
+
+/** The field was typed in: a valid stack selects its row at once; an invalid one is said, and the table keeps the last valid stack. */
+function onStackInput() {
+  const stack = readStack();
+  if (stack.ok) session.stack = stack.stack;
+  updateStackNote();
+  refreshTransportGate();
+}
+
+function stepSelected(delta) {
+  const stack = readStack();
+  selectStack(stepStack(stack.ok ? stack.stack : session.stack, delta));
+}
+
+/** The stack a Transport command goes to, or null after saying why it cannot. */
+function stackTarget(kind) {
+  const stack = readStack();
+  if (stack.ok) return stack.stack;
+  log("LOCAL", "error", `${kind} not sent`, stack.reason);
+  updateStackNote();
+  return null;
+}
+
+/** A row's command. A command already in flight is said, not dropped: the operator may have held a control just as another began. */
+async function runOnStack(kind, fn) {
+  if (session.busy) {
+    log("LOCAL", "error", `${kind} not sent`, "Another command is still in progress. Hold the control again when it has finished.");
+    return;
+  }
+  await run(fn);
+}
+
+/** `" · stack +60"` for a stack other than the main one, for the end of an activity line. */
+function onStack(stack) {
+  return stack === 0 ? "" : ` · stack ${formatStack(stack)}`;
+}
+
+/** The page the table shows on `stack`, for a Clear that names it. Null when the table shows no scene there. */
+function pageShownOn(stack) {
+  const row = stackRows(session.status, stack).rows.find((candidate) => candidate.stack === stack);
+  return row === undefined ? null : pageOf(row);
+}
 
 // ---------------------------------------------------------------------------
 // Activity log.
@@ -379,6 +472,19 @@ function appendRow(kind, outcome, body, detail) {
   while (ui.logList.childElementCount > LOG_CAP) {
     ui.logList.lastElementChild.remove();
   }
+
+  showResult(kind, outcome, body.textContent ?? "", detail);
+}
+
+/** The commands whose result is also written in the Stacks panel: the Activity log is below the fold on a short window, and a refusal
+ *  has to be read where the operator is looking (12.20). A page-level "not sent" (a stack or a frame that was not accepted) counts. */
+const RESULT_KINDS = new Set(["CUE", "TAKE", "CLEAR", "HOLD", "CONTINUE", "UPDATE", "OUT"]);
+
+function showResult(kind, outcome, text, detail) {
+  if (!RESULT_KINDS.has(kind) && !(kind === "LOCAL" && /not sent$/.test(text))) return;
+  ui.stacksResult.hidden = false;
+  ui.stacksResult.className = `stacks__result stacks__result--${outcome}`;
+  ui.stacksResult.textContent = `${kind} · ${text}${detail ? ` · ${detail}` : ""}`;
 }
 
 function log(kind, outcome, text, detail) {
@@ -387,10 +493,14 @@ function log(kind, outcome, text, detail) {
 
 /** A committed frame, in the log, always labelled as the engine's choice and
  *  never as an echo of what was asked for (invariant 9). */
-function logCommitted(kind, committed) {
+function logCommitted(kind, committed, stack = 0) {
   const body = el("span");
   body.appendChild(document.createTextNode("engine committed frame "));
   body.appendChild(el("span", "log__frame", formatCount(committed?.frame)));
+  if (committed?.startFrame !== undefined && committed?.startFrame !== null) {
+    body.appendChild(document.createTextNode(", new scene starts at frame "));
+    body.appendChild(el("span", "log__frame", formatCount(committed.startFrame)));
+  }
 
   appendRow(
     kind,
@@ -398,13 +508,14 @@ function logCommitted(kind, committed) {
     body,
     `${formatRate(committed?.timebase)} (${rationalOf(committed?.timebase)}) \u00b7 ${
       committed?.clock ?? "clock unreported"
-    }`,
+    }${onStack(stack)}`,
   );
 }
 
-function logFailure(kind, err) {
+function logFailure(kind, err, stack = 0) {
   const { name, detail, kind: outcome } = describeError(err);
-  log(kind, outcome === "refused" ? "refused" : "error", name, detail);
+  // Which stack the refusal is about is part of what the operator reads; the refusal itself stays verbatim.
+  log(kind, outcome === "refused" ? "refused" : "error", name, `${detail}${onStack(stack)}`.replace(/^ \u00b7 /, ""));
   // The engine says there is no operator on this command: the shell's own answer is the
   // truth, so the page asks it rather than keep showing a name that no longer holds.
   if (err && typeof err === "object" && err.refusal?.refusal === "operatorRequired") void syncOperator();
@@ -522,6 +633,7 @@ const TIER_NOTE = {
 };
 
 function renderStatus(status) {
+  session.status = status ?? null;
   ui.clockSource.textContent = status?.clock ?? EM_DASH;
   ui.referenceState.textContent = status?.reference ?? EM_DASH;
   ui.epochValue.textContent = formatCount(status?.epoch);
@@ -696,6 +808,9 @@ function refreshTransportGate() {
   ui.outButton.disabled = !usable;
   ui.configureButton.disabled = !session.connected || session.operator === null || session.busy;
   ui.refreshButton.disabled = !session.connected || session.busy;
+
+  // The Stacks table follows the same gate: its controls are disabled for real, and a hold in progress ends with them.
+  stacks.render(session.status, session.stack, usable);
 }
 
 function acknowledgeCritical() {
@@ -742,6 +857,9 @@ function setDisconnected(detail, wasConnected) {
   session.armedLabel = null;
   session.prominence = "blocking";
   session.clockLabel = "";
+  // No status is kept: a Stacks table that outlived its connection would say what is on air from a status nobody is reporting.
+  session.status = null;
+  stacks.cancelHolds();
 
   setChip(ui.connectionState, "DISCONNECTED", "idle");
   ui.connectionDetail.textContent = detail;
@@ -1028,21 +1146,27 @@ const COMMIT_HEAD = {
 };
 
 /** Show what the *engine* decided. Never an echo of the request. */
-function renderCommitted(kind, committed) {
+function renderCommitted(kind, committed, stack = 0) {
   ui.commitReadout.hidden = false;
-  ui.commitHead.textContent = COMMIT_HEAD[kind] ?? "Engine committed";
+  ui.commitHead.textContent = `${COMMIT_HEAD[kind] ?? "Engine committed"}${onStack(stack)}`;
   ui.commitFrame.textContent = formatCount(committed?.frame);
   ui.commitRate.textContent = `${formatRate(committed?.timebase)} (${rationalOf(committed?.timebase)})`;
   ui.commitClock.textContent = committed?.clock ?? "clock unreported";
-  ui.commitNote.textContent =
-    committed?.clock === "FreeRun"
-      ? "Committed on a free-running clock: the frame number is exact, its timing against any external reference is not."
-      : "";
+  const notes = [];
+  // A scene put on an occupied stack plays the old one's Out first: the command took effect at `frame`, the new scene starts later
+  // (12.10). Both frames are the engine's, and the second is never inferred here.
+  if (committed?.startFrame !== undefined && committed?.startFrame !== null) {
+    notes.push(`The scene on this stack leaves first. The new scene starts at frame ${formatCount(committed.startFrame)}.`);
+  }
+  if (committed?.clock === "FreeRun") {
+    notes.push("Committed on a free-running clock: the frame number is exact, its timing against any external reference is not.");
+  }
+  ui.commitNote.textContent = notes.join(" ");
 }
 
 /** Send one Program command. `send` is the call that names its command (`(payload) => invoke("cmd_take", payload)`),
  *  so the name is a literal at the call site, where the boundary guard reads it (R4, 2.26). */
-async function transport(kind, send, args) {
+async function transport(kind, send, args, stack = 0) {
   const schedule = readFrame();
   if (!schedule.ok) {
     log("LOCAL", "error", `${kind} not sent`, schedule.reason);
@@ -1053,11 +1177,11 @@ async function transport(kind, send, args) {
 
   try {
     const committed = await send(payload);
-    renderCommitted(kind, committed);
-    logCommitted(kind, committed);
+    renderCommitted(kind, committed, stack);
+    logCommitted(kind, committed, stack);
   } catch (err) {
     ui.commitReadout.hidden = true;
-    logFailure(kind, err);
+    logFailure(kind, err, stack);
     const described = describeError(err);
     if (CONNECTION_LOST.has(described.code)) {
       setDisconnected(`${described.name}${described.detail ? ` \u2014 ${described.detail}` : ""}`, true);
@@ -1075,7 +1199,14 @@ async function doCue() {
     log("LOCAL", "error", "CUE not sent", target.reason);
     return;
   }
-  await transport("CUE", (payload) => invoke("cmd_cue", payload), { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
+  const stack = stackTarget("CUE");
+  if (stack === null) return;
+  await transport(
+    "CUE",
+    (payload) => invoke("cmd_cue", payload),
+    { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash, ...stackArgs(stack) },
+    stack,
+  );
 }
 
 async function doTake() {
@@ -1084,29 +1215,51 @@ async function doTake() {
     log("LOCAL", "error", "TAKE not sent", target.reason);
     return;
   }
-  await transport("TAKE", (payload) => invoke("cmd_take", payload), { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
+  const stack = stackTarget("TAKE");
+  if (stack === null) return;
+  await transport(
+    "TAKE",
+    (payload) => invoke("cmd_take", payload),
+    { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash, ...stackArgs(stack) },
+    stack,
+  );
 }
 
+/** The Transport's CLEAR. On the main stack it is what it has always been: no expected page, so a stale table can never make it refuse
+ *  (the emergency clear is not changed here). On another stack it names the page the table shows for it, so a clear never takes off a
+ *  scene the operator did not see (Jev, 25 Nov 2026, docs/evidence/12.13/jev-laya-stacks2.json); when the table shows none there is
+ *  no page to name and the engine answers for an empty stack. */
 async function doClear() {
-  await transport("CLEAR", (payload) => invoke("cmd_clear", payload), {});
+  const stack = stackTarget("CLEAR");
+  if (stack === null) return;
+  const page = stack === 0 ? null : pageShownOn(stack);
+  await transport("CLEAR", (payload) => invoke("cmd_clear", payload), { ...stackArgs(stack), ...(page === null ? {} : { expected: page }) }, stack);
 }
 
-async function doPhase(phase, kind) {
+/** A stack row's Clear, held for one second. It names the page the row showed when the hold began. */
+async function doClearStack(stack, page) {
+  await transport("CLEAR", (payload) => invoke("cmd_clear", payload), { ...stackArgs(stack), expected: page }, stack);
+}
+
+/** A named phase of the scene on a stack: the field's stack from the Transport buttons, the row's own stack from a row. */
+async function doPhase(phase, kind, stackOverride) {
   const schedule = readFrame();
   if (!schedule.ok) {
     log("LOCAL", "error", `${kind} not sent`, schedule.reason);
     return;
   }
+  const stack = stackOverride ?? stackTarget(kind);
+  if (stack === null) return;
   try {
-    const result = await invoke("cmd_phase", { phase, frame: schedule.frame });
-    renderCommitted(kind, result?.committed);
+    const result = await invoke("cmd_phase", { phase, frame: schedule.frame, ...stackArgs(stack) });
+    renderCommitted(kind, result?.committed, stack);
     ui.commitNote.textContent = `Phase ${result?.phase ?? phase} entered at authored frame ${formatCount(
       result?.sceneFrame,
     )}.`;
-    logCommitted(kind, result?.committed);
+    logCommitted(kind, result?.committed, stack);
   } catch (err) {
     ui.commitReadout.hidden = true;
-    logFailure(kind, err);
+    logFailure(kind, err, stack);
     const described = describeError(err);
     if (CONNECTION_LOST.has(described.code)) {
       setDisconnected(`${described.name}${described.detail ? ` \u2014 ${described.detail}` : ""}`, true);
@@ -1212,6 +1365,24 @@ ui.configureButton.addEventListener("click", () => run(doConfigureOutput));
 ui.acknowledgeButton.addEventListener("click", acknowledgeCritical);
 ui.frameInput.addEventListener("input", updateFrameMode);
 
+ui.stackInput.addEventListener("input", onStackInput);
+ui.stackInput.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    event.preventDefault();
+    stepSelected(event.key === "ArrowUp" ? 1 : -1);
+  } else if (event.key === "Enter") {
+    const stack = readStack();
+    if (stack.ok) selectStack(stack.stack);
+  }
+});
+// Leaving the field writes a valid stack back in its own form (+60, not 060); an invalid one stays, marked, so it is not silently changed.
+ui.stackInput.addEventListener("blur", () => {
+  const stack = readStack();
+  if (stack.ok) ui.stackInput.value = formatStack(stack.stack);
+});
+ui.stackMinus.addEventListener("click", () => stepSelected(-1));
+ui.stackPlus.addEventListener("click", () => stepSelected(1));
+
 for (const input of [ui.endpointInput, ui.tokenInput]) {
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") run(doConnect);
@@ -1224,6 +1395,7 @@ for (const input of [ui.endpointInput, ui.tokenInput]) {
 
 async function boot() {
   updateFrameMode();
+  updateStackNote();
   setDisconnected("No engine connection.", false);
 
   if (!inShell) {

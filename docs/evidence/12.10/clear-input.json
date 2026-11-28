@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "How a targeted Clear checks that the page on its layer is the one the operator meant (row 12.10, decision Q8: 'a targeted clear removes only its layer when the expected page still matches'), task 112 follow-up, asked before coding (user, 24 Nov 2026: build the missing).",
+  "facts": "ClearRequest is {at: TakeAt}; it is a Copy struct built as a literal in 34 places across 18 files, among them Playout's service (codex has an active claim on services/playout/src/lib.rs). The target (channel, layer) travels on the Envelope, not in the request, and OutputTarget is built as a literal in 2 places. A layer's on-air scene is identified by take_id and revision; the engine reports it per layer in the status. The engine refuses by name through the contract's Refusal enum (a new variant regenerates the TypeScript). Wire changes must stay additive: an older sender omits the field and gets today's behaviour (clear whatever is on the layer). A page already cleared or replaced between the operator's look and the click is the case this protects: clearing the replacement by mistake takes the wrong graphic off air live.",
+  "proposed": "Add an optional expected: {takeId, revision} to ClearRequest (serde default, omitted when none). When present the engine compares it with the layer's on-air scene at the moment the Clear commits and refuses with a new named Refusal ClearExpectationUnmet {layer, expected, on_air} (on_air is a take id or 'nothing') and changes nothing; when absent the Clear behaves as today. A queued replacement behind a leaving scene counts as the layer's page only once it is on air, so an expectation naming the leaving scene still matches while it is leaving, and one naming the replacement matches only after it started."
+ },
+ "questions": {
+  "where": {
+   "type": "choice",
+   "instructions": "Where should the expected page travel?",
+   "criteria": {
+    "A": "A field of ClearRequest (an optional expected take id and revision), because only Clear checks it (as proposed).",
+    "B": "A field of the Envelope target, so every targeted command could check it later.",
+    "C": "A separate new command 'ClearIf' beside Clear."
+   }
+  },
+  "empty": {
+   "type": "choice",
+   "instructions": "What should a Clear that names an expected page do when the layer is empty?",
+   "criteria": {
+    "A": "Refuse by name, because the page the operator meant is not there (as proposed).",
+    "B": "Succeed as a no-op, because the layer is already clear.",
+    "C": "Succeed and report nothing was cleared."
+   }
+  },
+  "leaving": {
+   "type": "choice",
+   "instructions": "While a scene is leaving through its Out with a replacement queued behind it, which page does an expectation match?",
+   "criteria": {
+    "A": "The leaving scene matches until the replacement starts; the replacement matches only once on air (as proposed).",
+    "B": "Only the queued replacement matches, because it is the layer's next page.",
+    "C": "Either one matches."
+   }
+  }
+ }
+}

@@ -1,0 +1,54 @@
+{
+ "state": {
+  "decision": "How the render engine meets one clause of build-plan row 11.61 (text animators): animated text must 'render on the GPU from per-glyph instance data without per-frame re-shaping', and 'two renders of one frame are byte-identical'. Asked before any code is written, 28 Nov 2026.",
+  "how_it_works_today": "Text is shaped once when a scene is prepared; each glyph cluster's outline is cached. On a frame, a text animator gives each cluster a weight, and the engine applies a per-cluster transform, alpha and fill mix to the cached outline. Text is re-shaped on a frame only when size, line height, letter spacing or baseline shift is keyed; no test proves that an animator alone re-shapes nothing. Every vector layer source, text included, is drawn on the GPU the same way: for each path, Vello GPU 0.3 fills the outline in white into its own 8-bit coverage texture, then a compute pass composites the path's paint in float, scaled by that coverage, onto the layer; one GPU submission per path, because Vello uploads a scene's strips with queue writes that take effect at the next submission. The CPU reference draws the same paths with Vello CPU and the two must agree within one 8-bit code value (a standing gate, checked on DX12 and Vulkan). A text with a geometry-only animator is one path. A text with an opacity or fill animator is one path per glyph cluster, because each cluster has its own paint, and clusters that overlap composite over each other in order.",
+  "measured": "Debug build, 320x180, 20 frames, one text layer, 28 Nov 2026. DX12: static text 2.0 ms a frame and 0 GPU resource builds; geometry-only animator 3.5 ms (15 glyphs) and 5.0 ms (64 glyphs), 4 builds a frame; opacity animator 13.9 ms (15 glyphs, 30 builds a frame) and 48.8 ms (64 glyphs, 112 builds a frame). Vulkan: 1.2 ms; 2.8 and 3.7 ms; 12.4 ms (15 glyphs) and 41.1 ms (64 glyphs), same build counts. The CPU reference path takes 7 to 9 ms a frame in every case. The Program target is 1080p at 50 frames a second (20 ms a frame), with a p99 goal of 10 ms on a release build.",
+  "constraints": "No silent fallback: a renderer that cannot draw something refuses by name. The GPU and the CPU reference agree within one code value. The user decided on 15 Nov 2026 that Vello GPU gives the coverage and colour is composited in float. Other agents work in the same tree, so a change should stay inside the drawing code and its tests. A static text and the same text under an animator at rest must look the same."
+ },
+ "questions": {
+  "approach": {
+   "type": "choice",
+   "instructions": "Which approach should be built for the per-glyph clause?",
+   "criteria": {
+    "A": "Prove what exists and stop: add a count of text shapings to the engine's work counters and a test that frames of an animator-only animation shape nothing, on the CPU path and on the GPU. Leave one coverage texture, one compose pass and one submission per glyph cluster per frame.",
+    "B": "A, and batch the per-frame drawing: all the paths of one layer are filled by one Vello render into one coverage atlas (each path in its own cell, at a whole-pixel offset so its coverage is what it is today), and the compose pass runs once per path from a per-path instance record (cell, destination, paint, alpha) in one encoder. Two submissions per layer per frame instead of one per glyph. Vello still gives the coverage.",
+    "C": "A new instanced glyph pipeline: tessellate each cluster into triangles once at prepare, upload only an instance buffer (transform, alpha, fill) per frame and draw every glyph in one instanced draw with multisampling. Fastest per frame, but its edge coverage is not Vello's, so the GPU and the CPU reference no longer agree within one code value and animated text would differ from static text at glyph edges unless the CPU reference and the static path change too."
+   }
+  },
+  "equality": {
+   "type": "choice",
+   "instructions": "If the drawing is batched (B), what must its output be held to?",
+   "criteria": {
+    "A": "The same bytes as the unbatched drawing of the same paths, shown by a test that draws a layer both ways on DX12 and on Vulkan, and still within one code value of the CPU reference.",
+    "B": "Within one code value of the unbatched drawing.",
+    "C": "Looks the same to a person."
+   }
+  },
+  "scope": {
+   "type": "choice",
+   "instructions": "If the drawing is batched (B), which layers take the batched path?",
+   "criteria": {
+    "A": "Every vector layer source with more than one visible path (text clusters, a fill with its stroke, any multi-path object), at prepare and on a frame: one way of drawing, so a static text and an animated one cannot drift apart.",
+    "B": "Only a text that has an opacity or fill animator, on a frame; everything else keeps the path-by-path drawing.",
+    "C": "Only when a layer has more than some number of paths."
+   }
+  },
+  "too_large": {
+   "type": "choice",
+   "instructions": "What happens when the paths of a layer do not fit one coverage atlas (the device's texture limit, or Vello's 65535 limit on a side)?",
+   "criteria": {
+    "A": "The paths are packed into as many atlases as they need, in order, each one its own render and submission; a single path larger than the limit refuses by name exactly as it does today.",
+    "B": "The layer falls back to the path-by-path drawing without saying so.",
+    "C": "The layer is refused."
+   }
+  },
+  "meets_clause": {
+   "type": "noul",
+   "instructions": "With B built and proven (no shaping on an animator-only frame, one coverage atlas and one instance record per glyph cluster per frame, byte-identical repeat renders), is it fair to record the clause 'render on the GPU from per-glyph instance data without per-frame re-shaping' as met, stating that the glyph coverage is still rasterised by Vello each frame because a transform changes coverage?",
+   "criteria": {
+    "true": "Yes: the per-frame input is the cached glyph outlines plus one instance record per cluster, nothing is shaped, and the record says plainly what is still done each frame.",
+    "false": "No: coverage rasterised again each frame is not 'from instance data'; the clause stays open until glyph geometry is uploaded once and only instance data changes per frame, or the user rewords the clause."
+   }
+  }
+ }
+}

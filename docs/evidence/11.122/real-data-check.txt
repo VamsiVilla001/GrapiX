@@ -1,0 +1,22 @@
+The rule run over COPIES of real projects from the Editor's store (never the originals), by hand:
+  GX_REAL_PROJECTS=<scratch copy of the store> GX_REAL_PROJECT=<name> cargo test -p gx-editor --lib a_real_project -- --ignored --nocapture
+25 Nov 2026, claude-grapix-f1.
+
+material-demo (the user's test document): 3 scenes listed, 0 assets, 1 scene that could not be read:
+    material-demo: "scene document is not readable: missing field `r`"   <- named with its reason, not left out
+Rates 1794049479006: 4 scenes listed, 0 assets, 0 problems
+AS 1792303644735: 3 scenes listed, 1 asset (0 used, 1 unused): asset_legacy -> []
+Parity 11.18 1792400178704: 2 scenes listed, 2 assets (0 used, 2 unused): a font file, an image -> [] []
+Import 1794050821064: 1 scene listed, 1 asset (0 used, 1 unused)
+Fonts 11.13 1792390017388: 1 scene listed, 4 assets (0 used, 4 unused): FOUR FONT FILES, all reported unused
+
+What this shows: (1) the problems path works on real documents and names the real reason; (2) stored order and once-each hold on real stores
+(the test asserts it for every entry); (3) none of these real projects has an image or model that an object draws, so the "used" path rests
+on the fixtures; (4) FINDING: every font file is reported unused, because the rule (the client's, ported exactly) never counts a text
+object as using a font file. Asked of the owner of the Library panel (the UI session) whether the backend should count it.
+
+AFTER slice 1b (fonts counted), the same copies, rerun:
+Fonts 11.13 1792390017388: 1 scene listed, 4 assets (1 used, 3 unused): asset_font_3d4fef85... -> ["case"]; the other three fonts are declared and
+    named by no text object, so they are unused (true: the project declares more fonts than its one scene's text uses)
+Parity 11.18 1792400178704: 2 scenes listed, 2 assets (1 used, 1 unused): the font -> ["parity"]; the image is unused
+The finding is closed on real data: a font file a text object draws with is no longer tagged unused.

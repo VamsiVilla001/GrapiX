@@ -21,11 +21,14 @@ use crate::rasterizer::Frame;
 use crate::tiling::{Stage, Tile, TileError, TilePlan};
 #[cfg(test)]
 mod blend_tests;
+#[cfg(test)]
+mod stack_tests;
 pub(crate) mod draw;
 #[cfg(test)]
 pub(crate) mod effect_tests;
 pub mod output;
 pub mod scene;
+pub mod stack;
 
 /// An object's placement from local pixel coordinates into f64 stage space:
 /// x' = a*x + c*y + tx; y' = b*x + d*y + ty.
@@ -423,6 +426,18 @@ impl PreparedCompositor {
     /// Store every blended layer at the project's colour depth.
     pub fn set_depth(&mut self, depth: gx_contracts::color::ColorDepth) {
         self.depth = depth;
+    }
+
+    /// What a layer stack over this compositor's scenes is built from (task 112): the stage, the working space, the colour depth and the
+    /// tiles every scene of this stage shares.
+    pub fn stack_shape(&self) -> (Stage, WorkingColorSpace, gx_contracts::color::ColorDepth, Vec<crate::tiling::Tile>) {
+        (self.stage, self.working_space, self.depth, self.tiles.iter().map(|tile| tile.tile).collect())
+    }
+
+    /// A layer stack for scenes of this stage (task 112).
+    pub fn new_stack(&self) -> Result<stack::LayerStack, CompositorError> {
+        let (stage, space, depth, tiles) = self.stack_shape();
+        stack::LayerStack::prepare(&self.device, &self.queue, stage, space, depth, &tiles)
     }
 
     /// Prepare with the negotiated device limit. Source layer tiling belongs

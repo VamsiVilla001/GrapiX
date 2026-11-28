@@ -19,6 +19,7 @@ import type {
 
 import { wireFrame } from "./command-client";
 import { evaluateChannel } from "./timeline/easing";
+import { animatorRow, animatorValue } from "./text-animator";
 
 /// Whether a keyframe exists at the playhead across the whole selection.
 export type KeyState = "none" | "all" | "partial";
@@ -79,7 +80,27 @@ export function clampFrame(frame: number, durationFrames: bigint | number): numb
   return Math.min(duration, Math.max(0, Math.round(frame)));
 }
 
+export function supportsScalarProperty(surface: AnimationSurface, kind: string, property: string): boolean {
+  const kinds = surface.propertyKinds === undefined
+    ? surface.objectKinds
+    : surface.propertyKinds[property] ?? [];
+  return surface.properties.includes(property) && kinds.includes(kind);
+}
+
 export function propertyLabel(property: string): string {
+  // The text animator's scalars (11.61) have their own words: "Animator · Range offset".
+  const animated = animatorRow(property);
+  if (animated !== undefined) return `Animator · ${animated.label}`;
+  switch (property) {
+    case "size": return "Font size";
+    case "lineHeight": return "Leading";
+    case "letterSpacing": return "Tracking";
+    case "radius": return "Corner radius";
+    case "strokeStyle.dashOffset": return "Dash offset";
+  }
+  // A dash pattern's entries (`strokeStyle.dash.N`) are named from 1, as a person counts them.
+  const dash = /^strokeStyle\.dash\.(0|[1-9][0-9]*)$/.exec(property);
+  if (dash !== null) return `Dash ${Number(dash[1]) + 1}`;
   const words = property.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
@@ -92,7 +113,22 @@ export function baseValueOf(
   const object = document.objects.find((candidate) => candidate.id === objectId);
   if (!object) return undefined;
   const value = (object as unknown as Record<string, unknown>)[property];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (property === "strokeStyle.dashOffset") {
+    const style = (object as { strokeStyle?: { dashOffset?: unknown } }).strokeStyle;
+    return typeof style?.dashOffset === "number" && Number.isFinite(style.dashOffset) ? style.dashOffset : 0;
+  }
+  const animated = animatorValue(object, property);
+  if (animated !== undefined) return animated;
+  const dash = /^strokeStyle\.dash\.(0|[1-9][0-9]*)$/.exec(property);
+  if (dash !== null) {
+    const entry = (object as { strokeStyle?: { dash?: unknown[] } }).strokeStyle?.dash?.[Number(dash[1])];
+    return typeof entry === "number" && Number.isFinite(entry) ? entry : undefined;
+  }
+  if (object.type === "text" && property === "baselineShift") return 0;
+  if (object.type === "shape" && (property === "trimStart" || property === "trimOffset")) return 0;
+  if (object.type === "shape" && property === "trimEnd") return 100;
+  return undefined;
 }
 
 function channelFor(
@@ -158,7 +194,8 @@ export function keyframePanelModel(
 
   const rows = surface.properties.flatMap((property): KeyframeRow[] => {
     const withProp = animatable.filter(
-      (object) => baseValueOf(document, object.id, property) !== undefined,
+      (object) => supportsScalarProperty(surface, object.type, property)
+        && propertyValueAt(document, object.id, property, currentFrame) !== undefined,
     );
     if (withProp.length === 0) return [];
     const objectIds = withProp.map((object) => object.id);

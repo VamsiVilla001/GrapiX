@@ -117,5 +117,7 @@ test("the real plan, tracker and json agree, and regenerating them changes nothi
   const { modules: m, state } = parsePage(html);
   assert.deepEqual(drift(rows, m, state, json), []);
   assert.equal(regenerate(html, rows, json), html);
-  assert.equal(rows.length, 402); // 351 until the 24 Nov 2026 design rows (51) were added
+  // A lower bound, not a pin: rows are added all the time and never removed, so a count that must equal today's fails on every new row
+  // (351 became 402 on 24 Nov 2026, then 407 the same evening). A row that vanishes still fails.
+  assert.ok(rows.length >= 407, `${rows.length} rows`);
 });

@@ -1,0 +1,9 @@
+1 animation always shown CAUGHT
+2 sections under any tab CAUGHT
+3 sections include library CAUGHT
+4 sections ignore hidden CAUGHT
+5 row always usable CAUGHT
+6 row needs two CAUGHT
+7 auto-key never on CAUGHT
+8 auto-key needs a scene CAUGHT
+8 of 8 caught

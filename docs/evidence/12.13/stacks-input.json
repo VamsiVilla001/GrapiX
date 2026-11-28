@@ -1,0 +1,63 @@
+{
+ "state": {
+  "decision": "How the Playout page lets the operator choose and control a Stack (the UI name for a Program layer) before the P7 Stacks screen is built (claude-grapix-f1, 25 Nov 2026; asked BEFORE the build, as the rule says).",
+  "facts": "Playout's page today is one engineering surface: Clock, Program, Transport (typed Take id, Revision, Content hash, Frame; buttons CUE, TAKE, CLEAR, HOLD, CONTINUE, UPDATE, TAKE OUT), Output, Activity. Every command goes to layer zero. The backend for stacks is built and verified: the shell commands cmd_cue, cmd_take, cmd_phase and cmd_clear take an optional layer from -99,999 to +99,999 (absent is layer zero, which an older receiver still reads); cmd_clear also takes an optional expected {takeId, revision}, and the engine refuses a Clear whose named page is not on that stack with the named refusal ClearExpectationUnmet (an empty stack refuses too, saying nothing is on it) and changes nothing. The engine status carries an optional list `layers`, sorted by stack, each {layer, takeId, revision, state onAir|leaving|queued, frame}, with a scene's queued replacement listed after it; `program` stays the scene on stack zero. A take on an occupied stack plays the old scene's Out first, then starts the new one; a cut when it has no Out. There is NO backend for: clearing a range of stacks, clearing all stacks (armed; row 12.14), hiding or soloing a stack in the Airview (the Airview window is row 12.17), calling a cue by stack over Cue Control (not built), and Update, Continue and Out as commands of their own (they exist only as named phases of the scene on a stack). The owner's wording and design (Figma P7, 24 Nov 2026): the UI says Stack, never Layer; higher is in front; a stack holds one cue; Cue out and Clear are separate and armed (the design draws them 'Cue out · hold 1 s' and 'Clear'); the Stacks table has the columns STACK, ON THIS STACK (scene and cue), STATE (ON AIR, NEXT, PRELOADED), CONTROL THIS STACK; a 'Go to a stack' field. This Playout page has no Playline or Scene Bank yet, so a scene is still typed (Take id, Revision, hash). Rule of the project: no control that does nothing is drawn as working; it is dimmed and names the plan row, as the menus do. Rule: a refusal keeps its name and its detail, verbatim (invariant 17). Nothing is substituted automatically (invariant 18).",
+  "built": "Nothing yet. This is the plan: a Stack field in the Transport panel (typed whole number -99,999 to +99,999, plus and minus steppers, default 0, a named reason for an invalid entry); every Transport button acts on that stack; layer zero is sent as no layer. A Stacks panel lists every stack the engine reports, front to back, with the scene, its state and a queued replacement shown as a second line; a click on a row selects that stack in the field. Each stack row has Continue, Cue out and Clear. Controls with no backend are dimmed and name their plan row."
+ },
+ "questions": {
+  "picker": {
+   "type": "choice",
+   "instructions": "How should the operator choose the stack a command goes to?",
+   "criteria": {
+    "A": "A Stack field in Transport (typed, plus and minus) AND a Stacks table where a click on a row selects that stack in the field; every Transport button acts on the selected stack.",
+    "B": "Only the Stack field in Transport; no table.",
+    "C": "Only the Stacks table; a stack that is not on air cannot be chosen."
+   }
+  },
+  "armed": {
+   "type": "choice",
+   "instructions": "How should Cue out and Clear on a stack row be armed?",
+   "criteria": {
+    "A": "Press and hold for one second (the design's 'hold 1 s'), with the progress shown; a release before one second sends nothing; the keyboard holds Space or Enter for one second.",
+    "B": "Click once to arm (the button turns into 'Confirm', times out after 3 s), click again to send.",
+    "C": "A plain click, as the Transport buttons are today."
+   }
+  },
+  "expected": {
+   "type": "choice",
+   "instructions": "What should a Clear on a stack row send?",
+   "criteria": {
+    "A": "The page the row shows (expected takeId and revision), so that if the stack changed since the row was drawn the engine refuses by name and nothing is cleared.",
+    "B": "No expected page: it clears whatever is on that stack at that moment.",
+    "C": "Expected page for a row, none for the Transport CLEAR button."
+   }
+  },
+  "nobackend": {
+   "type": "choice",
+   "instructions": "What should the page show for the controls that have no backend yet (clear a range, clear all stacks, hide and solo in the Airview)?",
+   "criteria": {
+    "A": "Draw them dimmed and disabled, each naming its plan row (12.14 for clear all, 12.17 for hide and solo), as the Editor menus do.",
+    "B": "Leave them out of the page until the backend exists.",
+    "C": "Draw them enabled and report 'not available' when pressed."
+   }
+  },
+  "source": {
+   "type": "choice",
+   "instructions": "What should the Stacks table list, and from where?",
+   "criteria": {
+    "A": "Exactly what the engine reports in status.layers (front to back); the stack selected in the field is added as an empty row if the engine does not report it; when an engine sends no list, only stack zero from status.program.",
+    "B": "Only stack zero from status.program, as today.",
+    "C": "A fixed set of stacks the operator configures on the page."
+   }
+  },
+  "queued": {
+   "type": "choice",
+   "instructions": "How should a scene that leaves while a replacement is queued on the same stack be shown?",
+   "criteria": {
+    "A": "One row per stack: the scene on it with its state (LEAVING), and a second line 'then <scene> from frame N, QUEUED'; a Clear on that row names the page the first line shows.",
+    "B": "Two rows with the same stack number.",
+    "C": "Only the replacement."
+   }
+  }
+ }
+}

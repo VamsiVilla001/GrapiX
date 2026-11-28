@@ -329,3 +329,41 @@ describe("viewport", () => {
     expect(visibleFrames(viewport, 100).last).toBe(100);
   });
 });
+
+describe("the PARENT, BLEND and MATTE cells of a layer row (the new Figma UI, B3)", () => {
+  const full = (doc: SceneDocument): SceneDocument => ({
+    ...doc,
+    objects: doc.objects.map((object, index) => ({
+      ...object, visible: true, locked: false, opacity: 1, zDepth: 0, zIndex: 0, layerId: "", width: 100, height: 50,
+      rotation: 0, rotationX: 0, rotationY: 0, scaleX: 1, scaleY: 1, scaleZ: 1,
+      ...(index === 1 ? { blendMode: "multiply", trackMatte: { sourceId: "o0", mode: "luma" } } : {}),
+    })) as unknown as SceneDocument["objects"],
+  });
+  const cellsOf = (doc: SceneDocument, row: number): FakeElement[] => {
+    const full_ = full(doc);
+    const parts = renderTimelinePanel(fakeDocument, timelineModel(full_), viewport, timelineLayers(full_));
+    const rows = (parts.headers as unknown as FakeElement).children.filter((child) => child.className === "timeline-group-header");
+    const box = rows[row]!.children.find((child) => child.className === "timeline-layer-cells")!;
+    return box.children.filter((child) => child.className === "timeline-layer-cell");
+  };
+
+  it("draws three cells after the name, in the order of the column headings", () => {
+    const cells = cellsOf(scene(3, 1), 1);
+    expect(cells.map((c) => c.dataset.layerColumn)).toEqual(["parent", "blend", "matte"]);
+    expect(cells.every((c) => c.dataset.objectId === "o1")).toBe(true);
+    expect(cells.map((c) => c.textContent)).toEqual(["—", "Multiply", "o0 · Luma"]);
+  });
+
+  it("says what each cell is in its accessible name, and that it opens a menu", () => {
+    const [parent, blend, matte] = cellsOf(scene(3, 1), 1);
+    expect(parent!.attributes.get("aria-label")).toBe("Parent of o1: —");
+    expect(blend!.attributes.get("aria-label")).toBe("Blend mode of o1: Multiply");
+    expect(matte!.attributes.get("aria-label")).toBe("Track matte of o1: o0 · Luma");
+    expect([parent, blend, matte].every((c) => c!.attributes.get("aria-haspopup") === "menu")).toBe(true);
+  });
+
+  it("shows a layer with nothing set as Normal and dashes", () => {
+    const cells = cellsOf(scene(3, 1), 0);
+    expect(cells.map((c) => c.textContent)).toEqual(["—", "Normal", "—"]);
+  });
+});

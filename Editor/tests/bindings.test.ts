@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import { findNode } from "../src/agent-surface";
+import { dataPanel } from "../src/data-panel";
 import {
   bindingPanel,
   dataFields,
@@ -197,7 +199,7 @@ describe("preview resolution", () => {
 });
 
 describe("binding property panel", () => {
-  it("offers kind-aware properties and exposes the scene data fields", () => {
+  it("offers kind-aware properties, and the scene's data fields are listed by the Data panel", () => {
     const panel = bindingPanel(scene([text({ text: "match.headline" })]), ["headline"]);
     expect(panel.description).toContain("headline (text)");
     const properties = panel.children?.[0]?.children ?? [];
@@ -205,7 +207,11 @@ describe("binding property panel", () => {
       'match.headline → "Falcons lead"',
     );
     expect(properties.some((node) => node.id === "binding/property/assetId")).toBe(false);
-    expect(panel.children?.[1]?.children?.map((node) => node.label)).toContain("teams.0.name");
+    // The fields moved to the Data panel (Fields found); this panel says how many there are.
+    expect(panel.description).toMatch(/\d+ data field\(s\)/);
+    expect(panel.children).toHaveLength(1);
+    const found = findNode(dataPanel(scene([text({ text: "match.headline" })])), "data/fields");
+    expect(found?.children?.map((node) => node.label)).toContain("teams.0.name");
   });
 
   it("names why multi-selection cannot edit object-local bindings", () => {
@@ -234,9 +240,10 @@ describe("author-supplied sample data", () => {
     const bound: SceneDocument = { ...next, objects: [text({ text: "live.title" })] };
     const preview = resolveSceneBindings(bound);
     expect(preview.ok && preview.document.objects[0]).toMatchObject({ text: "BREAKING" });
-    // The panel lists the new fields for the author to pick from.
-    const panel = bindingPanel(bound, ["headline"]);
-    expect(panel.children?.[1]?.children?.map((node) => node.label)).toEqual(["live.title", "live.score"]);
+    // The Data panel lists the new fields for the author to pick from, and says what reads each.
+    const found = findNode(dataPanel(bound), "data/fields");
+    expect(found?.children?.map((node) => node.label)).toEqual(["live.title", "live.score"]);
+    expect(findNode(dataPanel(bound), "data/field/live.title")?.description).toBe("bound to headline.text");
   });
 
   it("refuses invalid JSON with its position", () => {

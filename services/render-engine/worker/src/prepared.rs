@@ -36,7 +36,7 @@ use gx_contracts::{ContentHash, Refusal};
 use crate::mesh::{prepare_meshes, AssetBytes, PreparedMeshes};
 use crate::rasterise::{PathRasteriser, PreparedPaths, RasterSurface, VelloCpuRasteriser};
 use crate::rasterizer::Frame;
-use crate::text::{prepare_texts, PreparedTexts};
+use crate::text::{prepare_text_object, prepare_texts, PreparedTexts};
 
 /// A document resolved into what a renderer actually consumes.
 ///
@@ -71,6 +71,7 @@ pub struct PreparedScene {
     static_frame: OnceLock<RasterSurface>,
     /// Shaped glyph runs, restricted to fonts carried by the scene.
     texts: PreparedTexts,
+    animated_font_bytes: std::sync::Arc<AssetBytes>,
     /// 3.17: every image object's decoded image, by asset id.
     images: crate::image::PreparedImages,
     /// Prepared primitive/glTF geometry, materials, lights and camera.
@@ -170,8 +171,9 @@ impl PreparedScene {
                 u32::MAX,
                 None,
                 &images,
+                None,
             )?;
-            effect_layers.push(Some(EffectLayer { source, iterations }));
+            effect_layers.push(Some(EffectLayer { source, iterations, pad }));
         }
         let static_frame = OnceLock::new();
         if build_reference {
@@ -191,6 +193,24 @@ impl PreparedScene {
             .map(|(index, object)| (object.id.clone(), index))
             .collect();
 
+        let animated_font_bytes = if resolved.timeline.channels.iter().any(|channel| {
+            !channel.keys.is_empty()
+                && matches!(
+                    channel.property.as_str(),
+                    "size" | "lineHeight" | "letterSpacing" | "baselineShift"
+                )
+        }) {
+            resolved
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == gx_contracts::scene::AssetKind::Font)
+                .filter_map(|asset| asset.checksum.as_ref())
+                .filter_map(|hash| Some((hash.clone(), asset_bytes.get(hash)?.clone())))
+                .collect()
+        } else {
+            AssetBytes::new()
+        };
+
         Ok(Self {
             document,
             resolved,
@@ -202,6 +222,7 @@ impl PreparedScene {
             paths,
             static_frame,
             texts,
+            animated_font_bytes: std::sync::Arc::new(animated_font_bytes),
             images,
             meshes,
         })
@@ -269,6 +290,7 @@ impl PreparedScene {
             .iter()
             .any(|channel| !channel.keys.is_empty())
             || gx_contracts::path_anim::has_path_animation(&self.document)
+            || self.document.timeline.colour_channels.iter().flatten().any(|channel| !channel.keys.is_empty())
             || self
                 .document
                 .objects
@@ -312,10 +334,12 @@ impl PreparedScene {
             }
         }
         // 11.112: animated paths, by vertex id; a topology mismatch holds a key and is not an error.
+        gx_contracts::animation::colour::apply(&mut evaluated, scene_frame)?;
         gx_contracts::path_anim::apply_path_channels(&mut evaluated, scene_frame)?;
         let resolution = resolve_hierarchy(&evaluated.objects);
-        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&self.texts))?;
-        let layers = self.layers_at(&mut evaluated)?;
+        let texts = self.texts_at(&evaluated)?;
+        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&texts))?;
+        let layers = self.layers_at(&mut evaluated, &resolution.effective, &texts)?;
         let surface = compose(
             &evaluated,
             &resolution.effective,
@@ -347,10 +371,12 @@ impl PreparedScene {
             }
         }
         // 11.112: animated paths, by vertex id; a topology mismatch holds a key and is not an error.
+        gx_contracts::animation::colour::apply(&mut evaluated, scene_frame)?;
         gx_contracts::path_anim::apply_path_channels(&mut evaluated, scene_frame)?;
         let resolution = resolve_hierarchy(&evaluated.objects);
-        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&self.texts))?;
-        let layers = self.layers_at(&mut evaluated)?;
+        let texts = self.texts_at(&evaluated)?;
+        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&texts))?;
+        let layers = self.layers_at(&mut evaluated, &resolution.effective, &texts)?;
         compose(
             &evaluated,
             &resolution.effective,
@@ -361,29 +387,71 @@ impl PreparedScene {
         )
     }
 
-    /// The layers drawn in their own space, for the frame `evaluated` is at: the prepared ones,
-    /// except that an object animating a path has its source drawn again (11.112).
-    fn layers_at(&self, evaluated: &mut SceneDocument) -> Result<std::borrow::Cow<'_, [Option<EffectLayer>]>, Refusal> {
-        let animated: Vec<usize> = self
-            .effect_layers
-            .iter()
-            .enumerate()
-            .filter(|(index, layer)| {
-                layer.is_some()
-                    && crate::layer_source::animates_a_path(&self.resolved, &self.resolved.objects[*index].base().id)
-            })
-            .map(|(index, _)| index)
-            .collect();
-        if animated.is_empty() {
-            return Ok(std::borrow::Cow::Borrowed(&self.effect_layers));
+    /// Reuse the published runs except for text whose evaluated layout changed.
+    fn texts_at(&self, evaluated: &SceneDocument) -> Result<std::borrow::Cow<'_, PreparedTexts>, Refusal> {
+        use std::borrow::Cow;
+
+        let mut texts = Cow::Borrowed(&self.texts);
+        let mut text_index = 0;
+        for (authored, current) in self.resolved.objects.iter().zip(&evaluated.objects) {
+            let (SceneObject::Text(authored), SceneObject::Text(current)) = (authored, current) else {
+                continue;
+            };
+            if text_layout_changed(authored, current) {
+                texts.to_mut().objects[text_index] =
+                    prepare_text_object(evaluated, current, &self.animated_font_bytes)?;
+            }
+            text_index += 1;
         }
-        let mut layers = self.effect_layers.clone();
-        for index in animated {
-            let previous = layers[index].as_ref().expect("filtered to prepared layers");
-            let source = crate::layer_source::redraw_layer_source_cpu(evaluated, &self.texts, index, &previous.source)?;
-            layers[index] = Some(EffectLayer { source, iterations: previous.iterations.clone() });
+        Ok(texts)
+    }
+
+    /// Rebuild affected layer sources with bounds that fit the evaluated pixels.
+    fn layers_at(
+        &self,
+        evaluated: &mut SceneDocument,
+        effective: &[ResolvedObject],
+        texts: &PreparedTexts,
+    ) -> Result<std::borrow::Cow<'_, [Option<EffectLayer>]>, Refusal> {
+        let mut layers = std::borrow::Cow::Borrowed(self.effect_layers.as_slice());
+        for (index, previous) in self.effect_layers.iter().enumerate() {
+            let Some(previous) = previous else { continue };
+            let authored = &self.resolved.objects[index];
+            let current = &evaluated.objects[index];
+            let scalar_change = authored.base().stroke_width != current.base().stroke_width
+                || authored.base().fill != current.base().fill
+                || authored.base().stroke != current.base().stroke
+                || authored.base().stroke_style != current.base().stroke_style
+                || match (authored, current) {
+                    (SceneObject::Text(a), SceneObject::Text(b)) => {
+                        text_layout_changed(a, b) || a.text_animator != b.text_animator
+                    },
+                    (SceneObject::Rect(a), SceneObject::Rect(b)) => a.radius != b.radius,
+                    (SceneObject::Shape(a), SceneObject::Shape(b)) => {
+                        a.trim_start != b.trim_start || a.trim_end != b.trim_end || a.trim_offset != b.trim_offset
+                    }
+                    _ => false,
+                };
+            let source = if scalar_change {
+                crate::layer_source::prepare_layer_source(
+                    evaluated, effective, texts, index, previous.pad, u32::MAX, None, &self.images, None,
+                )?
+            } else if crate::layer_source::animates_a_path(&self.resolved, &authored.base().id) {
+                crate::layer_source::redraw_layer_source_cpu(evaluated, texts, index, &previous.source)?
+            } else {
+                continue;
+            };
+            layers.to_mut()[index] = Some(EffectLayer {
+                source,
+                iterations: previous.iterations.clone(),
+                pad: previous.pad,
+            });
         }
-        Ok(std::borrow::Cow::Owned(layers))
+        Ok(layers)
+    }
+
+    pub(crate) fn animated_font_bytes(&self) -> &std::sync::Arc<AssetBytes> {
+        &self.animated_font_bytes
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -415,11 +483,19 @@ impl PreparedScene {
 /// the GPU compositor is held to. The whole canvas is visited, because the
 /// stencil and silhouette modes change the backdrop outside the object too.
 /// A hidden or fully transparent object changes nothing, in every mode.
+pub(crate) fn text_layout_changed(a: &gx_contracts::scene::TextObject, b: &gx_contracts::scene::TextObject) -> bool {
+    a.size != b.size
+        || a.line_height != b.line_height
+        || a.letter_spacing != b.letter_spacing
+        || a.baseline_shift != b.baseline_shift
+}
+
 /// An object with effects in its own layer space (3.22).
 #[derive(Debug, Clone)]
 struct EffectLayer {
     source: crate::layer_source::LayerSource,
     iterations: Vec<usize>,
+    pad: u32,
 }
 
 fn compose(
@@ -1056,6 +1132,113 @@ mod tests {
         );
     }
 
+    /// 11.153: Hide when empty on air. A text bound to a name draws it; the same text with the name blank, null or missing is not drawn,
+    /// and without Hide when empty a blank name draws nothing too but a missing one refuses the scene as it always did.
+    #[test]
+    fn hide_when_empty_leaves_an_empty_bound_text_undrawn() {
+        use gx_contracts::color::Rgba;
+        const INTER: &[u8] = include_bytes!("../tests/fixtures/Inter-Regular.ttf");
+        let hash = ContentHash("inter".into());
+        let mut scene = document(Vec::new());
+        scene.assets.push(AssetLibraryItem {
+            asset_id: "inter".into(),
+            name: "Inter".into(),
+            kind: AssetKind::Font,
+            path: "fonts/inter.ttf".into(),
+            checksum: Some(hash.clone()),
+            mime_type: Some("font/ttf".into()),
+            size_bytes: Some(INTER.len() as u64),
+            status: Some(AssetAvailability::Ready),
+            provenance: Default::default(),
+            color_space: None,
+        });
+        let mut font = inter();
+        if let FontSource::File { asset_id, .. } = &mut font.faces[0].source {
+            *asset_id = "inter".into();
+        }
+        scene.fonts.push(font);
+        let caption = |hide: Option<bool>| {
+            let mut base = ObjectBase::new("caption", "caption");
+            base.x = 100.0;
+            base.y = 100.0;
+            base.width = 600.0;
+            base.height = 300.0;
+            base.fill = Some(ColorValue::Solid {
+                color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+            });
+            base.hide_when_empty = hide;
+            base.bindings = Some(serde_json::Map::from_iter([(
+                "text".to_string(),
+                serde_json::json!("p.name"),
+            )]));
+            SceneObject::Text(TextObject {
+                base,
+                text: "Authored".into(),
+                font_id: "font_inter".into(),
+                size: 200.0,
+                layout: Default::default(),
+                auto_fit: Default::default(),
+                writing_mode: Default::default(),
+                vertical_align: Default::default(),
+                direction: Default::default(),
+                text_case: Default::default(),
+                decoration: Default::default(),
+                overflow: Default::default(),
+                max_lines: None,
+                kerning: None,
+                align: Default::default(),
+                line_height: None,
+                letter_spacing: 0.0,
+                word_spacing: 0.0,
+                paragraph_spacing: 0.0,
+                text_indent: 0.0,
+                baseline_shift: None,
+                text_animator: None,
+            })
+        };
+        let white_pixels = |hide: Option<bool>, data: serde_json::Value| {
+            let mut composed = scene.clone();
+            composed.objects = vec![caption(hide)];
+            composed.data_context = serde_json::from_value(data).unwrap();
+            PreparedScene::prepare(
+                composed,
+                &HashSet::from([hash.clone()]),
+                &AssetBytes::from([(hash.clone(), INTER.to_vec())]),
+                &MaterialSupport::fixed_function(),
+            )
+            .map(|prepared| {
+                prepared
+                    .frame(OutputTransform::Srgb)
+                    .pixels
+                    .chunks(4)
+                    .filter(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200)
+                    .count()
+            })
+        };
+        let hiding = Some(true);
+        assert!(
+            white_pixels(hiding, serde_json::json!({ "p": { "name": "I" } })).unwrap() > 1000,
+            "a value draws the text"
+        );
+        for empty in [
+            serde_json::json!({ "p": { "name": "" } }),
+            serde_json::json!({ "p": { "name": "   " } }),
+            serde_json::json!({ "p": { "name": null } }),
+            serde_json::json!({ "p": {} }),
+        ] {
+            assert_eq!(
+                white_pixels(hiding, empty.clone()).expect("an empty value prepares"),
+                0,
+                "{empty} leaves the element undrawn"
+            );
+        }
+        // Without it, a missing value is still refused by name: Hide when empty is the only way an empty value is allowed.
+        assert!(matches!(
+            white_pixels(None, serde_json::json!({ "p": {} })),
+            Err(Refusal::BindingPathInvalid { .. })
+        ));
+    }
+
     /// 3.13: objects compose in draw order across kinds. A rect after a text
     /// covers it; the same rect with a lower `z_index` goes beneath it.
     #[test]
@@ -1102,12 +1285,16 @@ mod tests {
             text_case: Default::default(),
             decoration: Default::default(),
             overflow: Default::default(),
+            max_lines: None,
+            kerning: None,
             align: Default::default(),
             line_height: None,
             letter_spacing: 0.0,
             word_spacing: 0.0,
             paragraph_spacing: 0.0,
             text_indent: 0.0,
+            baseline_shift: None,
+            text_animator: None,
         });
         let cover = |z_index: i32| {
             let mut base = ObjectBase::new("cover", "cover");
@@ -1387,15 +1574,15 @@ mod tests {
         let mut sheared = rect("sheared");
         sheared.base_mut().rotation = 30.0;
 
-        let mut underlined = TextObject {
+        let mut indented = TextObject {
             base: ObjectBase::new("title", "title"),
             text: "Hello".into(),
             font_id: "font_inter".into(),
             size: 40.0,
             ..text_defaults()
         };
-        underlined.decoration.underline = true;
-        let mut text_scene = document(vec![SceneObject::Text(underlined)]);
+        indented.text_indent = -12.0;
+        let mut text_scene = document(vec![SceneObject::Text(indented)]);
         text_scene.fonts.push(inter());
 
         let mut faded = rect("faded");
@@ -1439,7 +1626,7 @@ mod tests {
                     "3.16",
                 ),
             ),
-            (text_scene, not_drawable("title", "decoration", "11.51")),
+            (text_scene, not_drawable("title", "textIndent", "11.51")),
             (
                 document(vec![faded]),
                 not_drawable("faded", "opacity", "3.13"),
@@ -1790,12 +1977,16 @@ mod tests {
             text_case: Default::default(),
             decoration: Default::default(),
             overflow: Default::default(),
+            max_lines: None,
+            kerning: None,
             align: Default::default(),
             line_height: None,
             letter_spacing: 0.0,
             word_spacing: 0.0,
             paragraph_spacing: 0.0,
             text_indent: 0.0,
+            baseline_shift: None,
+            text_animator: None,
         }
     }
 

@@ -1,0 +1,15 @@
+1 missing path not empty CAUGHT
+2 null not empty CAUGHT
+3 blank not trimmed CAUGHT
+4 any string empty CAUGHT
+5 assetId not looked at CAUGHT
+6 number bindings looked at CAUGHT
+7 never hidden CAUGHT
+8 hides unless asked off CAUGHT
+9 issues not skipped CAUGHT
+10 absent key is a fault CAUGHT
+11 hidden_by_emptiness ignores flag CAUGHT
+12 unbound allowed CAUGHT
+13 off stores false CAUGHT
+14 differs ignores state CAUGHT
+14 of 14 caught

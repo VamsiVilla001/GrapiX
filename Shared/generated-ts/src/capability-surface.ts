@@ -283,6 +283,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "loadShed",
     "channelNotSupported",
     "layerNotSupported",
+    "layerCanvasMismatch",
+    "clearExpectationUnmet",
     "cueIdInvalid",
     "cueIdDuplicate",
     "cueIdLockedOnAir",

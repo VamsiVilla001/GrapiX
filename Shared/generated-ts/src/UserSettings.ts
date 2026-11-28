@@ -44,4 +44,11 @@ penSnap: boolean,
 /**
  * How far, in path pixels, Remove Point Keep Shape may let the curve move from the old shape (11.113). 1 pixel.
  */
-penFitTolerance: number, };
+penFitTolerance: number,
+/**
+ * The keys the person changed (11.84): a command id (`file.save`) to the keys that command has now, each written as the
+ * menus write it (`Ctrl Shift S`). Present for a command means those keys *replace* its defaults entirely; an empty list
+ * means no key; absent means the defaults. A key has one handler: no key is in two commands' lists. Which command ids
+ * exist is the Editor's registry, not this contract: an id it does not know is kept, ignored and shown for removal.
+ */
+shortcuts: { [key in string]?: Array<string> }, };

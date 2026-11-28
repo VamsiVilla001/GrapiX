@@ -19,7 +19,9 @@
 // the author presses undo once, sees eleven objects still changed, and no
 // longer trusts undo at all.
 
-import type { ObjectField, SceneDocument, SceneEdit, SceneObject } from "@grapix/contracts";
+import type { ObjectField, SceneDocument, SceneEdit, SceneObject, TextChoices } from "@grapix/contracts";
+import { animatorNodes, animatorRow, animatorValue, ANIMATOR_ROWS } from "./text-animator";
+import { fontChoiceNode, textChoiceNodes } from "./text-choices";
 
 import { isMixed, unify, type MaybeMixed, type UiNode } from "./agent-surface";
 
@@ -29,7 +31,12 @@ type AppliesTo = readonly SceneObject["type"][] | undefined;
 
 /// How a typed entry becomes a field value. `unit` is 0–1 and also accepts a
 /// percentage, because that is how the panel displays it.
-type InputKind = "string" | "nonEmptyString" | "number" | "unit" | "boolean";
+/// `count` is a whole number of at least 1, or a word that means no limit (Max lines); `length` is a number of scene units that is not negative
+/// (Paragraph spacing).
+type InputKind = "string" | "nonEmptyString" | "number" | "unit" | "boolean" | "count" | "length";
+
+/// The words that clear a `count` field.
+const NO_LIMIT = ["none", "off", "no limit", "0", ""];
 
 interface FieldSpec {
   readonly key: string;
@@ -42,6 +49,15 @@ interface FieldSpec {
 
 const percent = (value: unknown): string => `${Math.round(Number(value) * 100)}%`;
 
+/// The kinds that draw a stroke, and so have a stroke width and a dash offset (`is_animatable` in the contract).
+const STROKED: AppliesTo = ["text", "rect", "ellipse", "line", "shape"];
+
+/// Whether an element is bound to a text or an image: the only bindings whose value can be empty, so the only elements Hide when empty means anything for.
+export function hasEmptinessBinding(object: Pick<SceneObject, "bindings">): boolean {
+  const bindings = object.bindings ?? {};
+  return typeof bindings.text === "string" || typeof bindings.assetId === "string";
+}
+
 /// The fields the inspector knows, shared ones first.
 ///
 /// A table rather than a switch: the panel, the Mixed computation and the edit
@@ -51,6 +67,8 @@ const FIELDS: readonly FieldSpec[] = [
   { key: "name", label: "Name", appliesTo: undefined, input: "nonEmptyString", read: (o) => o.name },
   { key: "visible", label: "Visible", appliesTo: undefined, input: "boolean", read: (o) => o.visible },
   { key: "locked", label: "Locked", appliesTo: undefined, input: "boolean", read: (o) => o.locked },
+  // Hide when empty (11.153): drawn only where an element has a text or image binding to look at (see `hasEmptinessBinding`).
+  { key: "hideWhenEmpty", label: "Hide when empty", appliesTo: undefined, input: "boolean", read: (o) => o.hideWhenEmpty === true },
   {
     key: "opacity",
     label: "Opacity",
@@ -86,6 +104,65 @@ const FIELDS: readonly FieldSpec[] = [
     input: "number",
     read: (o) => (o.type === "text" ? o.size : undefined),
   },
+  // Tracking is in thousandths of an em; leading is a multiple of the size and reads "auto" until one is set (the font's own metrics); a baseline shift
+  // is in scene units and positive raises the glyphs. All three are animatable and are set through `editProperty`, as the Animation panel sets them.
+  {
+    key: "letterSpacing",
+    label: "Tracking",
+    appliesTo: ["text"],
+    input: "number",
+    read: (o) => (o.type === "text" ? o.letterSpacing : undefined),
+  },
+  {
+    key: "lineHeight",
+    label: "Leading",
+    appliesTo: ["text"],
+    input: "number",
+    read: (o) => (o.type === "text" ? (o.lineHeight ?? "auto") : undefined),
+  },
+  // Paragraph spacing and Max lines are held values (not keyframed): the gap between paragraphs in scene units, and how many lines are drawn at
+  // most ("none" until one is set; the lines past it are not drawn and the record check reports them).
+  {
+    key: "paragraphSpacing",
+    label: "Paragraph spacing",
+    appliesTo: ["text"],
+    input: "length",
+    read: (o) => (o.type === "text" ? (o.paragraphSpacing ?? 0) : undefined),
+  },
+  // Text indent is a held value too: how far in the first line of every paragraph starts, in scene units (not negative).
+  {
+    key: "textIndent",
+    label: "Text indent",
+    appliesTo: ["text"],
+    input: "length",
+    read: (o) => (o.type === "text" ? (o.textIndent ?? 0) : undefined),
+  },
+  // Word spacing is signed scene units added to each space; Kerning is the font's own pair adjustment, on unless switched off (omitted is on).
+  {
+    key: "wordSpacing",
+    label: "Word spacing",
+    appliesTo: ["text"],
+    input: "number",
+    read: (o) => (o.type === "text" ? (o.wordSpacing ?? 0) : undefined),
+  },
+  // Underline and strike-through are two held flags of the text's decoration, drawn from the face's own metrics.
+  { key: "underline", label: "Underline", appliesTo: ["text"], input: "boolean", read: (o) => (o.type === "text" ? o.decoration?.underline === true : undefined) },
+  { key: "strikethrough", label: "Strike-through", appliesTo: ["text"], input: "boolean", read: (o) => (o.type === "text" ? o.decoration?.strikethrough === true : undefined) },
+  { key: "kerning", label: "Kerning", appliesTo: ["text"], input: "boolean", read: (o) => (o.type === "text" ? o.kerning !== false : undefined) },
+  {
+    key: "maxLines",
+    label: "Max lines",
+    appliesTo: ["text"],
+    input: "count",
+    read: (o) => (o.type === "text" ? (o.maxLines ?? "none") : undefined),
+  },
+  {
+    key: "baselineShift",
+    label: "Baseline shift",
+    appliesTo: ["text"],
+    input: "number",
+    read: (o) => (o.type === "text" ? (o.baselineShift ?? 0) : undefined),
+  },
   {
     key: "radius",
     label: "Corner radius",
@@ -93,7 +170,56 @@ const FIELDS: readonly FieldSpec[] = [
     input: "number",
     read: (o) => (o.type === "rect" ? o.radius : undefined),
   },
+  // Trim is a percentage of the path (0 to 100; omitted is 0 and 100). A stroke's width and dash offset are in the object's own units.
+  {
+    key: "trimStart",
+    label: "Trim start",
+    appliesTo: ["shape"],
+    input: "number",
+    read: (o) => (o.type === "shape" ? (o.trimStart ?? 0) : undefined),
+  },
+  {
+    key: "trimEnd",
+    label: "Trim end",
+    appliesTo: ["shape"],
+    input: "number",
+    read: (o) => (o.type === "shape" ? (o.trimEnd ?? 100) : undefined),
+  },
+  {
+    key: "trimOffset",
+    label: "Trim offset",
+    appliesTo: ["shape"],
+    input: "number",
+    read: (o) => (o.type === "shape" ? (o.trimOffset ?? 0) : undefined),
+  },
+  { key: "strokeWidth", label: "Stroke width", appliesTo: STROKED, input: "number", read: (o) => o.strokeWidth },
+  {
+    key: "strokeStyle.dashOffset",
+    label: "Dash offset",
+    appliesTo: STROKED,
+    input: "number",
+    read: (o) => o.strokeStyle?.dashOffset ?? 0,
+  },
 ];
+
+/// A dash pattern's entries are animatable one by one (`strokeStyle.dash.N`, the contract's `dash::index`): the index of such a key.
+export function dashIndexOf(key: string): number | undefined {
+  const match = /^strokeStyle\.dash\.(0|[1-9][0-9]*)$/.exec(key);
+  return match === null ? undefined : Number(match[1]);
+}
+
+/// The spec of a field by key: the table's, or a dash entry's (its row exists only where the stroke has that many entries).
+function specFor(key: string): FieldSpec | undefined {
+  const fixed = FIELDS.find((candidate) => candidate.key === key);
+  if (fixed !== undefined) return fixed;
+  const animator = animatorRow(key);
+  if (animator !== undefined) {
+    return { key, label: animator.label, appliesTo: ["text"], input: animator.input, read: (o) => animatorValue(o, key), ...(animator.input === "unit" ? { format: percent } : {}) };
+  }
+  const index = dashIndexOf(key);
+  if (index === undefined) return undefined;
+  return { key, label: `Dash ${index + 1}`, appliesTo: STROKED, input: "number", read: (o) => o.strokeStyle?.dash?.[index] };
+}
 
 function applies(spec: FieldSpec, kind: SceneObject["type"]): boolean {
   return spec.appliesTo === undefined || spec.appliesTo.includes(kind);
@@ -120,6 +246,8 @@ export function displayValue(
 export function inspectorPanel(
   document: SceneDocument,
   selectedIds: readonly string[],
+  /** The text choices and what the engine draws of them (`cmd_text_choices`, 11.132); absent until read. */
+  textChoices?: TextChoices,
 ): UiNode {
   const selected = document.objects.filter((object) => selectedIds.includes(object.id));
 
@@ -135,13 +263,19 @@ export function inspectorPanel(
 
   const kinds = [...new Set(selected.map((object) => object.type))];
 
-  const fields: UiNode[] = FIELDS.filter((spec) =>
+  // A dash pattern has one row per entry, as many as the longest pattern among the selected strokes (the contract animates them one by one).
+  const dashCount = Math.max(0, ...selected.map((object) => ((STROKED as readonly string[]).includes(object.type) ? object.strokeStyle?.dash?.length ?? 0 : 0)));
+  const dashSpecs = Array.from({ length: dashCount }, (_, index) => specFor(`strokeStyle.dash.${index}`)!);
+  // The text animator's numbers (11.61): rows only where a selected text has an animator, so they do not clutter any other selection.
+  const animatorSpecs = selected.some((object) => animatorValue(object, "textAnimator.x") !== undefined) ? ANIMATOR_ROWS.map((row) => specFor(row.property)!) : [];
+  const fields: UiNode[] = [...FIELDS, ...dashSpecs, ...animatorSpecs].filter((spec) => !(spec.key === "fontId" && selected.some((object) => object.type === "text")))
+    .filter((spec) => spec.key !== "hideWhenEmpty" || selected.some(hasEmptinessBinding)).filter((spec) =>
     // A field is shown when it applies to at least one selected kind. One that
     // applies to none is genuinely irrelevant and is the only case that is
     // omitted rather than explained.
     kinds.some((kind) => applies(spec, kind)),
   ).map((spec) => {
-    const applicable = selected.filter((object) => applies(spec, object.type));
+    const applicable = selected.filter((object) => applies(spec, object.type) && ((dashIndexOf(spec.key) === undefined && animatorRow(spec.key) === undefined) || spec.read(object) !== undefined));
     const missing = kinds.filter((kind) => !applies(spec, kind));
     const value = unify(applicable.map((object) => spec.read(object)));
 
@@ -151,8 +285,14 @@ export function inspectorPanel(
       label: spec.label,
       value: displayValue(value, spec),
       input: {
-        type: spec.input === "number" ? "number" : spec.input === "boolean" ? "checkbox" : "text",
-        value: value === undefined || isMixed(value) ? "" : spec.input === "unit" ? displayValue(value, spec) : String(value),
+        type: spec.input === "number" || spec.input === "length" ? "number" : spec.input === "boolean" ? "checkbox" : "text",
+        // A number field holds a number: leading that is still "auto" shows that word beside an empty field.
+        value:
+          value === undefined || isMixed(value) || ((spec.input === "number" || spec.input === "length") && typeof value !== "number")
+            ? ""
+            : spec.input === "unit"
+              ? displayValue(value, spec)
+              : String(value),
         ...(isMixed(value) ? { mixed: true } : {}),
       },
       ...(missing.length === 0
@@ -183,7 +323,7 @@ export function inspectorPanel(
     description: only
       ? `${only.name} (${only.type})`
       : `${selected.length} objects selected (${kinds.join(", ")})`,
-    children: [...containerPaintNotices(document, selectedIds), ...fields],
+    children: [...containerPaintNotices(document, selectedIds), ...fields, ...fontChoiceNode(document, selectedIds), ...textChoiceNodes(document, selectedIds, textChoices), ...animatorNodes(document, selectedIds)],
   };
 }
 
@@ -227,8 +367,19 @@ const SECTIONS: readonly { readonly id: string; readonly title: string; readonly
   { id: "layer", title: "Layer", keys: ["name", "visible", "locked"] },
   // After Effects' order: position, scale, rotation, opacity.
   { id: "transform", title: "Transform", keys: ["x", "y", "scaleX", "scaleY", "rotation", "opacity"] },
-  { id: "text", title: "Text", keys: ["text", "fontId", "size"] },
-  { id: "shape", title: "Shape", keys: ["radius"] },
+  { id: "text", title: "Text", keys: ["text", "fontId", "size", "letterSpacing", "lineHeight", "wordSpacing", "paragraphSpacing", "textIndent", "kerning", "underline", "strikethrough", "maxLines", "baselineShift", "text-choices", "textCase", "align", "verticalAlign", "layout", "writingMode", "autoFit", "overflow"] },
+  { id: "shape", title: "Shape", keys: ["radius", "trimStart", "trimEnd", "trimOffset"] },
+  { id: "stroke", title: "Stroke", keys: ["strokeWidth", "strokeStyle.dashOffset"] },
+  { id: "data", title: "Data", keys: ["hideWhenEmpty"] },
+  {
+    id: "text-animator",
+    title: "Text animator",
+    keys: [
+      "textAnimator/add",
+      "textAnimator.selector.start", "textAnimator.selector.end", "textAnimator.selector.offset", "textAnimator/shape", "textAnimator/basis", "textAnimator/amount", "textAnimator/smoothness", "textAnimator/easeHigh", "textAnimator/easeLow", "textAnimator/randomize",
+      "textAnimator.x", "textAnimator.y", "textAnimator.scale", "textAnimator.rotation", "textAnimator.opacity", "textAnimator.tracking",
+    ],
+  },
 ];
 
 /// The field key an inspector node carries, from its id.
@@ -251,8 +402,9 @@ export function inspectorSections(panel: UiNode): InspectorSection[] {
     sections.push({ id: "refused-paint", title: "Unsupported container paint", fields: paintNotices });
     for (const notice of paintNotices) placed.add(notice);
   }
+  const dashKeys = [...byKey.keys()].filter((key) => dashIndexOf(key) !== undefined).sort((a, b) => dashIndexOf(a)! - dashIndexOf(b)!);
   for (const section of SECTIONS) {
-    const members = section.keys.flatMap((key) => {
+    const members = (section.id === "stroke" ? [...section.keys, ...dashKeys] : section.keys).flatMap((key) => {
       const field = byKey.get(key);
       return field ? [field] : [];
     });
@@ -282,7 +434,7 @@ export function isRefused<T extends object>(outcome: T | EditRefused): outcome i
 
 /// The history label for a field edit that changed `count` objects.
 export function fieldEditLabel(field: string, count: number): string {
-  const label = FIELDS.find((candidate) => candidate.key === field)?.label ?? field;
+  const label = specFor(field)?.label ?? field;
   return count > 1 ? `Set ${label} on ${count} objects` : `Set ${label}`;
 }
 
@@ -300,6 +452,16 @@ function objectFieldFor(field: string, value: unknown): ObjectField | undefined 
     case "text":
     case "fontId":
       return typeof value === "string" ? { name: field, value } : undefined;
+    case "hideWhenEmpty":
+    case "kerning":
+      return typeof value === "boolean" ? { name: field, value } : undefined;
+    case "paragraphSpacing":
+    case "textIndent":
+    case "wordSpacing":
+      return typeof value === "number" ? { name: field, value } : undefined;
+    // A limit, or null for none (the contract clears the field on null).
+    case "maxLines":
+      return value === null || typeof value === "number" ? { name: field, value } : undefined;
     default:
       return undefined;
   }
@@ -350,7 +512,7 @@ export function inspectorEdits(
   field: string,
   value: unknown,
 ): readonly SceneEdit[] | EditRefused {
-  const spec = FIELDS.find((candidate) => candidate.key === field);
+  const spec = specFor(field);
   if (!spec) return { refused: `no inspector field named ${field}` };
   const selected = document.objects.filter((object) => selectedIds.includes(object.id));
   if (selected.length === 0) return { refused: "nothing is selected" };
@@ -373,6 +535,22 @@ export function inspectorEdits(
         objectId: object.id,
         locked: value,
       }));
+    // The decoration is one field holding both flags: each text keeps the flag that was not touched, so a mixed selection is one edit per
+    // resulting value, all in the one batch.
+    case "underline":
+    case "strikethrough": {
+      if (typeof value !== "boolean") break;
+      const groups = new Map<string, { objectIds: string[]; decoration: { underline: boolean; strikethrough: boolean } }>();
+      for (const object of selected) {
+        if (object.type !== "text") return { refused: `${spec.label} is not a property of ${object.type}` };
+        const decoration = { underline: object.decoration?.underline === true, strikethrough: object.decoration?.strikethrough === true, [field]: value };
+        const key = `${decoration.underline}/${decoration.strikethrough}`;
+        const group = groups.get(key) ?? { objectIds: [], decoration };
+        group.objectIds.push(object.id);
+        groups.set(key, group);
+      }
+      return [...groups.values()].map((group) => ({ edit: "setObjectField", objectIds: group.objectIds, field: { name: "decoration", value: group.decoration } }) as SceneEdit);
+    }
     default: {
       const objectField = objectFieldFor(field, value);
       if (!objectField) break;
@@ -392,7 +570,7 @@ export function parseFieldInput(
   field: string,
   raw: string,
 ): { readonly value: unknown } | EditRefused {
-  const spec = FIELDS.find((candidate) => candidate.key === field);
+  const spec = specFor(field);
   if (!spec) return { refused: `no inspector field named ${field}` };
   const trimmed = raw.trim();
   switch (spec.input) {
@@ -404,6 +582,21 @@ export function parseFieldInput(
       if (trimmed === "true") return { value: true };
       if (trimmed === "false") return { value: false };
       return { refused: `${spec.label} needs true or false, not "${raw}"` };
+    case "count": {
+      if (NO_LIMIT.includes(trimmed.toLowerCase())) return { value: null };
+      const whole = Number(trimmed);
+      if (!Number.isInteger(whole) || whole < 1) {
+        return { refused: `${spec.label} needs a whole number from 1, or "none", not "${raw}"` };
+      }
+      return { value: whole };
+    }
+    case "length": {
+      const length = Number(trimmed);
+      if (trimmed === "" || !Number.isFinite(length) || length < 0) {
+        return { refused: `${spec.label} needs a number that is not negative, not "${raw}"` };
+      }
+      return { value: length };
+    }
     case "number":
     case "unit": {
       const isPercent = spec.input === "unit" && trimmed.endsWith("%");
@@ -428,7 +621,7 @@ export function fieldEditStart(
   selectedIds: readonly string[],
   field: string,
 ): { readonly label: string; readonly initial: string; readonly mixed: boolean } | undefined {
-  const spec = FIELDS.find((candidate) => candidate.key === field);
+  const spec = specFor(field);
   if (!spec) return undefined;
   const values = document.objects
     .filter((object) => selectedIds.includes(object.id) && applies(spec, object.type))

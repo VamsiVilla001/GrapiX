@@ -5,4 +5,4 @@
  * must be one every evaluator knows by name, because a substituted curve is a
  * visual change no one named (invariant 18).
  */
-export type SceneEasing = "linear" | "hold" | "ease-in" | "ease-out" | "ease-in-out" | "custom-bezier";
+export type SceneEasing = "linear" | "hold" | "ease-in" | "ease-out" | "ease-in-out" | "bounce" | "elastic" | "custom-bezier";

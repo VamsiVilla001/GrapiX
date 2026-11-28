@@ -1,0 +1,6 @@
+Row 11.132, real Editor window (debug build, scratch project), 27 Nov 2026 (claude).
+Auto-key on. Font size keyed 40 at frame 0 and 120 at frame 20: reads 80 at frame 10 and 120 at frame 30.
+Corner radius (a box) keyed 0 at frame 0 and 100 at frame 20: reads 50 at frame 10 and 100 at frame 30.
+Timeline tracks named "Font size" and "Corner radius" with their keys at 0 and 20.
+Earlier checks (26 Nov, docs/log/2026-11-26.md): stroke width, dash offset (27.5 at frame 11), tracking, leading, baseline shift, Fill and Stroke colour keys, dash pattern keys, text animator rows keyed.
+Trim start and trim end: the Properties rows are covered by Editor/tests/inspector-scalars.test.ts; the backend by task 118 on DX12 and Vulkan at both keys and the midpoint (a shape needs the Pen tool, not driven here).

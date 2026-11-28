@@ -92,6 +92,28 @@
       ],
       "type": "object"
     },
+    "ApplyTextAnimatorPreset": {
+      "description": "Put one of EffectCraft's text-animator presets (listing id\n`ec.textanimator.<name>`) on a text: its animator replaces the\ntext's, and its keys start at `at_frame` (11.61). One undo entry;\na preset the engine cannot draw yet refuses by name.",
+      "properties": {
+        "atFrame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "presetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "objectId",
+        "presetId",
+        "atFrame"
+      ],
+      "type": "object"
+    },
     "ApplyTextStyle": {
       "properties": {
         "objectId": {
@@ -1539,6 +1561,46 @@
         }
       ]
     },
+    "ColourKeyframe": {
+      "additionalProperties": false,
+      "properties": {
+        "bezier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CubicBezier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "easing": {
+          "$ref": "#/$defs/SceneEasing",
+          "default": "linear"
+        },
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "$ref": "#/$defs/Rgba"
+        }
+      },
+      "required": [
+        "frame",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ColourProperty": {
+      "enum": [
+        "fill",
+        "stroke",
+        "textAnimatorFill"
+      ],
+      "type": "string"
+    },
     "ConfirmDesignSystem": {
       "description": "Confirm a design-system draft as the project's next version.",
       "properties": {
@@ -1693,6 +1755,25 @@
           "type": "object"
         }
       ]
+    },
+    "CreateColourKey": {
+      "properties": {
+        "keyframe": {
+          "$ref": "#/$defs/ColourKeyframe"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "property": {
+          "$ref": "#/$defs/ColourProperty"
+        }
+      },
+      "required": [
+        "objectId",
+        "property",
+        "keyframe"
+      ],
+      "type": "object"
     },
     "CreateKeyframe": {
       "properties": {
@@ -4992,6 +5073,33 @@
       ],
       "type": "object"
     },
+    "MoveColourKey": {
+      "properties": {
+        "fromFrame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "property": {
+          "$ref": "#/$defs/ColourProperty"
+        },
+        "toFrame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "objectId",
+        "property",
+        "fromFrame",
+        "toFrame"
+      ],
+      "type": "object"
+    },
     "MoveGuide": {
       "description": "Move a guide to another position.",
       "properties": {
@@ -5364,6 +5472,242 @@
             "value": {
               "format": "int32",
               "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The text choices of the Properties dock (11.132): held values that are never keyframed. Text objects only. Whether the engine\ndraws a value is not decided here: `text_choices` asks the drawability check, and a graphic that uses a value the engine\ncannot draw yet is refused by name when it is previewed or published, exactly as when it is loaded.",
+          "properties": {
+            "name": {
+              "const": "textCase",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextCase"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "align",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextAlign"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "verticalAlign",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/VerticalAlign"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "layout",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextLayout"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Horizontal lines, or upright columns running right to left or left to right (11.51).",
+          "properties": {
+            "name": {
+              "const": "writingMode",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/WritingMode"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "autoFit",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextAutoFit"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "maxLines",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "overflow",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextOverflow"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "kerning",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "decoration",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TextDecoration"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "paragraphSpacing",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "First-line indent in scene units (11.51): the first line of every paragraph starts this far in. Not negative.",
+          "properties": {
+            "name": {
+              "const": "textIndent",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "wordSpacing",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Hide when empty (11.153, `ObjectBase.hide_when_empty`): the element is not drawn while one of its text or image bindings resolves to a\nmissing, null or blank value. Turning it on is refused by name on an element with no such binding; turning it off always works.",
+          "properties": {
+            "name": {
+              "const": "hideWhenEmpty",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -6012,6 +6356,27 @@
       },
       "type": "object"
     },
+    "RemoveColourKey": {
+      "properties": {
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "property": {
+          "$ref": "#/$defs/ColourProperty"
+        }
+      },
+      "required": [
+        "objectId",
+        "property",
+        "frame"
+      ],
+      "type": "object"
+    },
     "RemoveControl": {
       "properties": {
         "fieldId": {
@@ -6367,15 +6732,29 @@
     },
     "SceneEasing": {
       "description": "The easing between two keys. Closed and finite: the curve an author chooses\nmust be one every evaluator knows by name, because a substituted curve is a\nvisual change no one named (invariant 18).",
-      "enum": [
-        "linear",
-        "hold",
-        "ease-in",
-        "ease-out",
-        "ease-in-out",
-        "custom-bezier"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "linear",
+            "hold",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "custom-bezier"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "bounce",
+          "description": "Robert Penner's easeOutBounce: the value arrives at the second key and rebounds with shrinking height, ending exactly on\nit. Never leaves the range between the two keys' values. Not a cubic bezier (11.134).",
+          "type": "string"
+        },
+        {
+          "const": "elastic",
+          "description": "Robert Penner's easeOutElastic (amplitude 1, period 0.3): the value overshoots the second key and settles through a\ndecaying oscillation. It leaves the range between the keys' values by about 37 percent of their distance, so a property\nwith a range refuses it where that would break the range. Not a cubic bezier (11.134).",
+          "type": "string"
+        }
+      ]
     },
     "SceneEdit": {
       "description": "One change to one scene document. Only carried inside\n`EditorCommand::EditScene` and only applied through [`apply_edits`].",
@@ -7133,6 +7512,84 @@
             "edit"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CreateColourKey",
+          "properties": {
+            "edit": {
+              "const": "createColourKey",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/UpdateColourKey",
+          "properties": {
+            "edit": {
+              "const": "updateColourKey",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MoveColourKey",
+          "properties": {
+            "edit": {
+              "const": "moveColourKey",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RemoveColourKey",
+          "properties": {
+            "edit": {
+              "const": "removeColourKey",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetTextAnimator",
+          "properties": {
+            "edit": {
+              "const": "setTextAnimator",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ApplyTextAnimatorPreset",
+          "properties": {
+            "edit": {
+              "const": "applyTextAnimatorPreset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7846,6 +8303,31 @@
       ],
       "type": "object"
     },
+    "SetTextAnimator": {
+      "description": "Set a text animator, or remove it and its keys with null.",
+      "properties": {
+        "animator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextAnimator"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "objectIds"
+      ],
+      "type": "object"
+    },
     "SetTrackMatte": {
       "description": "Set one object's track matte by its source's id, or clear it by\nleaving `trackMatte` out (3.19). Refuses by name\n(`trackMatteInvalid`) what cannot be drawn as authored.",
       "properties": {
@@ -8092,6 +8574,91 @@
       ],
       "type": "object"
     },
+    "TextAlign": {
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ],
+      "type": "string"
+    },
+    "TextAnimator": {
+      "additionalProperties": false,
+      "description": "One geometry animator on a text object. Values describe the transform at\nfull selection; the range weights blend from the identity per cluster.",
+      "properties": {
+        "fill": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgba"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Solid target colour for fully selected glyphs."
+        },
+        "opacity": {
+          "description": "Fully selected paint opacity. Absent keeps the original paint alpha.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rotation": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "scale": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "selector": {
+          "$ref": "#/$defs/TextRangeSelector",
+          "default": {
+            "amount": 1.0,
+            "easeHigh": 0.0,
+            "easeLow": 0.0,
+            "end": 1.0,
+            "offset": 0.0,
+            "randomizeOrder": false,
+            "shape": "square",
+            "smoothness": 1.0,
+            "start": 0.0
+          }
+        },
+        "tracking": {
+          "description": "Signed spacing added after a fully selected shaped cluster, in scene pixels.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TextAutoFit": {
+      "description": "What to do when shaped text does not fit its box. Never silently clipped.",
+      "enum": [
+        "none",
+        "shrink",
+        "fit"
+      ],
+      "type": "string"
+    },
     "TextCase": {
       "description": "Case applied when the text is drawn, not when it is typed: the authored\ncharacters stay as they are, so a data binding can replace the text and\nthe case still applies, and switching it off returns the author's own\ncapitalisation.",
       "enum": [
@@ -8100,6 +8667,117 @@
         "lower",
         "title",
         "small-caps"
+      ],
+      "type": "string"
+    },
+    "TextDecoration": {
+      "description": "Underline and strikethrough: drawn from the font's metrics rather than\nshaped, so they are object state and not part of the font definition.",
+      "properties": {
+        "strikethrough": {
+          "default": false,
+          "type": "boolean"
+        },
+        "underline": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "TextLayout": {
+      "description": "Point text grows from its origin; paragraph text wraps inside the base box.",
+      "enum": [
+        "point",
+        "paragraph"
+      ],
+      "type": "string"
+    },
+    "TextOverflow": {
+      "enum": [
+        "visible",
+        "hidden",
+        "clip"
+      ],
+      "type": "string"
+    },
+    "TextRangeBasis": {
+      "description": "The logical units a text range selects.",
+      "enum": [
+        "characters",
+        "charactersExcludingSpaces",
+        "words",
+        "lines"
+      ],
+      "type": "string"
+    },
+    "TextRangeSelector": {
+      "additionalProperties": false,
+      "description": "Normalized range parameters. One unit of offset spans the entire text.",
+      "properties": {
+        "amount": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "basis": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextRangeBasis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "easeHigh": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "easeLow": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "end": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "offset": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "randomizeOrder": {
+          "default": false,
+          "type": "boolean"
+        },
+        "shape": {
+          "$ref": "#/$defs/TextRangeShape",
+          "default": "square"
+        },
+        "smoothness": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "start": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TextRangeShape": {
+      "enum": [
+        "square",
+        "rampUp",
+        "rampDown",
+        "triangle",
+        "round",
+        "smooth"
       ],
       "type": "string"
     },
@@ -8503,6 +9181,25 @@
       ],
       "type": "string"
     },
+    "UpdateColourKey": {
+      "properties": {
+        "keyframe": {
+          "$ref": "#/$defs/ColourKeyframe"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "property": {
+          "$ref": "#/$defs/ColourProperty"
+        }
+      },
+      "required": [
+        "objectId",
+        "property",
+        "keyframe"
+      ],
+      "type": "object"
+    },
     "UpdateFont": {
       "description": "Change a font's display name, fallbacks or enabled state (11.13).\nSwitching off a font something names is refused, as removing it is.",
       "properties": {
@@ -8599,6 +9296,14 @@
         }
       ]
     },
+    "VerticalAlign": {
+      "enum": [
+        "top",
+        "middle",
+        "bottom"
+      ],
+      "type": "string"
+    },
     "Vibrance": {
       "description": "Vibrance: saturation weighted `(1 - s) * min(s, 0.5)`: a grey and a fully\nsaturated colour are left alone, and a half-saturated one gains most.",
       "properties": {
@@ -8654,6 +9359,15 @@
         "clockwise",
         "counterclockwise",
         "both"
+      ],
+      "type": "string"
+    },
+    "WritingMode": {
+      "description": "CSS `writing-mode` values, which is what the shaper (3.6) consumes.",
+      "enum": [
+        "horizontal-tb",
+        "vertical-rl",
+        "vertical-lr"
       ],
       "type": "string"
     }

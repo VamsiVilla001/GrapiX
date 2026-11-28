@@ -1,0 +1,159 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the Editor's Ctrl K search (the Figma E1 screen, 'Search everything') should behave. Asked before coding, 24 Nov 2026.",
+   "facts": "The Editor has one list of every menu command with its label, its shortcut and whether it is built (an unbuilt one is shown dimmed and names the plan row that builds it). A command registry says whether a command can run now and in what words it refuses. The effects catalogue holds 306 effects, 46 of which the engine renders; an effect is added to the selected element. The scene has elements with names and kinds, selected by id. There is no help system yet (plan row 11.88). The design shows a palette over the work with groups Effects (add to the selected element), Commands (with shortcut), Elements, Help, and a footer line. Product rule 86: no effect is ever left out of the Editor, so every one of the 306 must be findable. Many people type in text fields while working (a name, a value).",
+   "options_keys": "A: Ctrl K opens (and closes) the palette from anywhere, even from a text field. B: only outside text fields.",
+   "options_blocked": "A: an unbuilt or currently refused result is shown dimmed with its reason, and Enter on it keeps the palette open and says why. B: hide results that cannot run. C: Enter on one closes the palette and writes the reason to the activity line.",
+   "options_scope": "A: search every effect, command and element, but show at most a handful per group with a line saying how many more, and show only commands when the box is empty. B: show at most a handful of results in total. C: show everything.",
+   "options_help": "A: leave the Help group out until the help system exists. B: show a Help group with placeholder entries."
+  },
+  "questions": {
+   "keys": {
+    "type": "choice",
+    "instructions": "Where should Ctrl K work?",
+    "criteria": {
+     "A": "Anywhere, including from a text field; pressing it again closes the palette.",
+     "B": "Only when focus is not in a text field."
+    }
+   },
+   "blocked": {
+    "type": "choice",
+    "instructions": "What should the palette do with a result that cannot run (not built yet, or refused for the current selection)?",
+    "criteria": {
+     "A": "Show it dimmed with its reason; Enter on it keeps the palette open and says why.",
+     "B": "Hide it.",
+     "C": "Show it; Enter closes the palette and writes the reason to the activity line."
+    }
+   },
+   "scope": {
+    "type": "choice",
+    "instructions": "How much should the palette show?",
+    "criteria": {
+     "A": "Search everything; a handful per group with a 'more' line; only commands when the box is empty.",
+     "B": "A handful of results in total.",
+     "C": "Everything that matches."
+    }
+   },
+   "help": {
+    "type": "choice",
+    "instructions": "The design has a Help group but there is no help system yet. What should the palette do?",
+    "criteria": {
+     "A": "Leave the Help group out until the help system exists.",
+     "B": "Show a Help group with placeholder entries."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "keys": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.6,
+    "probabilities": {
+     "A": 0.8,
+     "B": 0.2
+    }
+   },
+   "blocked": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.98,
+    "probabilities": {
+     "A": 0.99,
+     "B": 0,
+     "C": 0.01
+    }
+   },
+   "scope": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.73,
+    "probabilities": {
+     "A": 0.82,
+     "B": 0.01,
+     "C": 0.17
+    }
+   },
+   "help": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.3,
+    "probabilities": {
+     "A": 0.65,
+     "B": 0.35
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1888,
+   "output_tokens": 0,
+   "state_tokens": 415,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "keys": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.7182,
+     "B": 0.2818
+    },
+    "confidence": 0.1421,
+    "answer_confidence": 0.7182,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "blocked": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.0628,
+     "B": 0.9215,
+     "C": 0.0157
+    },
+    "confidence": 0.7138,
+    "answer_confidence": 0.9215,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "scope": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6464,
+     "B": 0.0788,
+     "C": 0.2747
+    },
+    "confidence": 0.2379,
+    "answer_confidence": 0.6464,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "help": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.8664,
+     "B": 0.1336
+    },
+    "confidence": 0.4329,
+    "answer_confidence": 0.8664,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

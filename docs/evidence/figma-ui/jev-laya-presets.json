@@ -1,0 +1,96 @@
+{
+ "input": {
+  "state": {
+   "decision": "Which ease presets the keyframe card offers beyond Linear, Ease and Hold (Figma B3c Graph; plan row 11.134 names Ease, Ease in, Ease out, Back, Bounce, Elastic), asked before coding (claude, 25 Nov 2026).",
+   "facts": "The contract's easings are a closed list: linear, hold, ease-in, ease-out, ease-in-out, custom-bezier. A custom bezier is two control points per segment; x stays in 0..1 and y may overshoot (a property's range, like opacity 0..1, must hold). A Back ease (a small overshoot past the target before settling) IS a cubic bezier: easeOutBack is (0.34, 1.56, 0.64, 1) and easeInBack (0.36, 0, 0.66, -0.56). Bounce (several diminishing rebounds) and Elastic (a decaying oscillation) are NOT cubic beziers and cannot be written as one segment; they need new named easings in the contract, the Rust evaluator (the engine's), the TypeScript mirror pinned against it, and a generated reference table, and each becomes part of every saved scene's vocabulary. Rule: a substituted curve is a visual change no one named (invariant 18); never show a control that does nothing.",
+   "proposed": "Offer Back out and Back in now, as presets that write the custom bezier above on the selected keys (no contract change), and leave Bounce and Elastic out of the card until the contract has them, saying so in the plan row. Bounce and Elastic become a separate backend task (new SceneEasing variants, evaluator in Rust and TypeScript, reference table, conformance) to be done only if the owner wants them."
+  },
+  "questions": {
+   "back": {
+    "type": "choice",
+    "instructions": "How should Back be offered?",
+    "criteria": {
+     "A": "As presets that write a custom bezier on the selected keys, no contract change (as proposed).",
+     "B": "As a new named easing in the contract, so it is a first-class easing like Ease in.",
+     "C": "Not at all until Bounce and Elastic can be offered together."
+    }
+   },
+   "bounce_elastic": {
+    "type": "choice",
+    "instructions": "What should happen to Bounce and Elastic now?",
+    "criteria": {
+     "A": "Left out of the card and recorded as a separate backend task for the owner to approve (as proposed).",
+     "B": "Built now: new easings in the contract and both evaluators.",
+     "C": "Shown in the card, approximated with a bezier."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "back": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "bounce_elastic": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 944,
+   "output_tokens": 0,
+   "state_tokens": 399,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "back": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.624,
+     "B": 0.1257,
+     "C": 0.2503
+    },
+    "confidence": 0.1793,
+    "answer_confidence": 0.624,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "bounce_elastic": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3479,
+     "B": 0.5931,
+     "C": 0.059
+    },
+    "confidence": 0.2317,
+    "answer_confidence": 0.5931,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

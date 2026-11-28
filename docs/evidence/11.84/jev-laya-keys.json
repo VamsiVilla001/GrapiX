@@ -1,0 +1,225 @@
+{
+ "input": {
+  "state": {
+   "decision": "Changing a key in the Editor (plan row 11.84, Shortcut and trigger settings), asked BEFORE coding (claude, 26 Nov 2026).",
+   "facts": "The Editor has one table of chords, SHORTCUTS: 37 entries, each a key plus Ctrl and Shift flags (Alt is never read) mapped to one command id (for example Ctrl S is file.save, K is motion.add-key, Space is motion.play). A command can have several keys (Redo has Ctrl Shift Z and Ctrl Y; Pen has G and P). Each shortcut may carry flags: quiet (the key has other jobs, so a refusal is silent), repeats (held undo/redo), fromFields (works with a text field focused). The menus show the key beside each command and the Settings window's Shortcuts page, built read-only on 25 Nov, lists one row per command with all its keys together, a search and a CLASH chip. Settings exist in two scopes: user (roams with the person) and machine (this computer), edited one key at a time by cmd_settings_set(scope, key, json value) and reset by key or whole scope; unknown fields refuse; every value is checked by the contract. The contract row says: clashes are shown, a shortcut has one handler, every menu item shows the key it has, the choices are user settings and can be reset. Keys are written as labels such as Ctrl Shift S. Owner rules: a control that does nothing is dimmed naming the row; a value shown must be one the app holds; what changes how a graphic looks is never a user setting; a refusal names its reason. The Editor is used live on a production machine, so a key that silently stops working is worse than one that is refused.",
+   "proposed": "The keymap is a user setting `shortcuts`: a map from command id to the list of keys that command has, present only for commands the person changed. Present replaces the command's default keys entirely; an empty list means no key; absent means the defaults. The contract checks the syntax of each key (optional Ctrl, optional Shift, then a letter, digit, F1 to F12, Space, Delete, Backspace, Home, End, PageUp, PageDown, an arrow, or one of the punctuation keys; Escape, Enter and Tab are reserved and refused; Alt is not a modifier here), at most 4 keys per command, and that no key is held by two commands (a key has one handler). The Shortcuts page gets, for each command, Change (then press the new key; Escape cancels), Remove key, and Reset, plus Reset all shortcuts. When the pressed key already belongs to another command the page says which, and offers Take it, which removes the key from that command and gives it to this one in one change. The General page's reset of your settings does not touch the keymap; Reset all shortcuts is on the Shortcuts page. Menus and the key handling use the effective keys. A stored command id this build does not have is ignored and listed on the page with a Remove."
+  },
+  "questions": {
+   "model": {
+    "type": "choice",
+    "instructions": "What does a changed command's entry mean?",
+    "criteria": {
+     "A": "The command's own key list replaces its defaults, so the page shows exactly the keys it has; an empty list is no key; absent is the defaults.",
+     "B": "Keys the person adds sit beside the defaults, which cannot be removed.",
+     "C": "Each default key is individually switched off or replaced, stored as edits to the defaults."
+    }
+   },
+   "clash": {
+    "type": "choice",
+    "instructions": "A person presses a key that another command already has. What happens?",
+    "criteria": {
+     "A": "Refuse and name the other command, and offer Take it, which moves the key in one change.",
+     "B": "Move the key silently and tell the other command's owner afterwards.",
+     "C": "Always refuse, with no way to take it except removing it from the other command first."
+    }
+   },
+   "scope": {
+    "type": "choice",
+    "instructions": "Where are the keys stored?",
+    "criteria": {
+     "A": "In the user settings, so they follow the person to another computer.",
+     "B": "In the machine settings, so they stay on this computer.",
+     "C": "In the project, with the graphic."
+    }
+   },
+   "reset": {
+    "type": "choice",
+    "instructions": "What does the General page's reset of your settings do to the keys?",
+    "criteria": {
+     "A": "Leaves the keymap alone; Reset all shortcuts on the Shortcuts page is its own control.",
+     "B": "Resets the keymap with everything else."
+    }
+   },
+   "recording": {
+    "type": "choice",
+    "instructions": "How is the new key entered?",
+    "criteria": {
+     "A": "Choose Change, then press the key; Escape cancels; Escape, Enter and Tab cannot be assigned and say why.",
+     "B": "Type its name into a text field.",
+     "C": "Choose from a list of every key."
+    }
+   },
+   "stale": {
+    "type": "choice",
+    "instructions": "What happens to a stored command id this build does not have?",
+    "criteria": {
+     "A": "It is ignored for key handling and listed on the Shortcuts page with a Remove.",
+     "B": "It is deleted silently when the settings load.",
+     "C": "The whole keymap is refused."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "model": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "clash": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "scope": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "reset": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0
+    }
+   },
+   "recording": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "stale": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 4373,
+   "output_tokens": 0,
+   "state_tokens": 661,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "model": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.425,
+     "B": 0.2953,
+     "C": 0.2797
+    },
+    "confidence": 0.0168,
+    "answer_confidence": 0.425,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "clash": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.1398,
+     "B": 0.6674,
+     "C": 0.1928
+    },
+    "confidence": 0.2151,
+    "answer_confidence": 0.6674,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "scope": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.1931,
+     "B": 0.1574,
+     "C": 0.6495
+    },
+    "confidence": 0.1909,
+    "answer_confidence": 0.6495,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "reset": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6522,
+     "B": 0.3478
+    },
+    "confidence": 0.0679,
+    "answer_confidence": 0.6522,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "recording": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.8123,
+     "B": 0.0204,
+     "C": 0.1672
+    },
+    "confidence": 0.5018,
+    "answer_confidence": 0.8123,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "stale": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3114,
+     "B": 0.3583,
+     "C": 0.3303
+    },
+    "confidence": 0.0015,
+    "answer_confidence": 0.3583,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

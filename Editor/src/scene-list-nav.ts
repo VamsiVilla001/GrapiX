@@ -29,12 +29,17 @@ export function moveRow(
   }
 }
 
-export type RowCommand = "open" | "delete" | "menu";
+export type RowCommand = "open" | "delete" | "menu" | "rename" | "changeId";
 
-/** What a key does to the focused row. Shift+F10 and the menu key open the context menu. */
+/**
+ * What a key does to the focused row. Shift+F10 and the menu key open the context menu; F2 renames the scene and F7 changes its Scene ID,
+ * the keys XPression's Scene Manager uses (11.72).
+ */
 export function rowCommand(key: string, shift = false): RowCommand | undefined {
   if (key === "Enter") return "open";
   if (key === "Delete") return "delete";
+  if (key === "F2" && !shift) return "rename";
+  if (key === "F7" && !shift) return "changeId";
   if (key === "ContextMenu" || (key === "F10" && shift)) return "menu";
   return undefined;
 }

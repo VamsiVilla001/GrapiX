@@ -29,6 +29,7 @@ tauri-build = { workspace = true }
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }
 gx-control-transport = { workspace = true }
+gx-playout = { path = "../../services/playout" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }

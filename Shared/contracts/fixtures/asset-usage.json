@@ -1,0 +1,395 @@
+{
+  "expected": {
+    "entries": [
+      {
+        "assetIds": [
+          "lib-logo",
+          "logo-a",
+          "logo-b"
+        ],
+        "key": "1111111111111111111111111111111111111111111111111111111111111111",
+        "scenes": [
+          {
+            "name": "Alpha",
+            "sceneId": "a"
+          },
+          {
+            "name": "Bravo",
+            "sceneId": "b"
+          }
+        ]
+      },
+      {
+        "assetIds": [
+          "lib-unused"
+        ],
+        "key": "id:lib-unused",
+        "scenes": []
+      },
+      {
+        "assetIds": [
+          "spare"
+        ],
+        "key": "4444444444444444444444444444444444444444444444444444444444444444",
+        "scenes": []
+      },
+      {
+        "assetIds": [
+          "model"
+        ],
+        "key": "2222222222222222222222222222222222222222222222222222222222222222",
+        "scenes": [
+          {
+            "name": "Alpha",
+            "sceneId": "a"
+          }
+        ]
+      },
+      {
+        "assetIds": [
+          "tex"
+        ],
+        "key": "3333333333333333333333333333333333333333333333333333333333333333",
+        "scenes": [
+          {
+            "name": "Alpha",
+            "sceneId": "a"
+          }
+        ]
+      }
+    ],
+    "problems": []
+  },
+  "note": "Read by Shared/contracts/src/asset_usage.rs and by Editor/tests/asset-usage-parity.test.ts. Rewrite with GX_WRITE_FIXTURES=1. Fonts are NOT in this fixture: the Editor's old client rule never counted a font file as used by text, so the client is compared on the cases it covered (images, models, bound-material textures) and the font cases are tested in Rust only.",
+  "objectsDrawing": [
+    {
+      "assetId": "logo-a",
+      "objects": [
+        "logo"
+      ],
+      "sceneId": "a"
+    },
+    {
+      "assetId": "spare",
+      "objects": [],
+      "sceneId": "a"
+    },
+    {
+      "assetId": "model",
+      "objects": [
+        "box"
+      ],
+      "sceneId": "a"
+    },
+    {
+      "assetId": "tex",
+      "objects": [
+        "panel"
+      ],
+      "sceneId": "a"
+    },
+    {
+      "assetId": "logo-b",
+      "objects": [
+        "first",
+        "second"
+      ],
+      "sceneId": "b"
+    }
+  ],
+  "projectAssets": [
+    {
+      "assetId": "lib-logo",
+      "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+      "kind": "image",
+      "name": "lib-logo",
+      "path": "assets/lib-logo",
+      "provenance": {
+        "sources": []
+      }
+    },
+    {
+      "assetId": "lib-unused",
+      "kind": "image",
+      "name": "lib-unused",
+      "path": "assets/lib-unused",
+      "provenance": {
+        "sources": []
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "document": {
+        "assets": [
+          {
+            "assetId": "logo-a",
+            "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+            "kind": "image",
+            "name": "logo-a",
+            "path": "assets/logo-a",
+            "provenance": {
+              "sources": []
+            }
+          },
+          {
+            "assetId": "spare",
+            "checksum": "4444444444444444444444444444444444444444444444444444444444444444",
+            "kind": "image",
+            "name": "spare",
+            "path": "assets/spare",
+            "provenance": {
+              "sources": []
+            }
+          },
+          {
+            "assetId": "model",
+            "checksum": "2222222222222222222222222222222222222222222222222222222222222222",
+            "kind": "model",
+            "name": "model",
+            "path": "assets/model",
+            "provenance": {
+              "sources": []
+            }
+          },
+          {
+            "assetId": "tex",
+            "checksum": "3333333333333333333333333333333333333333333333333333333333333333",
+            "kind": "image",
+            "name": "tex",
+            "path": "assets/tex",
+            "provenance": {
+              "sources": []
+            }
+          }
+        ],
+        "canvas": {
+          "frameRate": {
+            "den": 1,
+            "num": 50
+          },
+          "height": 1080,
+          "width": 1920
+        },
+        "colorDepth": "16",
+        "controls": [],
+        "dataContext": {},
+        "fonts": [],
+        "id": "a",
+        "materials": [
+          {
+            "alphaMode": "straight",
+            "blendMode": "normal",
+            "color": {
+              "color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0,
+                "space": "srgb"
+              },
+              "type": "solid"
+            },
+            "cullMode": "back",
+            "depthMode": "read-write",
+            "doubleSided": false,
+            "kind": "pbr",
+            "materialId": "m1",
+            "name": "m1",
+            "opacity": 1.0,
+            "textures": [
+              {
+                "assetId": "tex",
+                "colorSpace": "srgb",
+                "filtering": "linear",
+                "fit": "contain",
+                "slot": "baseColor",
+                "wrap": "clamp"
+              }
+            ]
+          }
+        ],
+        "name": "Alpha",
+        "objects": [
+          {
+            "assetId": "logo-a",
+            "fit": "contain",
+            "height": 0.0,
+            "id": "logo",
+            "layerId": "",
+            "locked": false,
+            "name": "logo",
+            "opacity": 1.0,
+            "rotation": 0.0,
+            "rotationX": 0.0,
+            "rotationY": 0.0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "scaleZ": 1.0,
+            "strokeWidth": 0.0,
+            "type": "image",
+            "visible": true,
+            "width": 0.0,
+            "x": 0.0,
+            "y": 0.0,
+            "zDepth": 0.0,
+            "zIndex": 0
+          },
+          {
+            "animationLoop": false,
+            "depth": 10.0,
+            "height": 0.0,
+            "id": "box",
+            "layerId": "",
+            "locked": false,
+            "meshKind": "model",
+            "modelAssetId": "model",
+            "name": "box",
+            "opacity": 1.0,
+            "rotation": 0.0,
+            "rotationX": 0.0,
+            "rotationY": 0.0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "scaleZ": 1.0,
+            "strokeWidth": 0.0,
+            "type": "mesh",
+            "visible": true,
+            "width": 0.0,
+            "x": 0.0,
+            "y": 0.0,
+            "zDepth": 0.0,
+            "zIndex": 0
+          },
+          {
+            "height": 0.0,
+            "id": "panel",
+            "layerId": "",
+            "locked": false,
+            "materialSlots": {
+              "face": {
+                "materialId": "m1"
+              }
+            },
+            "name": "panel",
+            "opacity": 1.0,
+            "radius": 0.0,
+            "rotation": 0.0,
+            "rotationX": 0.0,
+            "rotationY": 0.0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "scaleZ": 1.0,
+            "strokeWidth": 0.0,
+            "type": "rect",
+            "visible": true,
+            "width": 0.0,
+            "x": 0.0,
+            "y": 0.0,
+            "zDepth": 0.0,
+            "zIndex": 0
+          }
+        ],
+        "textStyles": [],
+        "timeline": {
+          "channels": [],
+          "durationFrames": 250,
+          "phases": []
+        },
+        "version": 4,
+        "workingColorSpace": "linear-srgb"
+      },
+      "sceneId": "a"
+    },
+    {
+      "document": {
+        "assets": [
+          {
+            "assetId": "logo-b",
+            "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+            "kind": "image",
+            "name": "logo-b",
+            "path": "assets/logo-b",
+            "provenance": {
+              "sources": []
+            }
+          }
+        ],
+        "canvas": {
+          "frameRate": {
+            "den": 1,
+            "num": 50
+          },
+          "height": 1080,
+          "width": 1920
+        },
+        "colorDepth": "16",
+        "controls": [],
+        "dataContext": {},
+        "fonts": [],
+        "id": "b",
+        "materials": [],
+        "name": "Bravo",
+        "objects": [
+          {
+            "assetId": "logo-b",
+            "fit": "contain",
+            "height": 0.0,
+            "id": "first",
+            "layerId": "",
+            "locked": false,
+            "name": "first",
+            "opacity": 1.0,
+            "rotation": 0.0,
+            "rotationX": 0.0,
+            "rotationY": 0.0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "scaleZ": 1.0,
+            "strokeWidth": 0.0,
+            "type": "image",
+            "visible": true,
+            "width": 0.0,
+            "x": 0.0,
+            "y": 0.0,
+            "zDepth": 0.0,
+            "zIndex": 0
+          },
+          {
+            "assetId": "logo-b",
+            "fit": "contain",
+            "height": 0.0,
+            "id": "second",
+            "layerId": "",
+            "locked": false,
+            "name": "second",
+            "opacity": 1.0,
+            "rotation": 0.0,
+            "rotationX": 0.0,
+            "rotationY": 0.0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "scaleZ": 1.0,
+            "strokeWidth": 0.0,
+            "type": "image",
+            "visible": true,
+            "width": 0.0,
+            "x": 0.0,
+            "y": 0.0,
+            "zDepth": 0.0,
+            "zIndex": 0
+          }
+        ],
+        "textStyles": [],
+        "timeline": {
+          "channels": [],
+          "durationFrames": 250,
+          "phases": []
+        },
+        "version": 4,
+        "workingColorSpace": "linear-srgb"
+      },
+      "sceneId": "b"
+    }
+  ]
+}

@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="favicon.png" />
     <link rel="stylesheet" href="skwad.css" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="settings-window.css" />
   </head>
   <body>
     <!-- Visible by default, and hidden by `main.js` only once the shell is
@@ -26,22 +27,11 @@
     <header class="bar">
       <nav class="app-menubar" aria-label="Editor menu">
         <!-- The menus are drawn from Editor/src/app-menu.ts (11.32): the eight of Ross XPression's menu bar. -->
-        <span class="workspace-title">GrapiX · Authoring workspace</span>
+        <span id="context-line" class="workspace-title context-line" title="The open scene: name, Scene ID, size, frame rate, colour depth and working space">No scene open</span>
       </nav>
       <div class="brand">
         <span class="mark">GrapiX</span>
         <span class="product">Editor</span>
-      </div>
-
-      <div class="scene-identity">
-        <label class="field">
-          <span class="label">Scene id</span>
-          <input id="scene-id" type="text" spellcheck="false" autocomplete="off" />
-        </label>
-        <label class="field">
-          <span class="label">Name</span>
-          <input id="scene-name" type="text" spellcheck="false" autocomplete="off" />
-        </label>
       </div>
 
       <div class="actions">
@@ -49,8 +39,8 @@
         <button id="open-scene" type="button">Open…</button>
         <button id="import-svg" type="button" title="Import an SVG as a new scene, with a report of every substitution">Import SVG…</button>
         <button id="save-scene" type="button">Save…</button>
-        <button id="undo" type="button" disabled>Undo</button>
-        <button id="redo" type="button" disabled>Redo</button>
+        <button id="layouts-open" type="button">Layouts…</button>
+        <button id="layouts-save-as-open" type="button">Save this layout as…</button>
         <button id="history-open" type="button" title="List every change to this scene, and go back or forward to any of them">History…</button>
         <button id="workspace-reset" type="button">Reset layout</button>
       </div>
@@ -64,18 +54,22 @@
           <button id="tool-scale" type="button" title="Resize (R)" aria-label="Resize tool" data-icon="tool-scale" data-tool="scale" data-menu-item="edit.resize" aria-pressed="false"></button>
           <button id="tool-pivot" type="button" title="Pivot (Y)" aria-label="Pivot tool" data-icon="tool-pivot" data-tool="pivot" data-menu-item="edit.centre" aria-pressed="false"></button>
           <button id="tool-pen" type="button" title="Pen (G)" aria-label="Pen tool" data-icon="tool-pen" data-tool="pen" data-menu-item="edit.pen" aria-pressed="false"></button>
+          <!-- On demand (visibility decision of 26 Nov, toolbar-context.ts): the path tools and what the Pen will make show while the Pen
+               or path editing is the tool; Hand and Zoom only while one of them is the tool (keys H and Z). -->
+          <span id="pen-context" class="tool-context" role="group" aria-label="Pen and path tools" hidden>
           <select id="pen-creates" class="pen-creates" title="What the Pen makes: Auto draws a mask on the selected layer and a shape otherwise" aria-label="Pen creates">
             <option value="auto">Pen: Auto</option>
             <option value="shape">Pen: Shape</option>
             <option value="mask">Pen: Mask</option>
           </select>
-          <span id="pen-creates-note" class="pen-creates-note" aria-live="polite"></span>
           <button id="tool-path" type="button" title="Edit path (A): drag a vertex, a handle or a curve; Alt breaks a handle; Delete takes the selected vertices out" aria-label="Edit path tool" data-icon="tool-path" data-tool="path" data-menu-item="edit.path" aria-pressed="false"></button>
           <button id="tool-vertex-add" type="button" title="Add vertex (=): click on a curve" aria-label="Add vertex tool" data-icon="tool-vertex-add" data-tool="vertex-add" data-menu-item="edit.vertex-add" aria-pressed="false"></button>
           <button id="tool-vertex-delete" type="button" title="Delete vertex (-): click on a vertex" aria-label="Delete vertex tool" data-icon="tool-vertex-delete" data-tool="vertex-delete" data-menu-item="edit.vertex-delete" aria-pressed="false"></button>
           <button id="tool-vertex-convert" type="button" title="Convert vertex (C): click on a vertex to swap corner and smooth" aria-label="Convert vertex tool" data-icon="tool-vertex-convert" data-tool="vertex-convert" data-menu-item="edit.vertex-convert" aria-pressed="false"></button>
-          <button id="tool-hand" type="button" title="Hand (H): drag to move the view; the middle mouse button does it with any tool" aria-label="Hand tool" data-icon="tool-hand" data-tool="hand" data-menu-item="edit.hand" aria-pressed="false"></button>
-          <button id="tool-zoom" type="button" title="Zoom (Z): click to zoom in, Alt-click to zoom out; the wheel zooms with any tool" aria-label="Zoom tool" data-icon="tool-zoom" data-tool="zoom" data-menu-item="edit.zoom" aria-pressed="false"></button>
+          <span id="pen-creates-note" class="pen-creates-note" aria-live="polite"></span>
+          </span>
+          <button hidden id="tool-hand" type="button" title="Hand (H): drag to move the view; the middle mouse button does it with any tool" aria-label="Hand tool" data-icon="tool-hand" data-tool="hand" data-menu-item="edit.hand" aria-pressed="false"></button>
+          <button hidden id="tool-zoom" type="button" title="Zoom (Z): click to zoom in, Alt-click to zoom out; the wheel zooms with any tool" aria-label="Zoom tool" data-icon="tool-zoom" data-tool="zoom" data-menu-item="edit.zoom" aria-pressed="false"></button>
         </div>
         <span class="tool-sep" role="separator"></span>
         <div class="tool-group" role="group" aria-label="Create">
@@ -83,8 +77,9 @@
           <button type="button" title="Create ellipse layer" aria-label="Create ellipse layer" data-create-kind="ellipse" data-menu-item="edit.add-object.ellipse" data-icon="circle"></button>
           <button type="button" title="Create text layer" aria-label="Create text layer" data-create-kind="text" data-menu-item="edit.add-object.text" data-icon="text-t"></button>
         </div>
-        <span class="tool-sep" role="separator"></span>
-        <div class="tool-group" role="group" aria-label="Line up and spread">
+        <span id="line-up-sep" class="tool-sep" role="separator" hidden></span>
+        <!-- On demand: shown when two or more elements are selected, the only time these can act. Also Edit > Line up and spread. -->
+        <div id="line-up-tools" class="tool-group" role="group" aria-label="Line up and spread" hidden>
           <button type="button" title="Line up left edges" aria-label="Line up left edges" data-native="arrange-line-left" data-menu-item="edit.line-up.left" data-icon="align-left"></button>
           <button type="button" title="Line up centres across" aria-label="Line up centres across" data-native="arrange-line-centre" data-menu-item="edit.line-up.centre" data-icon="align-centre"></button>
           <button type="button" title="Line up right edges" aria-label="Line up right edges" data-native="arrange-line-right" data-menu-item="edit.line-up.right" data-icon="align-right"></button>
@@ -96,11 +91,20 @@
         </div>
         <span class="tool-description">Scene tools</span>
       </div>
-
-      <!-- The scene switcher (11.29). A broadcast carries many graphics; each
-           open scene is its own session, and the panels below render whichever
-           one is active. -->
-      <nav id="scene-tabs" class="scene-tabs" aria-label="Open scenes"></nav>
+      <!-- The right end of the ribbon (the new Figma UI, row 11.67): what the engine is doing, undo and redo, and the way out. The file
+           buttons that used to sit in the bar are menu items (File, Edit); their elements stay in .actions, hidden, because the menu
+           runs them. -->
+      <div class="ribbon-right" role="group" aria-label="Search, engine, history and publish">
+        <button id="search-open" type="button" class="ribbon-search" title="Search effects, commands and elements" data-menu-item="edit.search"><span>Search everything</span><kbd>Ctrl K</kbd></button>
+        <label id="layout-switch" class="layout-switch" hidden>
+          <span class="label">Layout</span>
+          <select id="layout-select" aria-label="Layout" title="The arrangement of panels in use"></select>
+        </label>
+        <span class="engine-chip-wrap"><span id="engine-chip" class="engine-chip" data-tone="idle" role="status" tabindex="0" aria-describedby="engine-hover">Engine · No frame yet</span><span id="engine-hover" class="engine-hover" role="tooltip"></span></span>
+        <button id="undo" type="button" class="icon-only" title="Undo" aria-label="Undo" disabled><span class="sr">Undo</span></button>
+        <button id="redo" type="button" class="icon-only" title="Redo" aria-label="Redo" disabled><span class="sr">Redo</span></button>
+        <button type="button" class="primary" data-menu-item="file.playout.send" title="Send this graphic to Playout">Publish…</button>
+      </div>
     </header>
 
     <!-- Dockable workspace (11.5). Panels are addressed by `data-panel` and
@@ -119,9 +123,45 @@
       ></div>
       <section class="dock-region dock-centre" data-region="centre">
       <section class="viewport-pane" data-panel="viewport">
+        <!-- A font the scene needs cannot be used (the new Figma UI, S2): it blocks Publish, and says so over the picture. Built by `font-band.ts`. -->
+        <div id="font-band" class="font-band" role="alert" hidden>
+          <span id="font-band-text" class="font-band-text"></span>
+          <span class="font-band-actions">
+            <button id="font-band-choose" type="button">Choose a font</button>
+            <button id="font-band-locate" type="button">Locate font file…</button>
+          </span>
+        </div>
+        <!-- The scene switcher (11.29). A broadcast carries many graphics; each
+             open scene is its own session, and the panels render whichever one is
+             active. It sits over the picture it switches, as in the design. -->
+        <nav id="scene-tabs" class="scene-tabs" aria-label="Open scenes"></nav>
         <div class="pane-head">
-          <h2>Composition <span id="composition-name">Untitled</span></h2>
+          <!-- What the scene is called, and its Scene ID (a label both applications show, which no reference holds). The file name is the
+               scene's address in its project: chosen when it is first saved, read-only after, so it is only shown until then. -->
+          <h2>Composition</h2>
+          <!-- The composition header shows name, DRAFT, size and fps; the rest is in the Composition popover, opened by clicking the name
+               (visibility decision of 26 Nov, Figma B2v2 On demand). Every control keeps its id, so its wiring is unchanged. -->
+          <button id="composition-open" class="composition-open" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="composition-popover" title="Composition: name, Scene ID, file name, view, backdrop, guides and rate">
+            <span id="composition-name"></span><span class="caret" aria-hidden="true">▾</span>
+          </button>
           <span id="viewport-chip" class="chip-draft" title="The fast editing view. Effects, shaped text and masks are drawn only in the Engine view.">Draft</span>
+          <span id="viewport-note" class="meta viewport-note" role="status" aria-live="polite"></span>
+          <span id="canvas-size" class="meta"></span>
+          <div id="composition-popover" class="composition-popover" role="dialog" aria-label="Composition" hidden>
+          <div class="scene-identity">
+            <label class="field">
+              <span class="label">Name</span>
+              <input id="scene-name" type="text" spellcheck="false" autocomplete="off" aria-label="Name of the composition" />
+            </label>
+            <label class="field">
+              <span class="label">Scene ID</span>
+              <input id="scene-label" type="text" maxlength="64" spellcheck="false" autocomplete="off" aria-label="Scene ID" title="The label both applications show for this scene. Cues do not hold it, so changing it breaks nothing." />
+            </label>
+            <label id="scene-key-field" class="field">
+              <span class="label">File name</span>
+              <input id="scene-id" type="text" spellcheck="false" autocomplete="off" aria-label="File name" title="Where the scene is kept in the project. Chosen when it is first saved." />
+            </label>
+          </div>
           <label class="frame-control viewport-view-control">
             <span>View</span>
             <select id="viewport-view" aria-label="Viewport picture: Auto, Draft or Engine">
@@ -131,12 +171,16 @@
             </select>
           </label>
           <!-- After Effects' transparency grid toggle and the solid background colour (black until changed). -->
+          <div class="popover-row"><span class="label">Backdrop</span><span class="popover-controls">
           <button id="viewport-grid" class="icon-button viewport-grid-toggle" type="button" aria-pressed="false" aria-label="Transparency grid">
             <span class="viewport-grid-swatch" aria-hidden="true"></span>
           </button>
           <input id="viewport-bg" class="viewport-bg" type="color" value="#000000" aria-label="Viewport background colour" />
+          </span></div>
           <!-- Explicit guides (11.44): lines a point snaps to before any other line; they are kept with the scene. -->
-          <span class="guide-tools" role="group" aria-label="Guides">
+          <details class="guide-tools">
+            <summary title="Guides: lines a point snaps to, kept with the scene">Guides</summary>
+          <span class="guide-tools-body" role="group" aria-label="Guides">
             <select id="guide-axis" aria-label="Guide direction"><option value="x">Vertical</option><option value="y">Horizontal</option></select>
             <input id="guide-position" type="number" step="1" value="960" aria-label="Guide position in pixels" />
             <button id="guide-add" type="button" title="Put a guide at this position">Add guide</button>
@@ -145,16 +189,22 @@
             <button id="guide-remove" type="button" title="Take the chosen guide away">Remove</button>
             <label class="frame-control"><input id="guide-show" type="checkbox" checked /> <span>Show</span></label>
           </span>
-          <span id="viewport-note" class="meta viewport-note" role="status" aria-live="polite"></span>
-          <span id="canvas-size" class="meta"></span>
+          </details>
           <!-- The graphic's rational frame rate (11.43). A change is one
                setCanvas edit; frames are canonical, so keys keep their frame. -->
           <label class="frame-control canvas-rate-control">
             <span>Rate</span>
             <select id="canvas-rate" aria-label="Frame rate of this scene"></select>
           </label>
+          </div>
         </div>
         <div class="viewport-stage">
+          <!-- An empty graphic says what to do (S1). Shown over the stage, not inside the zoomed surface. -->
+          <div id="viewport-empty" class="viewport-empty" hidden>
+            <p class="viewport-empty-title" id="viewport-empty-title"></p>
+            <!-- The Start card (B1): tiles and the project's other graphics, drawn by start-graphic-view.ts. -->
+            <div id="viewport-start" class="viewport-start"></div>
+          </div>
           <div class="viewport-surface">
             <!-- Behind the composition only, sized to it by main.ts: the grid or the solid colour. -->
             <div id="viewport-backdrop" class="viewport-backdrop" aria-hidden="true"></div>
@@ -175,12 +225,20 @@
         <div class="viewer-footer">
           <!-- The view (11.105): commands of the registry, like every other button. Not saved in the scene. -->
           <button id="viewer-fit" class="viewer-fit" type="button" title="Fit to window (Ctrl 0)" data-menu-item="layout.fit" data-native="view-fit">Fit</button>
-          <button id="viewer-zoom-out" type="button" title="Zoom out (Ctrl -)" aria-label="Zoom out" data-menu-item="layout.zoom-out" data-native="view-zoom-out">&minus;</button>
+          <button hidden id="viewer-zoom-out" type="button" title="Zoom out (Ctrl -)" aria-label="Zoom out" data-menu-item="layout.zoom-out" data-native="view-zoom-out">&minus;</button>
           <button id="viewer-zoom-readout" class="viewer-zoom-readout" type="button" title="Actual size: one canvas pixel to one screen pixel (Ctrl 1)" data-menu-item="layout.zoom-100" data-native="view-zoom-100">100%</button>
-          <button id="viewer-zoom-in" type="button" title="Zoom in (Ctrl =)" aria-label="Zoom in" data-menu-item="layout.zoom-in" data-native="view-zoom-in">+</button>
-          <button id="viewer-transparency" type="button" data-icon="squares-four" aria-label="Toggle transparency grid" aria-pressed="false" title="Transparency grid"></button>
+          <button hidden id="viewer-zoom-in" type="button" title="Zoom in (Ctrl =)" aria-label="Zoom in" data-menu-item="layout.zoom-in" data-native="view-zoom-in">+</button>
+          <button hidden id="viewer-transparency" type="button" data-icon="squares-four" aria-label="Toggle transparency grid" aria-pressed="false" title="Transparency grid"></button>
           <span id="viewer-timecode" class="timecode">0:00:00:00</span>
-          <span id="viewer-rate" class="meta"></span>
+          <span hidden id="viewer-rate" class="meta"></span>
+          <!-- On demand (visibility decision of 26 Nov): a warning chip when something is not drawn, opening the list. Zoom in and out are
+               Ctrl = and Ctrl -, the transparency grid and the rate are in the Composition popover. -->
+          <button id="not-drawn-chip" class="not-drawn-chip" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="not-drawn-popover" hidden></button>
+          <div id="not-drawn-popover" class="footer-popover" role="dialog" aria-label="Not drawn by this preview" hidden>
+            <h3>Not drawn by this preview</h3>
+            <ul id="not-drawn-list" class="reason-list"></ul>
+            <p class="panel-note">These objects need the engine-backed preview. Publishing checks the scene separately.</p>
+          </div>
           <span class="preview-only">Authoring preview</span>
         </div>
       </section>
@@ -243,7 +301,22 @@
         </section>
 
         <section data-panel="object-manager" class="panel">
-          <h2>Objects</h2>
+          <h2>Elements</h2>
+          <!-- The three ways to add an element (the new Figma UI, B2). Each is enabled only for a kind Rust offers (`cmd_object_kinds`). -->
+          <div class="elements-add" role="group" aria-label="Add an element">
+            <button type="button" data-add-kind="rect" disabled>+ Box</button>
+            <button type="button" data-add-kind="text" disabled>+ Text</button>
+            <button type="button" data-add-kind="image" disabled>+ Image</button>
+          </div>
+          <!-- The object manager treegrid (11.8). Built by `object-manager.ts`
+               as a node tree and rendered here, so the ARIA a screen reader
+               announces and the snapshot an agent reads come from one
+               description and cannot disagree. -->
+          <div id="object-manager" class="tree-mount"></div>
+          <p id="object-empty" class="empty">No elements yet. Add a box, some text or an image above, or bring in a drawing.</p>
+          <!-- Everything the old Objects panel offered stays: the elements above are the list, and these are the tools around it. -->
+          <details class="object-more">
+            <summary>More tools</summary>
           <!-- Object lifecycle (11.18). The kind list is read from Rust so the
                menu cannot offer a kind `create_object` would refuse. -->
           <div class="object-tools">
@@ -278,18 +351,22 @@
               <input id="auto-tension" type="range" min="0" max="1" step="0.05" value="0.5" />
             </label>
           </div>
-          <!-- The object manager treegrid (11.8). Built by `object-manager.ts`
-               as a node tree and rendered here, so the ARIA a screen reader
-               announces and the snapshot an agent reads come from one
-               description and cannot disagree. -->
-          <div id="object-manager" class="tree-mount"></div>
-          <p id="object-empty" class="empty">No objects in this scene.</p>
+          </details>
         </section>
 
         <section data-panel="inspector" class="panel">
           <h2>Properties</h2>
-          <!-- Type-aware, and Mixed across a multi-selection (11.9). -->
-          <div id="inspector-mount" class="panel-mount"></div>
+          <!-- The selected element's card (the new Figma UI, B2): its style, motion and data in three short blocks. Built by `element-card.ts`. -->
+          <div id="element-card" class="element-card" aria-live="polite"></div>
+          <!-- The selected keyframes' card (B3): time, value, interpolation and the element's parent, blend and matte. Shown instead of the element card while keys are selected. Built by `timeline/key-card.ts`. -->
+          <div id="key-card" class="element-card key-card-area" aria-live="polite" hidden></div>
+          <!-- Type-aware, and Mixed across a multi-selection (11.9). Where the card's values are edited. -->
+          <details class="object-more all-properties" open>
+            <summary>All properties</summary>
+            <div id="inspector-mount" class="panel-mount"></div>
+          </details>
+          <!-- Add an effect, a mask or a pivot move (Figma B3d v2): built by `properties-add.ts`. -->
+          <div id="properties-add" class="properties-add" role="group" aria-label="Add"></div>
         </section>
         <!-- Masks and the track matte of the selected layer (11.117): built by `renderMasks` from `mask-edit.ts`. -->
         <section data-panel="masks" class="panel masks-panel">
@@ -314,6 +391,17 @@
             <input id="font-display-name" type="text" placeholder="Display name (optional)" aria-label="Display name for the next ingest" />
             <input id="font-licence" type="text" placeholder="Licence (optional, font files)" aria-label="Licence the next font files are under" />
           </div>
+          <!-- The fonts installed on this PC (11.13): listed face by face when opened, taken in as WOFF2, WOFF or as installed, and kept on this PC. -->
+          <details id="font-installed" class="font-installed">
+            <summary>Installed fonts on this PC</summary>
+            <input id="font-installed-search" type="search" placeholder="Search installed fonts" aria-label="Search the fonts installed on this PC by name, family or file" />
+            <select id="font-installed-list" multiple size="8" aria-label="Fonts installed on this PC"></select>
+            <div class="font-link-row">
+              <select id="font-conversion" aria-label="How the picked fonts are stored"></select>
+              <button type="button" id="font-installed-add">Add selected</button>
+            </div>
+            <p id="font-installed-status" class="scene-manager-summary" role="status">Open to list the installed fonts.</p>
+          </details>
           <div id="font-mount" class="asset-manager-mount"></div>
           <p id="font-empty" class="empty">No fonts in this scene.</p>
         </section>
@@ -464,7 +552,9 @@
 
 
         <section data-panel="bindings" class="panel">
-          <h2>Data bindings</h2>
+          <h2>Data</h2>
+          <!-- The graphic's data (B4): where it comes from and the fields found in it. -->
+          <div id="data-mount" class="panel-mount data-mount"></div>
           <!-- Object properties and scene data paths share one semantic tree
                with the agent surface. Bindings are authored here; resolution
                happens before the preview, never inside the renderer (11.19). -->
@@ -502,11 +592,12 @@
 
         <section data-panel="publish" class="panel">
           <h2>Publish</h2>
+          <div id="publish-checks" class="publish-checks-host"></div>
           <label class="field">
             <span class="label">Asset plane</span>
             <input id="endpoint" type="text" spellcheck="false" autocomplete="off" />
           </label>
-          <button id="publish" type="button" class="primary">Publish scene</button>
+          <button id="publish" type="button" class="primary">Publish to Playout</button>
           <p class="panel-note">
             Publication creates an immutable revision. It cannot put anything
             to air — only Playout can take a revision to Program.
@@ -550,12 +641,34 @@
           />
         </label>
       </div>
-      <!-- Three groups, one per thing a control acts on: selected keys,
-           selected objects, the scene's named phases. Each says what it
-           currently applies to. -->
+      <!-- The KEYFRAME bar (B3): buttons for the selected keys and the playhead. Built by `keyframe-bar.ts`. -->
+      <div id="keyframe-bar" class="keyframe-bar" role="toolbar" aria-label="Keyframe"></div>
+      <!-- On demand (visibility decision of 26 Nov 2026, Figma B3v2): the Keys, Presets and Phases groups and Stagger's settings
+           are popovers over the timeline. Stagger's settings open from the caret after Stagger; the three groups from the Motion
+           menu (Easing..., Motion presets..., Phases...) and the timeline's right-click. Every control keeps its id. -->
       <div class="timeline-tools-wrap">
+      <button id="timeline-keys-open" type="button" hidden aria-haspopup="dialog" aria-expanded="false">Easing…</button>
+      <button id="timeline-presets-open" type="button" hidden aria-haspopup="dialog" aria-expanded="false">Motion presets…</button>
+      <button id="timeline-phases-open" type="button" hidden aria-haspopup="dialog" aria-expanded="false">Phases…</button>
       <div class="timeline-tools" role="toolbar" aria-label="Timeline tools">
-        <fieldset class="tl-group" id="tl-group-keys">
+        <div id="stagger-popover" class="timeline-popover" role="dialog" aria-label="Stagger settings" hidden>
+          <h3>Stagger</h3>
+          <!-- The Stagger button of the KEYFRAME bar reads these (11.77). -->
+          <label class="frame-control">
+            <span>Stagger step</span>
+            <input id="stagger-step" type="number" step="1" value="5" aria-label="Stagger step in frames: the frames between one element and the next; negative staggers earlier" />
+          </label>
+          <label class="frame-control">
+            <span>Order</span>
+            <select id="stagger-order" aria-label="Order the elements are staggered in">
+              <option value="layer">Layer order</option>
+              <option value="selection">Selection order</option>
+            </select>
+          </label>
+          <label class="frame-control"><input id="stagger-reverse" type="checkbox" /><span>Reverse</span></label>
+          <label class="frame-control"><input id="stagger-centre" type="checkbox" /><span>From centre</span></label>
+        </div>
+        <fieldset class="tl-group timeline-popover" id="tl-group-keys" role="dialog" aria-label="Easing" hidden>
           <legend id="tl-legend-keys">Keys</legend>
           <label class="frame-control">
             <span>Easing</span>
@@ -564,7 +677,7 @@
             </select>
           </label>
         </fieldset>
-        <fieldset class="tl-group" id="tl-group-presets">
+      <fieldset class="tl-group timeline-popover" id="tl-group-presets" role="dialog" aria-label="Motion presets" hidden>
           <legend id="tl-legend-presets">Presets</legend>
           <label class="frame-control">
             <span>Preset</span>
@@ -584,7 +697,7 @@
           <!-- Save the selected keys as one phase of a project preset (11.15). -->
           <button id="timeline-preset-save" type="button">Save selected keys as preset…</button>
         </fieldset>
-        <fieldset class="tl-group" id="tl-group-phases">
+        <fieldset class="tl-group timeline-popover" id="tl-group-phases" role="dialog" aria-label="Phases" hidden>
           <legend>Phases</legend>
           <!-- Named phases (11.25). The scene timeline speaks the same operator
                vocabulary presets do: in, hold, out, continue, update. -->
@@ -605,7 +718,7 @@
       </div>
       <p id="timeline-preset-duration-error" class="field-error timeline-tools-error" role="alert" hidden></p>
       </div>
-      <div class="timeline-ruler"><span class="layer-column-heading">Layers · visibility / lock</span>
+      <div class="timeline-ruler"><span class="layer-column-heading"><span class="tl-col tl-col-name" title="Visibility, lock, then the layer">Layer</span><span class="tl-col tl-col-parent">Parent</span><span class="tl-col tl-col-blend">Blend</span><span class="tl-col tl-col-matte">Matte</span></span>
         <!-- The ruler scrubs: press or drag anywhere on it, or drag the
              playhead handle. The handle is a slider for the keyboard. -->
         <div id="timeline-ruler-ticks" aria-hidden="true"></div>
@@ -625,6 +738,15 @@
       hidden
     ></div>
 
+    <!-- The menu a PARENT, BLEND or MATTE cell of a Timeline layer opens (B3). Built by `layer-columns.ts`. -->
+    <div
+      id="column-menu"
+      class="context-menu column-menu"
+      role="menu"
+      aria-label="Layer setting"
+      hidden
+    ></div>
+
     <div
       id="scene-context-menu"
       class="context-menu"
@@ -633,9 +755,38 @@
       hidden
     ></div>
 
-    <footer class="log-bar">
-      <h2 class="log-title">Activity</h2>
-      <ul id="log" class="log"></ul>
+    <!-- The one-line status bar (visibility decision of 26 Nov 2026): Library, the latest message (click: the full history), and
+         the engine's last frame time. Built by `status-bar.ts`; the history is the same list as before. -->
+    <!-- The Library as its own screen (B13, visibility decision of 26 Nov 2026): a strip of tabs over one body. The panel a tab names
+         is brought into the body while the screen is open and put back where it stood on close. Built by `library-screen.ts`. -->
+    <div id="library-screen" class="library-screen" role="dialog" aria-label="Library" hidden>
+      <div class="library-screen-head">
+        <h2>Library</h2>
+        <div id="library-screen-tabs" class="library-screen-tabs" role="tablist"></div>
+        <button id="library-screen-close" type="button">Close</button>
+      </div>
+      <div id="library-screen-body" class="library-screen-body"></div>
+    </div>
+
+    <!-- The Data screen (B4): the same kind of screen for the take page, the template controls, the data and the publish checks. -->
+    <div id="data-screen" class="library-screen" role="dialog" aria-label="Data" hidden>
+      <div class="library-screen-head">
+        <h2>Data</h2>
+        <div id="data-screen-tabs" class="library-screen-tabs" role="tablist"></div>
+        <button id="data-screen-close" type="button">Close</button>
+      </div>
+      <div id="data-screen-body" class="library-screen-body"></div>
+    </div>
+
+    <footer class="log-bar status-bar">
+      <button id="data-screen-open" type="button" title="Open the Data screen: the data the graphic reads, its template controls, take page and publish checks">Data</button>
+      <button id="status-library" type="button" title="Open the Library screen: assets, colours, layer styles, text styles, fonts, effects and materials">Library</button>
+      <button id="status-message" type="button" aria-haspopup="dialog" aria-expanded="false" title="Show the full activity history"><span id="status-latest">No activity yet</span></button>
+      <span id="status-render" class="meta" title="Time the engine took to draw the last frame"></span>
+      <div id="log-popover" class="log-popover" role="dialog" aria-label="Activity" hidden>
+        <h2 class="log-title">Activity</h2>
+        <ul id="log" class="log"></ul>
+      </div>
     </footer>
 
     <!-- Start (11.43): a project is created at a path you choose, or opened, before any work
@@ -680,7 +831,6 @@
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form" method="dialog">
         <h2 id="settings-title">Settings</h2>
-        <p class="settings-lead">Changes are saved as you make them. <strong>Yours</strong> follows you to another computer; <strong>This computer</strong> stays here. What changes how a graphic looks is not here: that belongs to the project.</p>
         <div id="settings-body"></div>
         <p id="settings-error" class="start-error" role="alert"></p>
         <div class="dialog-actions">
@@ -692,6 +842,38 @@
     </dialog>
     <!-- Change history (11.82): the steps of the scene's command log. It is not modal, so it stays open
          beside the work; a click on a line takes the scene to the state just after it. -->
+    <!-- Search everything (Ctrl K): effects, commands and elements in one box. The logic is Editor/src/command-search.ts. -->
+    <dialog id="search-dialog" class="search-dialog" aria-label="Search everything">
+      <div class="search-head">
+        <input id="search-input" type="text" role="combobox" aria-expanded="true" aria-controls="search-results" aria-autocomplete="list" placeholder="Search effects, commands and elements" autocomplete="off" spellcheck="false" />
+        <kbd>CTRL K</kbd>
+      </div>
+      <div id="search-results" class="search-results" role="listbox" aria-label="Results"></div>
+      <p id="search-message" class="search-message" role="status"></p>
+      <p class="search-note">Enter runs the highlighted result. Every menu command is here, with its shortcut.</p>
+    </dialog>
+    <!-- Layouts (11.96): the named arrangements of panels. A layout is only an arrangement; switching one never touches a scene. -->
+    <dialog id="layouts-dialog" aria-labelledby="layouts-title">
+      <div class="layouts-head">
+        <h2 id="layouts-title">Layouts</h2>
+        <button id="layouts-close" type="button" aria-label="Close layouts">Close</button>
+      </div>
+      <ul id="layouts-list" class="layouts-list" role="listbox" aria-label="Layouts"></ul>
+      <div class="layouts-actions">
+        <button id="layouts-use" type="button">Use this layout</button>
+        <button id="layouts-save-as" type="button" class="primary">Save current as…</button>
+        <button id="layouts-rename" type="button">Rename</button>
+        <button id="layouts-reset" type="button">Reset layout</button>
+        <button id="layouts-delete" type="button" class="danger">Delete</button>
+      </div>
+      <form id="layouts-name-form" class="layouts-name-form" hidden>
+        <label><span class="label">Name</span> <input id="layouts-name" type="text" maxlength="60" autocomplete="off" spellcheck="false" /></label>
+        <button type="submit" class="primary">Save</button>
+        <button id="layouts-name-cancel" type="button">Cancel</button>
+      </form>
+      <p id="layouts-message" class="layouts-message" role="status"></p>
+      <p class="layouts-note">A layout is only an arrangement of panels. Switching one never changes the scene, the selection or undo. Layouts are saved in the application folder.</p>
+    </dialog>
     <dialog id="history-dialog" aria-labelledby="history-title">
       <div class="history-head">
         <h2 id="history-title">Change history</h2>

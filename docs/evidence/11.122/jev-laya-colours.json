@@ -1,0 +1,228 @@
+{
+ "input": {
+  "state": {
+   "decision": "Library colours: the Colours tab of the Library panel (Figma B13, plan row 11.122), backend and frontend, asked BEFORE coding (claude, 26 Nov 2026).",
+   "facts": "The Library panel lists a project's assets in a grid of cards with tabs Colours, Text styles, Layer styles, Backgrounds, Fonts and Assets; only Assets, Fonts and Text styles work today, the others are dimmed naming row 11.122. A project is a folder with one .gpx document; today it stores project settings and the Library's virtual folders, and it holds no colours. A graphic (scene) paints an object's fill or stroke with a ColorValue: none, a solid colour (red, green, blue, alpha, and the colour space the numbers are in: srgb, display-p3, linear and others) or a gradient; the setPaint edit sets it for the selected objects, refusing non-finite components or an alpha outside 0 to 1. A package pins the exact items a graphic used. What changes how a graphic LOOKS is never a user setting, and a library change must not be able to change a graphic that is on air. The Editor has no colour picker yet. Owner rules: a control that does nothing is dimmed naming the row; a value shown must be one the app holds; a refusal names its reason; library items belong to one project and are not copied between projects.",
+   "proposed": "A library colour is a named solid colour stored in the project: an id, a name (unique in the project, ignoring case) and a colour with its space. The Colours tab shows each as a swatch card with its name and value; the selected card offers Apply as fill, Apply as stroke (to the selected objects), Rename, Edit colour, Delete. New colour: from the selected object's fill (keeping its own colour space) or typed as a hex value (read as sRGB). Applying copies the colour into the object: nothing links the object to the library, so editing or deleting a library colour never changes a graphic; the card says in how many objects of the open graphic the exact colour is used now. Gradients, layer styles and backgrounds are later items."
+  },
+  "questions": {
+   "link": {
+    "type": "choice",
+    "instructions": "When a library colour is applied to an object, what is stored in the object?",
+    "criteria": {
+     "A": "A copy of the colour. Editing or deleting the library colour changes no graphic.",
+     "B": "A reference to the library colour, so editing it updates every graphic that uses it.",
+     "C": "A copy now, with a reference added later if the owner asks."
+    }
+   },
+   "new": {
+    "type": "choice",
+    "instructions": "How does a person add a colour?",
+    "criteria": {
+     "A": "From the selected object's fill (its colour space kept) or by typing a hex value (read as sRGB).",
+     "B": "Only from the selected object's fill.",
+     "C": "Only by typing a hex value."
+    }
+   },
+   "kind": {
+    "type": "choice",
+    "instructions": "What can a library colour be in this first slice?",
+    "criteria": {
+     "A": "A solid colour only; gradients are a later item.",
+     "B": "A solid colour or a gradient from the start.",
+     "C": "Only an sRGB colour."
+    }
+   },
+   "delete": {
+    "type": "choice",
+    "instructions": "What does deleting a library colour do?",
+    "criteria": {
+     "A": "Removes the swatch only; every graphic keeps the colours it was given.",
+     "B": "Refuses while any graphic uses it.",
+     "C": "Removes the swatch and clears the colour from every graphic that used it."
+    }
+   },
+   "usage": {
+    "type": "choice",
+    "instructions": "What does a swatch say about use?",
+    "criteria": {
+     "A": "How many objects in the open graphic have exactly this colour now, since nothing links them (and says that is what it counts).",
+     "B": "Nothing about use.",
+     "C": "Which stored scenes use it, read from every scene."
+    }
+   },
+   "names": {
+    "type": "choice",
+    "instructions": "What may a name be?",
+    "criteria": {
+     "A": "Any text of 1 to 64 characters without control characters, unique in the project ignoring case; refused by name when taken.",
+     "B": "Unique by id only; two colours may share a name.",
+     "C": "A fixed list of names."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "link": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "new": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "kind": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "delete": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "usage": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "names": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 3271,
+   "output_tokens": 0,
+   "state_tokens": 480,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "link": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3887,
+     "B": 0.1999,
+     "C": 0.4114
+    },
+    "confidence": 0.0401,
+    "answer_confidence": 0.4114,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "new": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2891,
+     "B": 0.2394,
+     "C": 0.4716
+    },
+    "confidence": 0.0393,
+    "answer_confidence": 0.4716,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "kind": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4714,
+     "B": 0.2541,
+     "C": 0.2746
+    },
+    "confidence": 0.0374,
+    "answer_confidence": 0.4714,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "delete": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.3906,
+     "B": 0.2561,
+     "C": 0.3533
+    },
+    "confidence": 0.0136,
+    "answer_confidence": 0.3906,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "usage": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4133,
+     "B": 0.2397,
+     "C": 0.347
+    },
+    "confidence": 0.0216,
+    "answer_confidence": 0.4133,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "names": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2649,
+     "B": 0.2808,
+     "C": 0.4542
+    },
+    "confidence": 0.0287,
+    "answer_confidence": 0.4542,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

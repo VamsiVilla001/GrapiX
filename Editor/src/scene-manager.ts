@@ -53,6 +53,10 @@ function sceneActions(scene: ManagedScene): UiAction[] {
   const publishUnavailable = unreadable ?? unsaved;
   return [
     { name: "open", label: scene.active ? "Editing" : "Open", ...(unreadable === undefined ? {} : { unavailable: unreadable }) },
+    // Rename (F2) and Change ID (F7) open the scene and put the cursor in its Name or Scene ID field; the typed value becomes an edit
+    // when the scene is saved, as it does from the Composition popover.
+    { name: "rename", label: "Rename", ...(unreadable === undefined ? {} : { unavailable: unreadable }) },
+    { name: "changeId", label: "Change ID", ...(unreadable === undefined ? {} : { unavailable: unreadable }) },
     { name: "duplicate", label: "Duplicate", ...(unreadable === undefined ? {} : { unavailable: unreadable }) },
     { name: "publish", label: "Publish", ...(publishUnavailable === undefined ? {} : { unavailable: publishUnavailable }) },
     { name: "delete", label: "Delete", ...(unsaved === undefined ? {} : { unavailable: unsaved }) },

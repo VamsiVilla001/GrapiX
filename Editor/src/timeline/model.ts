@@ -14,7 +14,9 @@
 // keeps repaint off the O(keys) path. `sourceKeys` is a borrowed reference to
 // the authored array, never a copy.
 
-import type { PathKey, PathTarget, RationalRate, SceneDocument, SceneKeyframe } from "@grapix/contracts";
+import type { ColourKeyframe, PathKey, PathTarget, RationalRate, SceneDocument, SceneKeyframe } from "@grapix/contracts";
+
+import { colourField, colourLabel, type ColourProperty } from "../colour-anim";
 
 import { propertyLabel } from "../keyframe-editor";
 import { targetField } from "../path-anim";
@@ -36,6 +38,10 @@ export interface TimelineTrack {
   /// speed graph draws the easing between whole paths (progress from key to key); the paths themselves are `pathKeys`.
   readonly pathTarget?: PathTarget;
   readonly pathKeys?: readonly PathKey[];
+  /// 11.132: set when this track is a solid colour channel. Its `sourceKeys` carry the key's place as `value`, as a path track's do;
+  /// the colours are `colourKeys`.
+  readonly colourProperty?: ColourProperty;
+  readonly colourKeys?: readonly ColourKeyframe[];
 }
 
 /// The row label of a path track: "Path", "Path 2" for a subpath, "Mask 1 path".
@@ -133,6 +139,28 @@ export function timelineModel(
       })),
       pathTarget: channel.target,
       pathKeys: channel.keys,
+    });
+  }
+
+  // 11.132: a solid colour channel is a track too ("Fill colour", "Stroke colour").
+  for (const channel of document.timeline.colourChannels ?? []) {
+    if (selected.length > 0 && !selected.includes(channel.objectId)) continue;
+    if (channel.keys.length === 0) continue;
+    keyCount += channel.keys.length;
+    tracks.push({
+      objectId: channel.objectId,
+      objectName: names.get(channel.objectId) ?? channel.objectId,
+      property: colourField(channel.property),
+      label: colourLabel(channel.property),
+      keys: buildKeyIndex(channel.keys),
+      sourceKeys: channel.keys.map((key, index) => ({
+        frame: key.frame,
+        value: index,
+        easing: key.easing,
+        ...(key.bezier === undefined ? {} : { bezier: key.bezier }),
+      })),
+      colourProperty: channel.property,
+      colourKeys: channel.keys,
     });
   }
 

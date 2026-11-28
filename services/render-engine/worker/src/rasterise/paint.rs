@@ -44,6 +44,18 @@ impl PathPaint {
         }
     }
 
+    pub(crate) fn mix_solid(self, target: WorkingRgba, weight: f32) -> Self {
+        match self {
+            Self::Solid(colour) => Self::Solid(colour.mix(target, weight)),
+            Self::Gradient(mut gradient) => {
+                for (_, colour) in &mut gradient.stops {
+                    *colour = colour.mix(target, weight);
+                }
+                Self::Gradient(gradient)
+            }
+        }
+    }
+
     pub(crate) fn scaled(self, k: f32) -> Self {
         match self {
             Self::Solid(colour) => Self::Solid(colour.scaled(k)),

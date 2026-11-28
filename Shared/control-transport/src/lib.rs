@@ -175,6 +175,7 @@ mod tests {
         for _ in 0..25 {
             match client.handle(ClientRequest::Clear(ClearRequest {
                 at: TakeAt::NextOpportunity,
+                expected: None,
             })) {
                 EngineReply::Cleared(c) => {
                     assert!(

@@ -1,0 +1,29 @@
+1 no slack CAUGHT
+2 big slack CAUGHT
+3 unsized width checked CAUGHT
+4 point checks height CAUGHT
+5 unsized height checked CAUGHT
+6 width wins ties SURVIVED
+7 height never named CAUGHT
+8 hidden never says CAUGHT
+9 free text measured CAUGHT
+10 duplicate id allowed CAUGHT
+11 blank id allowed CAUGHT
+12 limit off by one CAUGHT
+13 not rounded SURVIVED
+14 lines not counted CAUGHT
+15 line count off by one CAUGHT
+16 null is missing CAUGHT
+17 blank is text CAUGHT
+18 absent is empty CAUGHT
+19 number accepted CAUGHT
+20 hidden empty needs fixing CAUGHT
+21 overflow needs nothing CAUGHT
+22 tally swapped SURVIVED
+19 of 22 caught
+1 width wins ties CAUGHT
+2 not rounded CAUGHT
+3 height never named CAUGHT
+4 fits when one over CAUGHT
+5 tally swapped CAUGHT
+5 of 5 caught

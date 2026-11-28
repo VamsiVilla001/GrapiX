@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "How the Timeline's tool row (Keys: Easing select, Stagger step, Order, Reverse, From centre; Presets: preset select, duration, Apply in, Apply out, Save selected keys as preset; Phases: phase select, Set from selected keys, Play phase, Remove phase) moves off screen in the Editor, following the owner-approved visibility decision of 26 Nov 2026 (Figma B3v2: one KEYFRAME bar with transport, + Add, easing, Hold, Stagger, Zoom to fit; presets, phases and Stagger settings are on demand: Motion menu and key right-click; Stagger settings in a popover on its button).",
+  "facts": "The KEYFRAME bar already has Prev, Play, Next, + Add (K), Linear, Ease (F9), Ease in, Ease out, Hold, Stagger and Zoom to fit. The Easing select offers every easing the project knows (more than the five bar buttons). The Motion menu already has Apply entry preset, Apply exit preset and Play this phase, which press the row's buttons. The timeline has no right-click menu on keys yet. A popover module exists (one open at a time, Escape and a press outside close it). Nothing that works may be deleted; element ids stay so the menu, shortcuts and agents keep working.",
+  "constraints": "Nothing working removed; every control reachable in one click from the bar, the Motion menu or a right-click; agents see the same controls."
+ },
+ "questions": {
+  "easing_select": {
+   "type": "choice",
+   "instructions": "Where does the full Easing select go?",
+   "criteria": {
+    "A": "Into the KEYFRAME bar, after Hold, as the bar's easing control (the design's 'easing' slot).",
+    "B": "Into the Stagger popover with the stagger settings.",
+    "C": "Into a separate Keys popover opened from the Motion menu."
+   }
+  },
+  "stagger_settings": {
+   "type": "choice",
+   "instructions": "How are Stagger's settings (step, order, reverse, from centre) reached?",
+   "criteria": {
+    "A": "A small caret button right after Stagger in the bar opens a popover holding them; Stagger itself still runs at once with the current settings.",
+    "B": "Pressing Stagger opens the popover, and a Run button inside it staggers.",
+    "C": "Only from the Motion menu."
+   }
+  },
+  "presets_phases": {
+   "type": "choice",
+   "instructions": "How are the Presets and Phases controls reached?",
+   "criteria": {
+    "A": "Each is a popover over the timeline, opened from new Motion menu items (Motion presets…, Phases…) and from a new right-click menu on the timeline, which also offers Stagger settings…; the existing Motion items keep working.",
+    "B": "They stay as a row under the bar, folded by default behind a 'More' toggle.",
+    "C": "They move to a separate dock panel."
+   }
+  }
+ }
+}

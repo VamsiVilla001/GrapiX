@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "The contracts behind the Data block of Figma B2v2 and B4 (row 11.153), before codex builds them: what 'Hide when empty' stores and means, how a record is checked against a text layout (FITS, OVERFLOWS, EMPTY), and where that measuring runs, so the Editor can show 'Record 17 overflows its plate by 64 px' with the fix buttons Auto-fit and Hide when empty.",
+  "facts": "A graphic is a template: elements are bound to data paths (object.bindings, e.g. text -> player.display_name) and an operator fills the values live in Playout; names vary in length. The engine already shapes text (worker text.rs, clusters, lines) for rendering and the contract has per-text autoFit (none, shrink, fit) that the engine does not draw yet (row 11.51), overflow (visible|hidden|clip), layout (point|paragraph). The scene stores sample data (dataContext, one JSON object). A CSV reader exists (csv_table.rs, csv_source.rs); keeping a CSV in the project and its records is not built. Data Hub does not exist; no live feeds for now.",
+  "constraints": "The Editor never says FITS for a record nothing measured; one source of truth for text measuring so the check cannot disagree with what the engine draws (as text_choices.rs probes drawability); every refusal named; one undoable command per edit."
+ },
+ "questions": {
+  "hide_when_empty": {
+   "type": "choice",
+   "instructions": "What does Hide when empty store and mean?",
+   "criteria": {
+    "A": "An optional boolean on the object, set by an object edit: when an element's bound value is missing, null or only whitespace, the engine does not draw the element; an unbound element is unaffected; it is refused by name on an element with no binding.",
+    "B": "A rule per element with choices (hide, collapse, placeholder text), stored as an enum.",
+    "C": "Not stored: the operator's form decides at take time whether to show an element."
+   }
+  },
+  "fit_check": {
+   "type": "choice",
+   "instructions": "How is a record checked against a text layout?",
+   "criteria": {
+    "A": "The engine measures: a request takes the scene and a list of records, resolves each bound text with the record, shapes it in the element's box with the same shaping the renderer uses, and returns per record and element one of Fits, Overflows (by how many px and lines), Empty, or Missing (the field is not in the record). The Editor shows the result and never computes one.",
+    "B": "The Editor estimates from character counts and an average glyph width.",
+    "C": "Only a render of each record by the designer, looked at by eye."
+   }
+  },
+  "overflow": {
+   "type": "choice",
+   "instructions": "What counts as a text overflow?",
+   "criteria": {
+    "A": "The shaped text is larger than its box in a direction the layout does not grow: for paragraph text the lines need more height than the box (or a word is wider than the box); for point text the width exceeds the box width; an element that grows to fit or shrinks to fit (once drawn) does not overflow while it can still fit.",
+    "B": "Any glyph painted outside the element's box, including descenders and overshoot.",
+    "C": "Only text that is cut off by the overflow setting (hidden or clip)."
+   }
+  }
+ }
+}

@@ -40,12 +40,17 @@ use std::sync::{Mutex, MutexGuard};
 use gx_asset_plane::fonts::ingest::{
     prepare_font_files, FontFileInput, FontIngestRefusal, PreparedFontBatch, SceneFontLibrary,
 };
+use gx_asset_plane::fonts::convert::FontConversionTarget;
 use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
 use gx_asset_plane::fonts::manager::LinkedSource;
+use gx_asset_plane::fonts::system::{
+    installed_font_folders, prepare_default_font, prepare_system_fonts, scan_font_folders, SystemFontRequest, SystemFontScan,
+};
 use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
 use gx_asset_plane::package::{PackageSource, MAX_PACKAGE_BYTES};
 use gx_asset_plane::{content_hash, AssetHandoff, AssetStore, AssetStoreError, PublishRefusal};
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
+use gx_contracts::asset_usage::AssetUsageReport;
 use gx_contracts::command::{
     parse_command, CommandOutcome, EditorCommand, HistoryView, OpenScene, SaveScene, SaveTarget,
     SceneSource, SceneTarget, SessionKey, SessionView,
@@ -58,7 +63,7 @@ use gx_contracts::font::EmbeddingPolicy;
 use gx_contracts::platform::service_data_root;
 use gx_contracts::scene::{AssetLibraryItem, SceneDocument};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
-use gx_editor::publish::{package_sources, publish_document, PublishFailure};
+use gx_editor::publish::{graphic_blockers, package_sources, publish_document, GraphicBlocker, PublishFailure};
 use gx_editor::recent::RecentProjects;
 use gx_editor::{CommandError, Projects, Workspace};
 use serde::{Deserialize, Serialize};
@@ -314,6 +319,15 @@ impl ShellState {
             self.edits().forget(&key, &carried);
         }
         result
+    }
+
+    /// Check graphic (topic 16, rows 7.7 and 11.67): what would stop the document a target names from going out, named, read
+    /// only. A session target is the draft in the Editor, unsaved edits included. Nothing is published, nothing is written
+    /// (the asset cache is read, never changed), and no Cue ID is asked for: a Cue ID belongs to the Playout show.
+    pub fn preflight_target(&self, target: &SceneTarget) -> Result<PreflightReply, EditorError> {
+        let scene = self.document_for_preview(target)?;
+        let blockers = self.with_asset_store(|store| Ok(graphic_blockers(&scene, store)))?;
+        Ok(PreflightReply { blockers })
     }
 
     /// 11.65: the engine's picture of the document a target names, at a frame. The
@@ -575,6 +589,12 @@ pub struct PublishResult {
     pub transferred_bytes: u64,
 }
 
+/// What `cmd_scene_preflight` answers with: every blocker, in the order they are found, or none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PreflightReply {
+    pub blockers: Vec<GraphicBlocker>,
+}
+
 /// An Editor-side failure to publish, as the web layer sees it (5.10).
 ///
 /// `directory` is this Editor's package folder when it is known, so a refusal
@@ -763,6 +783,12 @@ fn start_error(error: start::StartError) -> EditorError {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListedScene {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<gx_editor::publish::GraphicReadiness>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<ContentHash>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_opened_ms: Option<u64>,
     pub scene_id: String,
     pub name: String,
     /// Set when the scene carries a revision, meaning it has been published.
@@ -808,18 +834,24 @@ pub struct ProjectTakePageCatalog {
 /// A scene that will not parse is reported by name rather than dropped from
 /// the list: an author whose file has gone bad needs to see it, not to find
 /// it silently missing.
-pub fn scene_catalog(store: &Projects, project: &str) -> Result<ProjectSceneCatalog, EditorError> {
+pub fn scene_catalog(store: &Projects, project: &str, assets: &AssetStore) -> Result<ProjectSceneCatalog, EditorError> {
     let ids = store.list_scenes(project).map_err(project_error)?;
     let mut scenes = Vec::with_capacity(ids.len());
     for scene_id in ids {
         match store.read_scene(project, &scene_id) {
             Ok(scene) => scenes.push(ListedScene {
+                readiness: Some(gx_editor::publish::graphic_preflight(&scene, assets).readiness),
+                content_hash: Some(scene.content_hash()),
+                last_opened_ms: None,
                 scene_id,
                 name: scene.name,
                 published_revision: scene.revision.map(|revision| revision.0),
                 unavailable_reason: None,
             }),
             Err(error) => scenes.push(ListedScene {
+                readiness: None,
+                content_hash: None,
+                last_opened_ms: None,
                 name: scene_id.clone(),
                 scene_id,
                 published_revision: None,
@@ -890,7 +922,17 @@ fn cmd_execute(
     command: serde_json::Value,
 ) -> Result<CommandOutcome, EditorError> {
     let command = parse_command(command).map_err(refused)?;
-    state.execute_command(command)
+    let opened = match &command {
+        EditorCommand::OpenScene(OpenScene { source: SceneSource::Project { project, scene_id } }) => {
+            projects().ok().map(|store| (store.gpx_path(project), scene_id.clone()))
+        }
+        _ => None,
+    };
+    let outcome = state.execute_command(command)?;
+    if let (Some((gpx, scene_id)), Ok(recent)) = (opened, recent_projects()) {
+        let _ = recent.record_graphic_open(&gpx, &scene_id, now_ms());
+    }
+    Ok(outcome)
 }
 
 /// Import an SVG file as a new unbound graphic (7.2, 11.17). The source bytes
@@ -969,6 +1011,15 @@ fn cmd_publish(
     state.publish_target(&endpoint, target)
 }
 
+/// Check graphic: the named blockers of the document a target names (topic 16). Read only; it takes a target, never a document (R4).
+#[tauri::command]
+fn cmd_scene_preflight(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+) -> Result<PreflightReply, EditorError> {
+    state.preflight_target(&target)
+}
+
 /// 11.65: ask the engine to draw the document a target names at a frame, and
 /// return the PNG. Asynchronous so the window is never held while the engine
 /// renders; it takes a target, never a document (R4), and creates no revision.
@@ -999,6 +1050,101 @@ async fn cmd_engine_preview(
     Ok(tauri::ipc::Response::new(image.png))
 }
 
+/// Resolve the scene and its project under the same workspace lock.
+fn csv_scene(
+    state: &ShellState,
+    target: &SceneTarget,
+) -> Result<(SceneDocument, Option<(Projects, gx_contracts::command::SceneOrigin)>), EditorError> {
+    use gx_contracts::command::SceneOrigin;
+    let workspace = state.workspace();
+    let (scene, origin) = match target {
+        SceneTarget::Session { session } => {
+            let view = workspace.view(*session).map_err(|error| command_error(error, None))?;
+            (view.document, view.origin)
+        }
+        SceneTarget::Stored { project, scene_id } => {
+            let scene = workspace.document(target).map_err(|error| command_error(error, None))?.into_owned();
+            (scene, Some(SceneOrigin { project: project.clone(), scene_id: scene_id.clone() }))
+        }
+    };
+    Ok((scene, OPEN_PROJECT.projects().zip(origin)))
+}
+
+#[tauri::command]
+fn cmd_project_csv_source(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+) -> Result<Option<gx_editor::project::ProjectCsv>, EditorError> {
+    let (_, project) = csv_scene(&state, &target)?;
+    match project {
+        Some((store, origin)) => store.csv_source(&origin.project, &origin.scene_id).map_err(project_error),
+        None => Ok(None),
+    }
+}
+
+/// Choose a local file in the native picker. A replacement shows column changes before it is accepted.
+#[tauri::command]
+async fn cmd_import_project_csv(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+    delimiter: gx_contracts::csv_table::Delimiter,
+) -> Result<Option<gx_editor::project::ProjectCsv>, EditorError> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+    let (_, project) = csv_scene(&state, &target)?;
+    let (store, origin) = project.ok_or_else(|| EditorError::ProjectFailed {
+        detail: "save this graphic in a project before importing CSV data".into(),
+    })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(picked) = app.dialog().file().add_filter("Delimited data", &["csv", "tsv"]).blocking_pick_file() else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|error| EditorError::ProjectFailed { detail: error.to_string() })?;
+        let import = store.prepare_csv_import(&origin.project, &origin.scene_id, &path, delimiter).map_err(project_error)?;
+        if import.replaces_source() && !app.dialog()
+            .message(format!("Replace this graphic's CSV source?\n\n{}", import.columns))
+            .title("Update CSV source")
+            .buttons(MessageDialogButtons::OkCancel)
+            .blocking_show()
+        {
+            return Ok(None);
+        }
+        store.accept_csv_import(&origin.project, &origin.scene_id, import).map(Some).map_err(project_error)
+    }).await.map_err(|error| EditorError::ProjectFailed { detail: error.to_string() })?
+}
+
+/// 11.153: run the engine's fit check over the imported CSV or the graphic's sample record.
+#[tauri::command]
+async fn cmd_fit_report(
+    state: tauri::State<'_, ShellState>,
+    endpoint: String,
+    target: SceneTarget,
+) -> Result<gx_contracts::fit_report::FitReport, EditorError> {
+    let (scene, project) = csv_scene(&state, &target)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let table = match project {
+            Some((store, origin)) => store.read_csv_table(&origin.project, &origin.scene_id).map_err(project_error)?,
+            None => None,
+        };
+        let records = table.map_or_else(|| gx_editor::fit::records_of(&scene), gx_editor::fit::csv_records);
+        gx_editor::fit::fit_document(&endpoint, scene, records).map_err(fit_error)
+    }).await.map_err(|error| EditorError::Protocol {
+        detail: format!("the record check task failed: {error}"),
+    })?
+}
+
+fn fit_error(failure: gx_editor::fit::FitCheckFailure) -> EditorError {
+    use gx_editor::fit::FitCheckFailure;
+    match failure {
+        FitCheckFailure::InvalidEndpoint { endpoint } => EditorError::InvalidEndpoint { endpoint },
+        FitCheckFailure::Unreachable { endpoint, detail } => EditorError::Unreachable { endpoint, detail },
+        // The engine's own refusal, by name, so the Data screen can say why.
+        FitCheckFailure::EngineRefused(cause) => refused(cause),
+        FitCheckFailure::Invalid { detail } | FitCheckFailure::Protocol { detail } => EditorError::Protocol { detail },
+    }
+}
+
 #[tauri::command]
 fn cmd_take_page_preview(
     state: tauri::State<'_, ShellState>,
@@ -1018,6 +1164,13 @@ fn cmd_object_kinds() -> Vec<&'static str> {
 #[tauri::command]
 fn cmd_animation_surface() -> AnimationSurface {
     animation_surface()
+}
+
+/// The text choices of the Properties dock (11.132) and, for each value, the layouts under which the engine draws it, read from the
+/// drawability check itself so the dock cannot offer a value the engine would refuse.
+#[tauri::command]
+fn cmd_text_choices() -> gx_contracts::text_choices::TextChoices {
+    gx_contracts::text_choices::text_choices()
 }
 
 /// The effect and preset catalogue (11.69), read from Rust so the panel cannot
@@ -1366,8 +1519,19 @@ fn cmd_default_location_projects() -> Result<Vec<(String, String)>, EditorError>
 }
 
 #[tauri::command]
-fn cmd_scene_list(project: String) -> Result<ProjectSceneCatalog, EditorError> {
-    scene_catalog(&projects()?, &project)
+fn cmd_scene_list(
+    state: tauri::State<'_, ShellState>,
+    project: String,
+) -> Result<ProjectSceneCatalog, EditorError> {
+    let store = projects()?;
+    let mut catalog = state.with_asset_store(|assets| scene_catalog(&store, &project, assets))?;
+    if let Ok(recent) = recent_projects() {
+        let opened = recent.graphic_open_times(&store.gpx_path(&project));
+        for scene in &mut catalog.scenes {
+            scene.last_opened_ms = opened.get(&scene.scene_id).copied();
+        }
+    }
+    Ok(catalog)
 }
 
 #[tauri::command]
@@ -1458,6 +1622,61 @@ fn cmd_font_prepare_link(
     };
     state.with_asset_store(|store| {
         prepare_font_link(store, &UreqFontFetcher::new(), library, &source).map_err(ingest_refused)
+    })
+}
+
+/// The fonts installed on this PC, listed face by face (build plan 11.13, "installed fonts"). Reads the tables a list needs from each file
+/// in the machine's and the user's font folders, never a whole file; a file that cannot be read is named in `skipped` with the reason.
+#[tauri::command]
+fn cmd_system_fonts_list() -> SystemFontScan {
+    scan_font_folders(&installed_font_folders())
+}
+
+/// Take installed faces into the asset cache converted to WOFF2, WOFF or as they are, and return them as one `addFonts` batch. Like every
+/// font ingest it never touches the scene. A request names a file and a face; the file must sit directly in an installed font folder.
+/// Installed fonts are licensed to this PC, so they are always `Restricted`: they stay on this workstation and never enter a package.
+#[tauri::command]
+fn cmd_font_prepare_system(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+    requests: Vec<SystemFontRequest>,
+    conversion: FontConversionTarget,
+) -> Result<PreparedFontBatch, EditorError> {
+    let scene = state
+        .workspace()
+        .document(&target)
+        .map_err(|error| command_error(error, None))?
+        .into_owned();
+    let library = SceneFontLibrary {
+        fonts: &scene.fonts,
+        assets: &scene.assets,
+    };
+    let folders = installed_font_folders();
+    state.with_asset_store(|store| {
+        prepare_system_fonts(store, library, &folders, &requests, conversion).map_err(ingest_refused)
+    })
+}
+
+/// The default font (Arial) from this PC's installed fonts, converted as asked: regular first, then bold, italic and bold italic where they
+/// are installed. A PC without Arial regular is refused by name; no other font is put in its place.
+#[tauri::command]
+fn cmd_font_prepare_default(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+    conversion: FontConversionTarget,
+) -> Result<PreparedFontBatch, EditorError> {
+    let scene = state
+        .workspace()
+        .document(&target)
+        .map_err(|error| command_error(error, None))?
+        .into_owned();
+    let library = SceneFontLibrary {
+        fonts: &scene.fonts,
+        assets: &scene.assets,
+    };
+    let folders = installed_font_folders();
+    state.with_asset_store(|store| {
+        prepare_default_font(store, library, &folders, conversion).map_err(ingest_refused)
     })
 }
 
@@ -1621,6 +1840,172 @@ fn cmd_project_assets(project: String) -> Result<Vec<AssetLibraryItem>, EditorEr
     projects()?.project_assets(&project).map_err(project_error)
 }
 
+/// Where each of the project's assets is used, across every stored scene (Panchayati task 119, plan row 11.122): the one rule in
+/// `gx_contracts::asset_usage`, which the Library reads instead of scanning the scenes itself. Read only; it takes a project name, never a
+/// document (R4). A scene that cannot be read is named in the answer, not left out of it.
+#[tauri::command]
+fn cmd_project_asset_usage(project: String) -> Result<AssetUsageReport, EditorError> {
+    gx_editor::asset_usage::project_asset_usage(&projects()?, &project).map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_folders(
+    project: String,
+) -> Result<gx_contracts::project::library_folders::LibraryFolderView, EditorError> {
+    projects()?.library_folder_view(&project).map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_folder_create(
+    project: String,
+    name: String,
+    parent_id: Option<String>,
+) -> Result<String, EditorError> {
+    projects()?.update_library_folders(&project, |folders| {
+        folders.create_named(&name, parent_id.as_deref())
+    }).map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_folder_rename(project: String, folder_id: String, name: String) -> Result<(), EditorError> {
+    projects()?.update_library_folders(&project, |folders| folders.rename(&folder_id, &name))
+        .map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_folder_move(project: String, folder_id: String, parent_id: Option<String>) -> Result<(), EditorError> {
+    projects()?.update_library_folders(&project, |folders| folders.move_folder(&folder_id, parent_id.as_deref()))
+        .map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_folder_delete(project: String, folder_id: String) -> Result<(), EditorError> {
+    projects()?.update_library_folders(&project, |folders| folders.delete(&folder_id))
+        .map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_asset_move(project: String, asset_id: String, folder_id: Option<String>) -> Result<(), EditorError> {
+    projects()?.move_library_asset(&project, &asset_id, folder_id.as_deref())
+        .map_err(project_error)
+}
+
+/// The project's Library colours (11.122), in the order they were made.
+#[tauri::command]
+fn cmd_library_colours(
+    project: String,
+) -> Result<Vec<gx_contracts::project::library_colours::LibraryColour>, EditorError> {
+    Ok(projects()?.library_colours(&project).map_err(project_error)?.colours)
+}
+
+/// Make a named colour; returns its id. The name is unique in the project ignoring case; a refusal names the reason.
+#[tauri::command]
+fn cmd_library_colour_create(
+    project: String,
+    name: String,
+    color: gx_contracts::color::Rgba,
+) -> Result<String, EditorError> {
+    projects()?
+        .update_library_colours(&project, |colours| colours.create_named(&name, color))
+        .map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_colour_rename(project: String, colour_id: String, name: String) -> Result<(), EditorError> {
+    projects()?
+        .update_library_colours(&project, |colours| colours.rename(&colour_id, &name))
+        .map_err(project_error)
+}
+
+/// Change a library colour's value. Graphics already painted with it keep their copy.
+#[tauri::command]
+fn cmd_library_colour_set(project: String, colour_id: String, color: gx_contracts::color::Rgba) -> Result<(), EditorError> {
+    projects()?
+        .update_library_colours(&project, |colours| colours.set_colour(&colour_id, color))
+        .map_err(project_error)
+}
+
+/// Remove a library colour. Graphics painted with it keep their copy.
+#[tauri::command]
+fn cmd_library_colour_delete(project: String, colour_id: String) -> Result<(), EditorError> {
+    projects()?
+        .update_library_colours(&project, |colours| colours.delete(&colour_id))
+        .map_err(project_error)
+}
+
+/// The project's Library layer styles (11.122), in the order they were made.
+#[tauri::command]
+fn cmd_library_layer_styles(
+    project: String,
+) -> Result<Vec<gx_contracts::project::library_layer_styles::LibraryLayerStyle>, EditorError> {
+    Ok(projects()?.library_layer_styles(&project).map_err(project_error)?.styles)
+}
+
+/// Make a named layer style from an effect stack; returns its id. A refusal names the reason (a taken name, an effect the engine refuses,
+/// an effect limited to a mask).
+#[tauri::command]
+fn cmd_library_layer_style_create(
+    project: String,
+    name: String,
+    effects: Vec<gx_contracts::effect::EffectInstance>,
+) -> Result<String, EditorError> {
+    projects()?
+        .update_library_layer_styles(&project, |styles| styles.create_named(&name, effects))
+        .map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_layer_style_rename(project: String, style_id: String, name: String) -> Result<(), EditorError> {
+    projects()?
+        .update_library_layer_styles(&project, |styles| styles.rename(&style_id, &name))
+        .map_err(project_error)
+}
+
+/// Replace a library layer style's effects. Graphics already given its effects keep their copy.
+#[tauri::command]
+fn cmd_library_layer_style_set(
+    project: String,
+    style_id: String,
+    effects: Vec<gx_contracts::effect::EffectInstance>,
+) -> Result<(), EditorError> {
+    projects()?
+        .update_library_layer_styles(&project, |styles| styles.set_effects(&style_id, effects))
+        .map_err(project_error)
+}
+
+/// Remove a library layer style. Graphics given its effects keep their copy.
+#[tauri::command]
+fn cmd_library_layer_style_delete(project: String, style_id: String) -> Result<(), EditorError> {
+    projects()?
+        .update_library_layer_styles(&project, |styles| styles.delete(&style_id))
+        .map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_import_folder_plan(
+    project: String,
+    directory: String,
+) -> Result<gx_editor::library_import::FolderImportPlan, EditorError> {
+    gx_editor::library_import::plan_folder_import(
+        &projects()?, &project, std::path::Path::new(&directory),
+    ).map_err(project_error)
+}
+
+#[tauri::command]
+fn cmd_library_import_folder_apply(
+    state: tauri::State<'_, ShellState>,
+    project: String,
+    directory: String,
+    plan_fingerprint: ContentHash,
+) -> Result<usize, EditorError> {
+    let projects = projects()?;
+    state.with_asset_store(|store| {
+        gx_editor::library_import::apply_folder_import(
+            &projects, &project, std::path::Path::new(&directory), &plan_fingerprint, store,
+        ).map_err(project_error)
+    })
+}
+
 /// The verified bytes of one asset, for previews: the project's copy when a
 /// project is named and holds it, otherwise the import cache. The address is
 /// checked as a SHA-256 before it touches a path, and the bytes are re-hashed
@@ -1698,10 +2083,15 @@ pub fn run() {
             cmd_session_view,
             cmd_session_history,
             cmd_publish,
+            cmd_scene_preflight,
             cmd_engine_preview,
+            cmd_fit_report,
+            cmd_import_project_csv,
+            cmd_project_csv_source,
             cmd_take_page_preview,
             cmd_object_kinds,
             cmd_animation_surface,
+            cmd_text_choices,
             cmd_effect_surface,
             cmd_control_properties,
             cmd_starter_presets,
@@ -1735,10 +2125,32 @@ pub fn run() {
             cmd_take_page_read,
             cmd_font_prepare_files,
             cmd_font_prepare_link,
+            cmd_system_fonts_list,
+            cmd_font_prepare_system,
+            cmd_font_prepare_default,
             cmd_font_bytes,
             cmd_asset_prepare_files,
             cmd_project_assets_adopt,
             cmd_project_assets,
+            cmd_project_asset_usage,
+            cmd_library_folders,
+            cmd_library_folder_create,
+            cmd_library_folder_rename,
+            cmd_library_folder_move,
+            cmd_library_folder_delete,
+            cmd_library_asset_move,
+            cmd_library_colours,
+            cmd_library_colour_create,
+            cmd_library_colour_rename,
+            cmd_library_colour_set,
+            cmd_library_colour_delete,
+            cmd_library_layer_styles,
+            cmd_library_layer_style_create,
+            cmd_library_layer_style_rename,
+            cmd_library_layer_style_set,
+            cmd_library_layer_style_delete,
+            cmd_library_import_folder_plan,
+            cmd_library_import_folder_apply,
             cmd_asset_bytes,
         ]))
         .build(tauri::generate_context!());
@@ -2132,6 +2544,61 @@ mod tests {
                 .ids,
             ["ed-held"]
         );
+    }
+
+    fn edit_scene(state: &ShellState, session: SessionKey, edits: Vec<SceneEdit>) {
+        state
+            .execute_command(EditorCommand::EditScene(EditScene {
+                target: gx_contracts::command::SceneTarget::Session { session },
+                edits,
+                module: None,
+                if_revision: None,
+            }))
+            .expect("the edit applies");
+    }
+
+    #[test]
+    fn check_graphic_reads_the_draft_with_its_unsaved_edits_and_names_what_blocks() {
+        let scratch = Scratch::new("preflight");
+        let state = ShellState::new(Workspace::new(None))
+            .with_asset_root(scratch.0.join("assets"))
+            .with_package_directory(scratch.0.join("packages"));
+        let key = state
+            .execute_command(EditorCommand::OpenScene(gx_contracts::command::OpenScene {
+                source: gx_contracts::command::SceneSource::New { id: "card".into(), name: "Card".into() },
+            }))
+            .expect("a new scene opens")
+            .session
+            .expect("a session")
+            .session;
+        let target = gx_contracts::command::SceneTarget::Session { session: key };
+        edit_scene(&state, key, vec![SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Bar".into() })]);
+        // Nothing is wrong yet, and nothing was saved: the answer is for the draft.
+        assert_eq!(state.preflight_target(&target).unwrap().blockers, Vec::new());
+
+        let id = state.document_for_preview(&target).unwrap().objects[0].base().id.clone();
+        let mut context = serde_json::Map::new();
+        context.insert("n".into(), serde_json::json!(5));
+        edit_scene(&state, key, vec![
+            SceneEdit::ReplaceDataContext(gx_contracts::command::ReplaceDataContext { data_context: context }),
+            SceneEdit::SetBinding(gx_contracts::command::SetBinding { object_id: id.clone(), property: "x".into(), path: Some("n".into()) }),
+        ]);
+        assert_eq!(state.preflight_target(&target).unwrap().blockers, Vec::new());
+
+        // The data the binding reads goes away: the binding stays authored and is named, with the object and property.
+        edit_scene(&state, key, vec![SceneEdit::ReplaceDataContext(gx_contracts::command::ReplaceDataContext { data_context: serde_json::Map::new() })]);
+        let blockers = state.preflight_target(&target).unwrap().blockers;
+        assert_eq!(blockers.len(), 1, "{blockers:?}");
+        assert_eq!((blockers[0].code.as_str(), blockers[0].subject.as_str()), ("bindingInvalid", format!("{id}.x").as_str()));
+        // Asking again changes nothing: it is read only.
+        assert_eq!(state.preflight_target(&target).unwrap().blockers, blockers);
+    }
+
+    #[test]
+    fn check_graphic_on_a_session_that_is_not_open_is_an_error_not_an_empty_list() {
+        let state = ShellState::new(Workspace::new(None));
+        let result = state.preflight_target(&gx_contracts::command::SceneTarget::Session { session: SessionKey(404) });
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -2645,7 +3112,7 @@ mod tests {
         std::fs::write(scratch.0.join("news/scenes/bad.json"), b"{ not-json")
             .expect("write corrupt scene");
 
-        let catalog = scene_catalog(&store, "news").expect("list scene catalog");
+        let catalog = scene_catalog(&store, "news", &AssetStore::at_root(scratch.0.join("cache"))).expect("list scene catalog");
         assert_eq!(catalog.scenes.len(), 1);
         assert_eq!(catalog.scenes[0].scene_id, "bad");
         assert!(catalog.scenes[0]
@@ -2654,7 +3121,7 @@ mod tests {
             .is_some_and(|reason| reason.contains("unreadable")));
 
         assert!(matches!(
-            scene_catalog(&store, "../news"),
+            scene_catalog(&store, "../news", &AssetStore::at_root(scratch.0.join("cache"))),
             Err(EditorError::CommandRefused {
                 cause: Refusal::ProjectNameInvalid { .. },
                 ..
@@ -2697,8 +3164,13 @@ mod tests {
         // Legacy metadata must neither gate navigation nor be modified.
         let legacy = scratch.0.join("broadcast/design-system");
         std::fs::write(&legacy, b"legacy metadata, not a directory").unwrap();
-        let catalog = scene_catalog(&store, "broadcast").unwrap();
+        let catalog = scene_catalog(&store, "broadcast", &AssetStore::at_root(scratch.0.join("cache"))).unwrap();
         assert_eq!(catalog.scenes.len(), 2);
+        for graphic in &catalog.scenes {
+            let scene = store.read_scene("broadcast", &graphic.scene_id).unwrap();
+            assert_eq!(graphic.content_hash, Some(scene.content_hash()));
+            assert_eq!(graphic.readiness, Some(gx_editor::publish::GraphicReadiness::default()));
+        }
         assert!(catalog
             .scenes
             .iter()

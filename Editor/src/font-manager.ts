@@ -25,13 +25,83 @@
 // its authoritative in-use check live with the command executor; this module
 // reports the intent.
 
-import type { FontDefinition, FontLoadStatus, SceneDocument, SceneObject } from "@grapix/contracts";
+import type {
+  FontConversionTarget,
+  FontDefinition,
+  FontLoadStatus,
+  SceneDocument,
+  SceneObject,
+  SystemFontEntry,
+  SystemFontRequest,
+  SystemFontScan,
+} from "@grapix/contracts";
 
 import type { UiNode } from "./agent-surface";
 
 /// File types the ingest picker offers — the four containers the font
 /// subsystem verifies. The bytes' magic, not the extension, decides.
 export const FONT_FILE_ACCEPT = ".otf,.ttf,.woff,.woff2";
+
+/// The family a scene starts with (11.13): Arial, taken from the fonts installed on this PC. A scene with no font takes it before its first
+/// text object is made, so "Add text" never stops at "needs a font"; it is a font in the scene like any other, and Remove takes it out.
+export const DEFAULT_FONT_FAMILY = "Arial";
+
+/// How an installed font is stored once it is taken in: as WOFF2 (the smallest), as WOFF, or as the TTF/OTF it is installed as.
+export const FONT_CONVERSIONS: readonly { readonly conversion: FontConversionTarget; readonly label: string }[] = [
+  { conversion: "woff2", label: "Store as WOFF2 (smallest)" },
+  { conversion: "woff", label: "Store as WOFF" },
+  { conversion: "keep", label: "Keep as installed (TTF/OTF)" },
+];
+
+/// The default font is stored as WOFF2.
+export const DEFAULT_FONT_CONVERSION: FontConversionTarget = "woff2";
+
+/// Whether the scene already carries the default family.
+export function hasDefaultFont(document: Pick<SceneDocument, "fonts">): boolean {
+  return document.fonts.some((font) => font.family.toLowerCase() === DEFAULT_FONT_FAMILY.toLowerCase());
+}
+
+/// Whether making an object of `kind` has to take the default font in first: text needs a font in the scene, and a blank scene has none.
+export function needsDefaultFont(document: Pick<SceneDocument, "fonts">, kind: string): boolean {
+  return kind === "text" && document.fonts.length === 0;
+}
+
+/// One installed face's identity in the list: a collection's faces share a file.
+export function installedFontKey(entry: Pick<SystemFontEntry, "path" | "faceIndex">): string {
+  return `${entry.path}#${entry.faceIndex}`;
+}
+
+/// The line an installed face has in the list: its name, then what the font says about its weight and style, then its file.
+export function installedFontLabel(entry: SystemFontEntry): string {
+  const style = entry.style === "normal" ? "" : ` ${entry.style}`;
+  const face = entry.collection ? ` · face ${entry.faceIndex + 1}` : "";
+  return `${entry.displayName} — ${entry.weight}${style} · ${entry.fileName}${face}`;
+}
+
+/// The installed faces that match what was typed in the search box (name, family or file), in the list's own order.
+export function filterInstalledFonts(scan: SystemFontScan, search: string): SystemFontEntry[] {
+  const needle = search.trim().toLowerCase();
+  if (needle === "") return scan.fonts;
+  return scan.fonts.filter((entry) =>
+    `${entry.displayName} ${entry.family} ${entry.fileName}`.toLowerCase().includes(needle),
+  );
+}
+
+/// What the installed-fonts list says about itself: how many faces, how many shown, and the files that could not be read.
+export function installedFontsSummary(scan: SystemFontScan, shown: number): string {
+  const skipped = scan.skipped.length === 0 ? "" : ` · ${scan.skipped.length} file(s) could not be read`;
+  return shown === scan.fonts.length
+    ? `${scan.fonts.length} installed font face(s)${skipped}`
+    : `${shown} of ${scan.fonts.length} installed font face(s) shown${skipped}`;
+}
+
+/// The files the picked list rows name, for the shell: a file and the face in it. Rows that are not in the scan are not requested.
+export function installedFontRequests(scan: SystemFontScan, pickedKeys: readonly string[]): SystemFontRequest[] {
+  const picked = new Set(pickedKeys);
+  return scan.fonts
+    .filter((entry) => picked.has(installedFontKey(entry)))
+    .map((entry) => ({ path: entry.path, faceIndex: entry.faceIndex }));
+}
 
 /// The line 1.x previewed every family with: Latin, Arabic, Devanagari and
 /// figures, so a face without one of those scripts shows it at a glance.
@@ -427,11 +497,22 @@ export function planFontRemoval(
   return { fontId, displayName: font.displayName, assetIds };
 }
 
+/// The fonts that block a take: the ones the registry could not resolve. One rule for the panel's alert, the band over the viewport and
+/// the publish refusal, so they cannot disagree.
+export function blockingFonts(document: Pick<SceneDocument, "fonts">, state: Pick<FontManagerState, "unresolvedFontIds">): FontDefinition[] {
+  const unresolved = new Set(state.unresolvedFontIds ?? []);
+  return document.fonts.filter((font) => unresolved.has(font.fontId));
+}
+
+/// The reason a publish gives while fonts block it, naming each; `undefined` when none does.
+export function fontBlockedReason(blocking: readonly Pick<FontDefinition, "displayName">[]): string | undefined {
+  return blocking.length > 0 ? `unresolved font(s): ${blocking.map((font) => font.displayName).join(", ")}` : undefined;
+}
+
 export function fontManagerPanel(
   document: SceneDocument,
   state: FontManagerState = {},
 ): UiNode {
-  const unresolved = new Set(state.unresolvedFontIds ?? []);
   const ingestBusy = state.ingesting ? { unavailable: "a font ingest is already running" } : {};
 
   const shown = document.fonts.flatMap((font) => {
@@ -522,7 +603,7 @@ export function fontManagerPanel(
     };
   });
 
-  const blocking = document.fonts.filter((font) => unresolved.has(font.fontId));
+  const blocking = blockingFonts(document, state);
 
   const children: UiNode[] = [];
   if (blocking.length > 0) {
@@ -548,10 +629,7 @@ export function fontManagerPanel(
   }
   children.push({ id: "font-manager/list", role: "list", label: "Fonts", children: items });
 
-  const blockedReason =
-    blocking.length > 0
-      ? `unresolved font(s): ${blocking.map((font) => font.displayName).join(", ")}`
-      : undefined;
+  const blockedReason = fontBlockedReason(blocking);
 
   return {
     id: "font-manager",
@@ -564,6 +642,17 @@ export function fontManagerPanel(
     actions: [
       { name: "ingestFiles", label: "Add font files", ...ingestBusy },
       { name: "ingestLink", label: "Add font link", ...ingestBusy },
+      // Installed fonts come from this PC and stay on it: they are taken in as WOFF2 or WOFF (or as they are) and never packaged.
+      { name: "ingestInstalled", label: "Add installed fonts", ...ingestBusy },
+      {
+        name: "addDefault",
+        label: `Add ${DEFAULT_FONT_FAMILY}`,
+        ...(state.ingesting
+          ? { unavailable: "a font ingest is already running" }
+          : hasDefaultFont(document)
+            ? { unavailable: `${DEFAULT_FONT_FAMILY} is already in ${document.name}` }
+            : {}),
+      },
       {
         name: "publish",
         label: "Publish",

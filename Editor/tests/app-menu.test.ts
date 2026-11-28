@@ -102,6 +102,7 @@ describe("every item is a real action or an honest promise", () => {
       "edit.redo",
       "edit.resize",
       "edit.rotate",
+      "edit.search",
       "edit.undo",
       "edit.vertex-add",
       "edit.vertex-convert",
@@ -113,6 +114,7 @@ describe("every item is a real action or an honest promise", () => {
       "layout.zoom-100",
       "layout.zoom-in",
       "layout.zoom-out",
+      "motion.add-key",
       "motion.copy-keys",
       "motion.delete-keys",
       "motion.easy-ease",
@@ -125,7 +127,7 @@ describe("every item is a real action or an honest promise", () => {
 
   it("lists the panels the page really has, and keeps what GrapiX adds", () => {
     const panels = commandsOf(APP_MENUS.find((m) => m.id === "panels")!.items).filter((c) => c.focusPanel !== undefined);
-    expect(panels.map((c) => c.label)).toEqual(["Scenes", "Objects", "Materials", "Properties", "Timeline", "Effects", "Live preview"]);
+    expect(panels.map((c) => c.label)).toEqual(["Scenes", "Elements", "Materials", "Properties", "Timeline", "Effects", "Live preview"]);
     const own = allCommands().filter((c) => c.evidence === "grapix").map((c) => c.id);
     for (const id of ["file.new-scene", "file.close-project", "edit.duplicate", "layout.reset"]) expect(own).toContain(id);
   });

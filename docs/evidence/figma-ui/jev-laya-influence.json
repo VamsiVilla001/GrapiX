@@ -1,0 +1,129 @@
+{
+ "input": {
+  "state": {
+   "decision": "Make the keyframe card's Ease in % and Ease out % editable (Figma B3 right panel; plan row 11.134 numeric ease), asked before coding (user, 24 Nov 2026: build the missing Editor UI).",
+   "facts": "The card already shows Ease out (the leaving key's curve x1 as a percentage) and Ease in (1 minus the previous key's curve x2), read-only. A segment between two keys is one cubic bezier (x1,y1 leaving handle; x2,y2 arriving handle), with endpoints fixed at 0 and 1; x values must stay in 0..1; y is the speed side and may overshoot. The stored easing can be Linear, Hold, Ease in, Ease out, Ease in-out or a custom bezier, and updateKeyframe and planSetSegmentBezier already write a custom bezier on the leaving key. A Linear segment has handles on the diagonal (0,0) and (1,1). Rule: never show a control that does nothing; a value shown must be one the scene holds. The Ease in field belongs to the segment that ARRIVES at the selected key, so it writes the previous key's bezier; with no previous key it has nothing to edit.",
+   "proposed": "Typing a percentage in Ease out sets x1 of the segment leaving the selected key to value/100 (clamped 0.1 to 100 percent), and Ease in sets x2 of the arriving segment to 1 minus value/100, always as a custom bezier written on the key that owns the segment. The y of the handle is kept when the segment is already curved; for a Linear segment the handle stays on the straight line (y equals x) so typing a number changes nothing visible until the other handle is moved, and a Hold segment is not editable. Fields show a dash and are disabled when there is no segment on that side."
+  },
+  "questions": {
+   "linear": {
+    "type": "choice",
+    "instructions": "What should typing an influence on a Linear segment do?",
+    "criteria": {
+     "A": "Convert it to a custom bezier whose handle slides along the straight line, so the curve stays linear until the other handle moves (as proposed).",
+     "B": "Convert it to a custom bezier with a flat handle (speed 0 at the key), like Easy Ease with the typed influence, so the curve visibly eases.",
+     "C": "Refuse and ask the operator to pick Ease first."
+    }
+   },
+   "range": {
+    "type": "choice",
+    "instructions": "Which range should a typed influence accept?",
+    "criteria": {
+     "A": "0.1 to 100 percent, the contract's x range; anything else is clamped (as proposed).",
+     "B": "Anything from 0 to 100 percent, 0 included.",
+     "C": "Any number; refuse values outside 0 to 100 with a message."
+    }
+   },
+   "hold": {
+    "type": "choice",
+    "instructions": "What should the field do when the segment is Hold?",
+    "criteria": {
+     "A": "Show a dash and be disabled, because a held segment has no curve (as proposed).",
+     "B": "Convert the segment to a custom bezier when typed into.",
+     "C": "Show the number 0 and accept typing."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "linear": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.98,
+    "probabilities": {
+     "A": 0.99,
+     "B": 0.01,
+     "C": 0
+    }
+   },
+   "range": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.79,
+    "probabilities": {
+     "A": 0.86,
+     "B": 0.12,
+     "C": 0.02
+    }
+   },
+   "hold": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.96,
+    "probabilities": {
+     "A": 0.97,
+     "B": 0.02,
+     "C": 0.01
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1525,
+   "output_tokens": 0,
+   "state_tokens": 426,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "linear": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6292,
+     "B": 0.259,
+     "C": 0.1118
+    },
+    "confidence": 0.1932,
+    "answer_confidence": 0.6292,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "range": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4409,
+     "B": 0.3127,
+     "C": 0.2463
+    },
+    "confidence": 0.0263,
+    "answer_confidence": 0.4409,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "hold": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.2828,
+     "B": 0.4304,
+     "C": 0.2869
+    },
+    "confidence": 0.0185,
+    "answer_confidence": 0.4304,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

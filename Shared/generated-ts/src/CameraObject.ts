@@ -83,6 +83,12 @@ strokeStyle?: StrokeStyle,
  */
 bindings?: { [key in string]?: JsonValue },
 /**
+ * Hide when empty (11.153): when a text or image binding of this object resolves to a missing, null or blank value, the object is
+ * not drawn. Absent means false. It is meaningful only with such a binding, and `ObjectField::HideWhenEmpty` refuses to turn it on
+ * without one.
+ */
+hideWhenEmpty?: boolean,
+/**
  * Material slot assignments: slot name → the material bound to it
  * (1.3). A `BTreeMap` so the wire order is the slot order and two
  * equal scenes serialise to equal bytes.

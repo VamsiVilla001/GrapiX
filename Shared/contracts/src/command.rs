@@ -703,6 +703,41 @@ commands! {
             pub from_frame: u64,
             pub to_frame: u64,
         },
+        CreateColourKey = "createColourKey" {
+            pub object_id: String,
+            pub property: crate::animation::colour::ColourProperty,
+            pub keyframe: crate::animation::colour::ColourKeyframe,
+        },
+        UpdateColourKey = "updateColourKey" {
+            pub object_id: String,
+            pub property: crate::animation::colour::ColourProperty,
+            pub keyframe: crate::animation::colour::ColourKeyframe,
+        },
+        MoveColourKey = "moveColourKey" {
+            pub object_id: String,
+            pub property: crate::animation::colour::ColourProperty,
+            pub from_frame: u64,
+            pub to_frame: u64,
+        },
+        RemoveColourKey = "removeColourKey" {
+            pub object_id: String,
+            pub property: crate::animation::colour::ColourProperty,
+            pub frame: u64,
+        },
+        /// Set a text animator, or remove it and its keys with null.
+        SetTextAnimator = "setTextAnimator" {
+            pub object_ids: Vec<String>,
+            pub animator: Option<crate::text_animator::TextAnimator>,
+        },
+        /// Put one of EffectCraft's text-animator presets (listing id
+        /// `ec.textanimator.<name>`) on a text: its animator replaces the
+        /// text's, and its keys start at `at_frame` (11.61). One undo entry;
+        /// a preset the engine cannot draw yet refuses by name.
+        ApplyTextAnimatorPreset = "applyTextAnimatorPreset" {
+            pub object_id: String,
+            pub preset_id: String,
+            pub at_frame: u64,
+        },
     }
 }
 
@@ -758,6 +793,10 @@ pub enum EditEffect {
     },
     Stored {
         origin: SceneOrigin,
+        /// The Scene ID allocated by a creation command.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        scene_label: Option<String>,
     },
     ProjectCreated {
         project: String,
@@ -1169,6 +1208,34 @@ fn apply_edit(
         SceneEdit::MovePathKey(p) => {
             render_edit::move_path_key(scene, &p.object_id, p.target, p.from_frame, p.to_frame)?
         }
+        SceneEdit::CreateColourKey(p) => {
+            animation::colour::create_key(scene, &p.object_id, p.property, p.keyframe.clone())?;
+            EditEffect::None
+        }
+        SceneEdit::UpdateColourKey(p) => {
+            animation::colour::update_key(scene, &p.object_id, p.property, p.keyframe.clone())?;
+            EditEffect::None
+        }
+        SceneEdit::MoveColourKey(p) => {
+            animation::colour::move_key(scene, &p.object_id, p.property, p.from_frame, p.to_frame)?;
+            EditEffect::None
+        }
+        SceneEdit::RemoveColourKey(p) => {
+            animation::colour::remove_key(scene, &p.object_id, p.property, p.frame)?;
+            EditEffect::None
+        }
+        SceneEdit::SetTextAnimator(p) => {
+            animation::set_text_animator(scene, &p.object_ids, p.animator.as_ref())?;
+            EditEffect::None
+        }
+        SceneEdit::ApplyTextAnimatorPreset(p) => EditEffect::PresetApplied {
+            duration_frames: crate::text_animator_presets::apply(
+                scene,
+                &p.object_id,
+                &p.preset_id,
+                p.at_frame,
+            )?,
+        },
     })
 }
 
@@ -1341,6 +1408,12 @@ pub mod witness {
             SceneEdit::MoveGuide(_) => 55,
             SceneEdit::RemoveGuide(_) => 56,
             SceneEdit::SetSceneLabel(_) => 57,
+            SceneEdit::CreateColourKey(_) => 58,
+            SceneEdit::UpdateColourKey(_) => 59,
+            SceneEdit::MoveColourKey(_) => 60,
+            SceneEdit::RemoveColourKey(_) => 61,
+            SceneEdit::SetTextAnimator(_) => 62,
+            SceneEdit::ApplyTextAnimatorPreset(_) => 63,
         }
     }
 
@@ -1556,12 +1629,16 @@ pub mod witness {
             text_case: TextCase::Original,
             decoration: Default::default(),
             overflow: Default::default(),
+            max_lines: None,
+            kerning: None,
             align: Default::default(),
             line_height: None,
             letter_spacing: 0.0,
             word_spacing: 0.0,
             paragraph_spacing: 0.0,
             text_indent: 0.0,
+            baseline_shift: None,
+            text_animator: None,
         }));
         scene
     }
@@ -2101,6 +2178,37 @@ id: None,
                 target: crate::path_geometry::PathTarget::Shape { subpath: 0 },
                 frame: 1,
             }),
+            SceneEdit::CreateColourKey(CreateColourKey {
+                object_id: "shape-1".into(),
+                property: animation::colour::ColourProperty::Fill,
+                keyframe: animation::colour::ColourKeyframe {
+                    frame: 0,
+                    value: crate::color::Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+                    easing: animation::SceneEasing::Linear,
+                    bezier: None,
+                },
+            }),
+            SceneEdit::UpdateColourKey(UpdateColourKey {
+                object_id: "shape-1".into(),
+                property: animation::colour::ColourProperty::Fill,
+                keyframe: animation::colour::ColourKeyframe {
+                    frame: 0,
+                    value: crate::color::Rgba::srgb(0.0, 0.0, 1.0, 1.0),
+                    easing: animation::SceneEasing::Hold,
+                    bezier: None,
+                },
+            }),
+            SceneEdit::MoveColourKey(MoveColourKey {
+                object_id: "shape-1".into(),
+                property: animation::colour::ColourProperty::Fill,
+                from_frame: 0,
+                to_frame: 1,
+            }),
+            SceneEdit::RemoveColourKey(RemoveColourKey {
+                object_id: "shape-1".into(),
+                property: animation::colour::ColourProperty::Fill,
+                frame: 1,
+            }),
             SceneEdit::RemoveSubpath(RemoveSubpath {
                 shape_id: "shape-1".into(),
                 subpath: 1,
@@ -2111,7 +2219,53 @@ id: None,
             }),
             SceneEdit::MoveGuide(MoveGuide { id: 1, position: 480.0 }),
             SceneEdit::RemoveGuide(RemoveGuide { id: 1 }),
+            SceneEdit::SetTextAnimator(SetTextAnimator {
+                object_ids: vec!["text".into()],
+                animator: Some(crate::text_animator::TextAnimator::default()),
+            }),
+            SceneEdit::ApplyTextAnimatorPreset(ApplyTextAnimatorPreset {
+                object_id: "text".into(),
+                // 1.5 s: it fits the witness scene's 100 frames at its rate.
+                preset_id: "ec.textanimator.fadeUpCharacters".into(),
+                at_frame: 0,
+            }),
         ]
+    }
+
+    #[test]
+    fn set_text_animator_is_atomic_and_removing_it_clears_only_its_keys() {
+        let mut scene = fixture_scene();
+        scene.timeline.duration_frames = 20;
+        let text = "text".to_owned();
+        let rect = authoring::create_object(&mut scene, "rect", "Plate").unwrap();
+        let editable = |object_ids, animator| SceneEdit::SetTextAnimator(SetTextAnimator { object_ids, animator });
+        let ctx = EditContext::default();
+        let animator = crate::text_animator::TextAnimator { x: 12.0, ..Default::default() };
+        let original = scene.clone();
+        assert!(matches!(
+            apply_edits(&mut scene, &[editable(vec![text.clone(), rect.clone()], Some(animator.clone()))], &ctx),
+            Err(Refusal::AnimationPropertyUnsupported { object, property }) if object == rect && property == "textAnimator"
+        ));
+        assert_eq!(scene, original);
+        let invalid = crate::text_animator::TextAnimator { scale: -1.0, ..animator.clone() };
+        assert!(apply_edits(&mut scene, &[editable(vec![text.clone()], Some(invalid))], &ctx).is_err());
+        assert_eq!(scene, original);
+
+        let (before, _) = apply_edits(&mut scene, &[editable(vec![text.clone()], Some(animator))], &ctx).unwrap();
+        assert_eq!(before, original);
+        let key = |value| SceneKeyframe { frame: 5, value, easing: animation::SceneEasing::Linear, bezier: None };
+        let property = "textAnimator.selector.start";
+        assert!(animation::set_keyframe(&mut scene, &text, property, key(1.1)).is_err());
+        animation::set_keyframe(&mut scene, &text, property, key(0.25)).unwrap();
+        animation::set_keyframe(&mut scene, &text, "opacity", key(0.5)).unwrap();
+        let before_remove = scene.clone();
+        let (previous, _) = apply_edits(&mut scene, &[editable(vec![text.clone()], None)], &ctx).unwrap();
+        assert_eq!(previous, before_remove);
+        assert_eq!(scene.timeline.channels.len(), 1);
+        assert_eq!(scene.timeline.channels[0].property, "opacity");
+        let SceneObject::Text(removed) = scene.objects.iter().find(|object| object.base().id == text).unwrap()
+            else { unreachable!() };
+        assert!(removed.text_animator.is_none());
     }
 
     fn control_field(label: &str) -> ControlField {

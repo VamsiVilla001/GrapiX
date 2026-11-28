@@ -21,6 +21,10 @@ url = { workspace = true }
 # MIT/Apache-2.0; decompresses WOFF transport wrappers into sfnt so the
 # established `ttf-parser` metadata inspection verifies every accepted format.
 allsorts = "0.17"
+# MIT/Apache-2.0 (flate2) and MIT/BSD-3 (brotli): the encoders for WOFF (zlib)
+# and WOFF2 (Brotli), already in the lock file as dependencies of the shell.
+flate2 = "1"
+brotli = "8"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 # MIT; provides the established ZIP container with zstd member compression

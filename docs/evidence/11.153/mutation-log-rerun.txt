@@ -1,0 +1,5 @@
+caught   M3 a UTF-16 little endian mark is not recognised  [bytes_that_are_not_utf8_are_refused_by_what_they_look_like]
+caught   M4 a UTF-16 big endian mark is not recognised  [bytes_that_are_not_utf8_are_refused_by_what_they_look_like]
+caught   M34 the line of a quote that opens is not kept  [a_stray_quote_text_after_a_closing_quote_and_an_unterminated]
+caught   M53 the file-size words are unrelated  [a_fault_is_said_in_words_an_operator_can_act_on]
+{"mutants":55,"caught":4,"survivors":[],"restoredByteForByte":true}

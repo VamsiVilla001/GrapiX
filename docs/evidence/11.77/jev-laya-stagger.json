@@ -1,0 +1,195 @@
+{
+ "input": {
+  "state": {
+   "decision": "Stagger animations (plan row 11.77, Editor timeline), asked BEFORE coding (claude, 26 Nov 2026).",
+   "facts": "The Editor timeline lets an author select keys (each key is one frame of one property of one object) and move them by a number of frames; every gesture is one ordered batch of moveKeyframe / movePathKey edits applied as ONE undoable history entry, and the whole gesture is refused if any key would land on a frame another unselected key of the same property already holds, or outside the timeline (frame below 0 or above the duration); nothing is silently overwritten. Row 11.77 says: with several objects selected, a Stagger command offsets each one's selected keys by a step in frames, in the order of selection or the layer order, with a reverse and a from-centre option, as one undoable gesture, ported from XPression's Stagger Animations. The new Figma UI keeps a one-row timeline toolbar and shows a control that cannot act dimmed with its reason. Owner rules: a refusal names its reason; one undo per gesture; the same command must be available to an agent as the same description a person sees.",
+   "proposed": "A Stagger control in the timeline's key toolbar with a Step field (whole frames, default 5, may be negative to stagger earlier), an Order choice (Layer order, the top layer first, as the default; or Selection order) and two switches, Reverse and From centre. It acts on the selected keys only, grouped by object: the objects with selected keys are put in the chosen order, reversed if asked, and the object at position i moves its selected keys by i times the step, so the first object does not move. From centre ranks each object by its distance from the middle of the ordered list instead, so the middle object (or the middle pair) does not move and each step further out moves later by one more step. It needs keys selected on at least two objects, and is dimmed with that reason otherwise. A whole object's selected keys keep their spacing, the existing collision and timeline-edge refusals apply to the whole gesture, and a step of 0 is refused by name."
+  },
+  "questions": {
+   "keys": {
+    "type": "choice",
+    "instructions": "Which keys does Stagger move?",
+    "criteria": {
+     "A": "Only the selected keys, grouped by object, so the author chooses exactly which keys of which objects.",
+     "B": "Every key of every selected object, ignoring which keys are selected.",
+     "C": "Only the first key of each selected object."
+    }
+   },
+   "order": {
+    "type": "choice",
+    "instructions": "In what order are the objects staggered by default?",
+    "criteria": {
+     "A": "Layer order, the top layer first, with Selection order as a choice.",
+     "B": "Selection order only.",
+     "C": "Alphabetical by object name."
+    }
+   },
+   "centre": {
+    "type": "choice",
+    "instructions": "What does From centre do?",
+    "criteria": {
+     "A": "The middle object does not move and each object further from the middle moves later by one more step, on both sides.",
+     "B": "The middle object moves first, the others are staggered to the right only.",
+     "C": "Objects on the left move earlier and objects on the right move later."
+    }
+   },
+   "step": {
+    "type": "choice",
+    "instructions": "What may the step be?",
+    "criteria": {
+     "A": "A whole number of frames, positive or negative, default 5; 0 is refused by name.",
+     "B": "A positive number of frames only.",
+     "C": "A number of seconds."
+    }
+   },
+   "refuse": {
+    "type": "choice",
+    "instructions": "What happens when a staggered key would land on an occupied frame or outside the timeline?",
+    "criteria": {
+     "A": "The whole gesture is refused by name and nothing moves, like every other key move.",
+     "B": "The keys that can move are moved and the rest are skipped.",
+     "C": "Keys are nudged to the nearest free frame."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "keys": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "order": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "centre": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.98,
+    "probabilities": {
+     "A": 0.99,
+     "B": 0,
+     "C": 0.01
+    }
+   },
+   "step": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "refuse": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 2689,
+   "output_tokens": 0,
+   "state_tokens": 474,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "keys": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5458,
+     "B": 0.2029,
+     "C": 0.2512
+    },
+    "confidence": 0.0887,
+    "answer_confidence": 0.5458,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "order": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4066,
+     "B": 0.385,
+     "C": 0.2085
+    },
+    "confidence": 0.0349,
+    "answer_confidence": 0.4066,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "centre": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6794,
+     "B": 0.1669,
+     "C": 0.1537
+    },
+    "confidence": 0.227,
+    "answer_confidence": 0.6794,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "step": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2515,
+     "B": 0.317,
+     "C": 0.4315
+    },
+    "confidence": 0.0224,
+    "answer_confidence": 0.4315,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "refuse": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6263,
+     "B": 0.179,
+     "C": 0.1947
+    },
+    "confidence": 0.163,
+    "answer_confidence": 0.6263,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

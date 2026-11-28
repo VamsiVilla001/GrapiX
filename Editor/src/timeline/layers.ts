@@ -20,6 +20,7 @@
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 
 import { objectManagerPanel } from "../object-manager";
+import { layerColumns, type LayerColumns } from "./layer-columns";
 
 // Adapted from EffectCraft, MIT OR Apache-2.0, Copyright (c) 2026 ArtCraft Team
 // and the EffectCraft contributors: the label palette is `Label::rgb` in
@@ -117,6 +118,8 @@ export interface TimelineLayer {
   readonly locked: boolean;
   readonly visibility: LayerSwitch;
   readonly lock: LayerSwitch;
+  /// What the PARENT, BLEND and MATTE cells say (the new Figma UI, B3).
+  readonly columns: LayerColumns;
 }
 
 /// Every object's layer row, keyed by object id. Duplicate ids keep the first
@@ -152,6 +155,7 @@ export function timelineLayers(document: SceneDocument): ReadonlyMap<string, Tim
       locked: object.locked,
       visibility: switchFor("toggleVisibility"),
       lock: switchFor("toggleLock"),
+      columns: layerColumns(document, object),
     });
   });
   return layers;
@@ -165,7 +169,8 @@ export function layerSignature(layers: ReadonlyMap<string, TimelineLayer>): stri
       ([id, layer]) =>
         `${id}:${layer.index}:${layer.name}:${layer.kind}:${layer.visible}:${layer.locked}:` +
         `${layer.visibility.label}:${layer.visibility.unavailable ?? ""}:` +
-        `${layer.lock.label}:${layer.lock.unavailable ?? ""}`,
+        `${layer.lock.label}:${layer.lock.unavailable ?? ""}:` +
+        `${layer.columns.parent.label}:${layer.columns.blend.label}:${layer.columns.matte.label}:${layer.columns.matte.warning === undefined ? "" : "!"}`,
     )
     .join("|");
 }

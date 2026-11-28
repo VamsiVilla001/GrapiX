@@ -7,10 +7,20 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import type { SceneDocument, SceneObject, SystemFontEntry, SystemFontScan } from "@grapix/contracts";
 import { findNode } from "../src/agent-surface";
 import {
+  DEFAULT_FONT_CONVERSION,
+  DEFAULT_FONT_FAMILY,
+  FONT_CONVERSIONS,
   FONT_SAMPLE,
+  filterInstalledFonts,
+  hasDefaultFont,
+  installedFontKey,
+  installedFontLabel,
+  installedFontRequests,
+  installedFontsSummary,
+  needsDefaultFont,
   fontAssignTargets,
   fontAssignUnavailable,
   fontLinkFor,
@@ -157,6 +167,8 @@ describe("ingest is reachable from the panel", () => {
     expect(panel.actions!.map((action) => action.name)).toEqual([
       "ingestFiles",
       "ingestLink",
+      "ingestInstalled",
+      "addDefault",
       "publish",
     ]);
     expect(panel.actions!.every((action) => action.unavailable === undefined)).toBe(true);
@@ -165,7 +177,7 @@ describe("ingest is reachable from the panel", () => {
 
   it("a running ingest makes a second one unavailable, with the reason", () => {
     const panel = fontManagerPanel(document, { ingesting: true });
-    for (const name of ["ingestFiles", "ingestLink"]) {
+    for (const name of ["ingestFiles", "ingestLink", "ingestInstalled", "addDefault"]) {
       expect(panel.actions!.find((action) => action.name === name)!.unavailable).toBe(
         "a font ingest is already running",
       );
@@ -395,5 +407,77 @@ describe("an ingest's optional names", () => {
   it("blank names leave the prepared font as it was", () => {
     const prepared = fileFont("x", "Inter", ["a"]) as never;
     expect(withIngestNames([prepared], { family: " ", displayName: "" })).toEqual([prepared]);
+  });
+});
+
+describe("the default font and the installed fonts (11.13)", () => {
+  const arial = fileFont("arial", "Arial", ["arial-asset"]);
+  const entry = (over: Partial<SystemFontEntry>): SystemFontEntry => ({
+    path: "C:\Windows\Fonts\arial.ttf",
+    faceIndex: 0,
+    fileName: "arial.ttf",
+    family: "Arial",
+    displayName: "Arial",
+    weight: 400,
+    style: "normal",
+    sizeBytes: 773236,
+    collection: false,
+    ...over,
+  });
+  const scan: SystemFontScan = {
+    fonts: [
+      entry({}),
+      entry({ path: "C:\Windows\Fonts\arialbd.ttf", fileName: "arialbd.ttf", displayName: "Arial Bold", weight: 700 }),
+      entry({ path: "C:\Windows\Fonts\msgothic.ttc", fileName: "msgothic.ttc", family: "MS Gothic", displayName: "MS Gothic", faceIndex: 1, collection: true }),
+    ],
+    skipped: [{ fileName: "broken.ttf", reason: "is too short to be a font" }],
+  };
+
+  it("is Arial, stored as WOFF2, and a blank scene needs it before its first text", () => {
+    expect(DEFAULT_FONT_FAMILY).toBe("Arial");
+    expect(DEFAULT_FONT_CONVERSION).toBe("woff2");
+    expect(needsDefaultFont(scene([], [], []), "text")).toBe(true);
+    // Only text needs a font, and only a scene with none.
+    expect(needsDefaultFont(scene([], [], []), "rect")).toBe(false);
+    expect(needsDefaultFont(scene([], [arial], [fontAsset("arial-asset")]), "text")).toBe(false);
+  });
+
+  it("is offered once: Add Arial is unavailable where the scene has it, whatever the case of its family", () => {
+    const blank = scene([], [], []);
+    expect(hasDefaultFont(blank)).toBe(false);
+    expect(findNode(fontManagerPanel(blank), "font-manager")!.actions!.find((a) => a.name === "addDefault")).toMatchObject({ label: "Add Arial" });
+    expect(findNode(fontManagerPanel(blank), "font-manager")!.actions!.find((a) => a.name === "addDefault")!.unavailable).toBeUndefined();
+    const withArial = scene([], [{ ...(arial as object), family: "ARIAL" }], [fontAsset("arial-asset")]);
+    expect(hasDefaultFont(withArial)).toBe(true);
+    expect(fontManagerPanel(withArial).actions!.find((a) => a.name === "addDefault")!.unavailable).toBe("Arial is already in Lower third");
+  });
+
+  it("offers WOFF2 first, then WOFF, then the font as installed", () => {
+    expect(FONT_CONVERSIONS.map((c) => c.conversion)).toEqual(["woff2", "woff", "keep"]);
+  });
+
+  it("lists each face with its weight, style and file, and a collection's faces apart", () => {
+    expect(installedFontLabel(scan.fonts[0]!)).toBe("Arial — 400 · arial.ttf");
+    expect(installedFontLabel(entry({ displayName: "Arial Italic", style: "italic", fileName: "ariali.ttf" }))).toBe("Arial Italic — 400 italic · ariali.ttf");
+    expect(installedFontLabel(scan.fonts[2]!)).toBe("MS Gothic — 400 · msgothic.ttc · face 2");
+    expect(new Set(scan.fonts.map(installedFontKey)).size).toBe(3);
+  });
+
+  it("searches by name, family and file, and says how many are shown and how many files could not be read", () => {
+    expect(filterInstalledFonts(scan, "  ")).toBe(scan.fonts);
+    expect(filterInstalledFonts(scan, "BOLD").map((f) => f.displayName)).toEqual(["Arial Bold"]);
+    expect(filterInstalledFonts(scan, "msgothic.ttc").map((f) => f.family)).toEqual(["MS Gothic"]);
+    expect(filterInstalledFonts(scan, "nothing like this")).toEqual([]);
+    expect(installedFontsSummary(scan, 3)).toBe("3 installed font face(s) · 1 file(s) could not be read");
+    expect(installedFontsSummary(scan, 1)).toBe("1 of 3 installed font face(s) shown · 1 file(s) could not be read");
+    expect(installedFontsSummary({ fonts: scan.fonts, skipped: [] }, 3)).toBe("3 installed font face(s)");
+  });
+
+  it("asks the shell for exactly the picked faces: a file and the face in it, nothing the scan does not hold", () => {
+    expect(installedFontRequests(scan, [installedFontKey(scan.fonts[2]!), "C:\elsewhere.ttf#0", installedFontKey(scan.fonts[0]!)])).toEqual([
+      { path: "C:\Windows\Fonts\arial.ttf", faceIndex: 0 },
+      { path: "C:\Windows\Fonts\msgothic.ttc", faceIndex: 1 },
+    ]);
+    expect(installedFontRequests(scan, [])).toEqual([]);
   });
 });

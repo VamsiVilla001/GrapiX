@@ -1,0 +1,150 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the render engine composites several Program layers (task 112, rows 12.10 and 12.13), asked before coding (user, 24 Nov 2026: Claude takes over codex's task 112).",
+   "facts": "Today the engine holds one Program scene (layer 0, `program`) and cued scenes per layer. A scene has its own GPU compositor: working-space Rgba32Float tile textures (premultiplied), then an output pass that encodes them to Program (Rec.709) and Preview (sRGB) 8-bit surfaces and reads them back through a three-slot ring. Codex already split the per-scene draw (`compose_at`) from the encode. Decided on Panchayati (topic 14, proposal 38): status.program stays the layer-zero projection; a sorted optional `layers` list reports onAir, leaving and queued scenes; a Take replies with the command's committed frame and an optional startFrame; layers compose low to high in the working space BEFORE output encoding; a Take on an occupied layer starts the outgoing scene's authored Out phase and puts the new scene on that layer when the Out finishes, else it is a cut; per-layer and queued state persists across a restart; transition configuration is a separate decision. Existing clients and tests must keep working: with a single layer the frame path must be exactly what it is today.",
+   "proposed": "Keep layer 0 in `program` and hold other layers in a map, with a queued replacement per layer applied when the engine clock reaches its start frame. With one layer on air, render exactly as today. With several, draw each scene to its own working-space tiles, composite the tiles low to high with a GPU 'over' pass in the working space (premultiplied alpha, ping-pong accumulation tiles), and encode the result with an output ring built over those accumulation tiles. All layers on air must share one canvas size: a Take whose scene has another size than the Program's current layers is refused by name. A legacy Clear (no target) clears layer 0 only; a targeted Clear clears its layer and drops any queued replacement on it."
+  },
+  "questions": {
+   "composite": {
+    "type": "choice",
+    "instructions": "How should several layers be composited?",
+    "criteria": {
+     "A": "On the GPU in the working space, before output encoding, with an over pass between each scene's tiles and an output ring built over the result (as proposed).",
+     "B": "On the CPU after each scene is read back and encoded to 8-bit, blending the encoded frames.",
+     "C": "By merging the on-air scene documents into one document and preparing that, with one clock."
+    }
+   },
+   "canvas": {
+    "type": "choice",
+    "instructions": "What should happen when a scene on another layer has a different canvas size from the layers already on air?",
+    "criteria": {
+     "A": "Refuse the Take by name (as proposed) and state the sizes.",
+     "B": "Scale or crop the scene to the Program canvas silently.",
+     "C": "Allow it and composite the overlap only."
+    }
+   },
+   "legacy_clear": {
+    "type": "choice",
+    "instructions": "What does a Clear with no layer target (the legacy form) do once other layers can be on air?",
+    "criteria": {
+     "A": "It clears layer 0 only, because no target means layer 0 everywhere else too (as proposed).",
+     "B": "It clears every layer.",
+     "C": "It is refused while other layers are on air."
+    }
+   },
+   "single_layer_unchanged": {
+    "type": "noul",
+    "instructions": "Is it right to keep the existing single-scene frame path unchanged whenever only one layer is on air, and use the stack path only when two or more are?",
+    "criteria": {
+     "true": "Yes: existing behaviour and tests stay exact; the new path is exercised only by new layers.",
+     "false": "No: always use the stack path."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "composite": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "canvas": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "legacy_clear": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "single_layer_unchanged": {
+    "type": "noul",
+    "noul": 0.86
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 2213,
+   "output_tokens": 0,
+   "state_tokens": 474,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "composite": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.3911,
+     "B": 0.2503,
+     "C": 0.3586
+    },
+    "confidence": 0.0155,
+    "answer_confidence": 0.3911,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "canvas": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.1747,
+     "B": 0.5818,
+     "C": 0.2435
+    },
+    "confidence": 0.1226,
+    "answer_confidence": 0.5818,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "legacy_clear": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.3174,
+     "B": 0.4387,
+     "C": 0.244
+    },
+    "confidence": 0.0262,
+    "answer_confidence": 0.4387,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "single_layer_unchanged": {
+    "type": "noul",
+    "noul": 0.9814,
+    "confidence": 0.9814,
+    "answer_confidence": 0.9814,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

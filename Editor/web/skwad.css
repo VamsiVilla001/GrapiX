@@ -39,7 +39,34 @@
   --sk-radius-tag: 1px; --sk-radius-control: 2px; --sk-radius-cell: 3px; --sk-radius-card: 4px;
   --sk-space-1: 4px; --sk-space-2: 8px; --sk-space-3: 12px; --sk-gap: 14px; --sk-space-4: 16px;
   --sk-space-5: 20px; --sk-space-6: 24px;
+  /* Added for the new Figma UI (24 Nov 2026, row 11.67). The viewport and key colours are in the
+     Figma file; the information blue, the on-air colours and the timeline bar were measured from the
+     exported screens (docs/evidence/figma-ui/), so check them against the file before relying on a shade. */
+  --sk-viewport: #000000; --sk-key: #F58138;
+  --sk-info: #5AA9E6; --sk-info-tint: #112130; --sk-info-ink: #5AA9E6;
+  --sk-onair-row: #603A21; --sk-onair-monitor: #362119; --sk-track: #393E6A;
+  /* Type (Figma sk/* styles): Manrope for words, JetBrains Mono for figures. */
+  --sk-text-body: 500 12px/16px var(--sk-font-ui);
+  --sk-text-body-strong: 600 12px/16px var(--sk-font-ui);
+  --sk-text-title: 600 13px/18px var(--sk-font-ui);
+  --sk-text-caption: 500 11px/14px var(--sk-font-ui);
+  --sk-text-label: 600 10px/12px var(--sk-font-ui);
+  --sk-text-wordmark: 800 18px/22px var(--sk-font-ui);
+  --sk-text-mono: 500 11px/16px var(--sk-font-mono);
+  --sk-text-mono-small: 400 10px/14px var(--sk-font-mono);
+  --sk-text-timecode: 700 12px/16px var(--sk-font-mono);
+  --sk-tracking-label: 0.06em; --sk-tracking-wordmark: -0.02em;
 }
+/* The type styles as classes: one place says what a title or a label looks like. */
+.sk-body { font: var(--sk-text-body); }
+.sk-body-strong { font: var(--sk-text-body-strong); }
+.sk-title { font: var(--sk-text-title); }
+.sk-caption { font: var(--sk-text-caption); }
+.sk-label { font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-transform: uppercase; }
+.sk-wordmark { font: var(--sk-text-wordmark); letter-spacing: var(--sk-tracking-wordmark); }
+.sk-mono { font: var(--sk-text-mono); }
+.sk-mono-small { font: var(--sk-text-mono-small); }
+.sk-timecode { font: var(--sk-text-timecode); color: var(--sk-ember); }
 /* Readability: Manrope at the apps' dense sizes reads best at 500 with tabular figures. */
 body { font-weight: 500; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
 :focus-visible { outline: 2px solid var(--sk-ember); outline-offset: 2px; }

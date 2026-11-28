@@ -1,0 +1,129 @@
+{
+ "input": {
+  "state": {
+   "decision": "The Test row of the Publish screen (row 11.153, Figma B6): the Publish checks are Style, Data, Assets and Scene, each OK or FIX, and Publish stays off while any says FIX. A fifth row, Test, would show what the engine's record check says (46 FIT, 2 NEED FIXING, each named). Is Test a blocker, how does it look before a check was made, and does Publish run the check?",
+   "facts": "The record check is the engine's own measuring with the renderer's shaping (cmd_fit_report), one request, about a second; today the records are the graphic's one sample data record, later the rows of a CSV kept in the project. A result is FITS, OVERFLOWS n PX, EMPTY or MISSING path; an empty value is fine when the element has Hide when empty. The graphic may change after the check, which makes the report out of date. A graphic with no text bound to data has nothing to test. The engine may be unreachable. Publishing makes an immutable numbered package an operator cues live; it never puts anything on air by itself. Data bindings with no source already block Publish.",
+   "constraints": "The Editor never says FITS for a record nothing measured; every state in words; a blocked Publish must say what to fix; the designer must not be stuck on a test they knowingly accept."
+  },
+  "questions": {
+   "blocks": {
+    "type": "choice",
+    "instructions": "Does a Test row that says FIX block the Publish button?",
+    "criteria": {
+     "A": "No. Test is advisory: it shows FIX with the lines that need fixing, and Publish stays on. The other four rows still block.",
+     "B": "Yes, like the other rows: any record that needs fixing keeps Publish off until fixed or Hide when empty or Auto-fit is set.",
+     "C": "Yes, but the designer can tick 'Publish anyway' next to it."
+    }
+   },
+   "unchecked": {
+    "type": "choice",
+    "instructions": "What does the Test row say before a check was made or when the report is out of date?",
+    "criteria": {
+     "A": "A neutral row 'NOT CHECKED' (or 'OUT OF DATE') with a Check records button; never OK, never blocking; the row is drawn only when a text is bound to data.",
+     "B": "Publish runs the check itself the moment the panel opens and shows its result, with the row 'checking…' until it answers.",
+     "C": "The row is drawn as OK until a check says otherwise."
+    }
+   },
+   "when": {
+    "type": "choice",
+    "instructions": "When does the record check run for the Publish screen?",
+    "criteria": {
+     "A": "Only when the designer asks (Check records), on the row and on the Data screen; the one report is shared by both.",
+     "B": "Automatically after every edit, in the background.",
+     "C": "Automatically only at the moment Publish is pressed, refusing the publish if a record needs fixing."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "blocks": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.62,
+    "probabilities": {
+     "A": 0.23,
+     "B": 0.75,
+     "C": 0.02
+    }
+   },
+   "unchecked": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.97,
+    "probabilities": {
+     "A": 0.98,
+     "B": 0.02,
+     "C": 0
+    }
+   },
+   "when": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.88,
+    "probabilities": {
+     "A": 0.92,
+     "B": 0.01,
+     "C": 0.07
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1193,
+   "output_tokens": 0,
+   "state_tokens": 300,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "blocks": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.1361,
+     "B": 0.5338,
+     "C": 0.3301
+    },
+    "confidence": 0.1149,
+    "answer_confidence": 0.5338,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "unchecked": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.3774,
+     "B": 0.2589,
+     "C": 0.3638
+    },
+    "confidence": 0.012,
+    "answer_confidence": 0.3774,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "when": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.225,
+     "B": 0.3445,
+     "C": 0.4305
+    },
+    "confidence": 0.0301,
+    "answer_confidence": 0.4305,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

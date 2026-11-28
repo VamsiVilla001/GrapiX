@@ -88,47 +88,102 @@ pub(super) fn prepare_text(
     resolved: &ResolvedObject,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
-    use vello_cpu::kurbo::{PathEl, Point as K};
+    use vello_cpu::kurbo::{Affine, PathEl, Point as K, Rect, Shape};
     let base = &text.base;
     let id = base.id.as_str();
     let place = |p: K| -> Result<K, Refusal> {
         let at = transform(&base.anchor, resolved, p.x, p.y)?;
         Ok(K::new(f64::from(at.x), f64::from(at.y)))
     };
-    let mut scene = super::BezPath::new();
-    for element in prepared.outline.elements() {
-        scene.push(match *element {
-            PathEl::MoveTo(p) => PathEl::MoveTo(place(p)?),
-            PathEl::LineTo(p) => PathEl::LineTo(place(p)?),
-            PathEl::QuadTo(c, p) => PathEl::QuadTo(place(c)?, place(p)?),
-            PathEl::CurveTo(c1, c2, p) => PathEl::CurveTo(place(c1)?, place(c2)?, place(p)?),
-            PathEl::ClosePath => PathEl::ClosePath,
-        });
-    }
     let frame = ObjectFrame {
         anchor: &base.anchor,
         resolved,
         width: base.width,
         height: base.height,
     };
-    if let Some(paint) = path_paint(id, "text fill", base.fill.as_ref(), &frame)? {
-        append_outline(
-            id,
-            scene.clone(),
-            super::OutlineFill::NonZero,
-            paint,
-            output,
-        );
+    use crate::colour_pipeline::WorkingRgba;
+    let clip_transform = if text.overflow != gx_contracts::scene::TextOverflow::Visible
+        && text.auto_fit != gx_contracts::scene::TextAutoFit::Fit
+        && (base.width > 0.0 || base.height > 0.0)
+    {
+        let origin = place(K::ORIGIN)?;
+        let x = place(K::new(1.0, 0.0))? - origin;
+        let y = place(K::new(0.0, 1.0))? - origin;
+        let transform = Affine::new([x.x, x.y, y.x, y.y, origin.x, origin.y]);
+        (transform.determinant() != 0.0).then_some(transform)
+    } else {
+        None
+    };
+    let base_paint = path_paint(id, "text fill", base.fill.as_ref(), &frame)?;
+    // `instance`: the outline is one glyph cluster with its own paint (11.61), so its paths share coverage sheets with the text's
+    // other clusters on both backends.
+    let mut draw_outline = |outline: &super::BezPath, opacity: f32, fill, instance: bool| -> Result<(), Refusal> {
+        let mut scene = super::BezPath::new();
+        for element in outline.elements() {
+            scene.push(match *element {
+                PathEl::MoveTo(p) => PathEl::MoveTo(place(p)?),
+                PathEl::LineTo(p) => PathEl::LineTo(place(p)?),
+                PathEl::QuadTo(c, p) => PathEl::QuadTo(place(c)?, place(p)?),
+                PathEl::CurveTo(c1, c2, p) => PathEl::CurveTo(place(c1)?, place(c2)?, place(p)?),
+                PathEl::ClosePath => PathEl::ClosePath,
+            });
+        }
+        let first = output.len();
+        let paint = if let Some((target, weight)) = fill {
+            let base = base_paint.clone().unwrap_or(PathPaint::Solid(WorkingRgba::transparent()));
+            Some(base.mix_solid(target, weight))
+        } else {
+            base_paint.clone()
+        };
+        if let Some(paint) = paint {
+            append_outline(id, scene.clone(), super::OutlineFill::NonZero, paint, output);
+        }
+        stroke_outline(id, &scene, &base.stroke, base.stroke_width, &base.stroke_style(), &frame, output)?;
+        for path in &mut output[first..] {
+            path.paint = path.paint.clone().scaled(opacity);
+            path.instance = instance;
+            if let Some(transform) = clip_transform {
+                // Missing dimensions impose no limit. The inverse-mapped outline
+                // bounds supply a finite extent on those axes, including strokes.
+                let ink = transform.inverse().transform_rect_bbox(path.outline.bounding_box());
+                let (left, right) = if base.width > 0.0 { (0.0, base.width) } else { (ink.x0 - 1.0, ink.x1 + 1.0) };
+                let (top, bottom) = if base.height > 0.0 { (0.0, base.height) } else { (ink.y0 - 1.0, ink.y1 + 1.0) };
+                path.clip = Some(transform * Rect::new(left, top, right, bottom).to_path(0.0));
+            }
+        }
+        Ok(())
+    };
+    let Some(animator) = &text.text_animator else {
+        draw_outline(&prepared.outline, 1.0, None, false)?;
+        if !prepared.decoration.elements().is_empty() {
+            draw_outline(&prepared.decoration, 1.0, None, false)?;
+        }
+        return Ok(());
+    };
+    let transform = crate::text::GlyphTransform {
+        translation: [animator.x, animator.y],
+        scale: animator.scale,
+        rotation_degrees: animator.rotation,
+        tracking: animator.tracking.unwrap_or(0.0),
+    };
+    if animator.opacity.is_some() || animator.fill.is_some() || !prepared.decoration.elements().is_empty() {
+        let opacity = animator.opacity.unwrap_or(1.0);
+        let fill = animator.fill.map(|colour| WorkingRgba::from_source(
+            colour, gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        ));
+        for cluster in prepared.animated_clusters(&animator.selector, transform)? {
+            // Keep even fully transparent geometry in the source bounds.
+            let alpha = (1.0 + (opacity - 1.0) * cluster.weight).clamp(0.0, 1.0) as f32;
+            let fill = fill.map(|colour| (colour, cluster.weight.clamp(0.0, 1.0) as f32));
+            draw_outline(&cluster.outline, alpha, fill, true)?;
+            if !cluster.decoration.elements().is_empty() {
+                draw_outline(&cluster.decoration, alpha, fill, true)?;
+            }
+        }
+        Ok(())
+    } else {
+        draw_outline(&prepared.animated_outline(&animator.selector, transform)?, 1.0, None, false)
     }
-    stroke_outline(
-        id,
-        &scene,
-        &base.stroke,
-        base.stroke_width,
-        &base.stroke_style(),
-        &frame,
-        output,
-    )
 }
 
 fn prepare_rect(

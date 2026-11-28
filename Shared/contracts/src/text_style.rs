@@ -328,12 +328,16 @@ mod tests {
                 text_case: TextCase::Original,
                 decoration: Default::default(),
                 overflow: Default::default(),
+                max_lines: None,
+                kerning: None,
                 align: Default::default(),
                 line_height: Some(1.1),
                 letter_spacing: 8.0,
                 word_spacing: 0.0,
                 paragraph_spacing: 0.0,
                 text_indent: 0.0,
+                baseline_shift: None,
+                text_animator: None,
             })],
         }
     }

@@ -7,6 +7,7 @@
 
 pub mod animation;
 pub mod asset_edit;
+pub mod asset_usage;
 pub mod auth;
 pub mod authoring;
 pub mod bindings;
@@ -14,6 +15,7 @@ pub mod color;
 pub mod command;
 mod container_paint;
 pub mod control;
+pub mod csv_table;
 pub mod design_system;
 pub mod drawability;
 pub mod effect;
@@ -31,6 +33,8 @@ pub mod matte_view;
 pub mod material_edit;
 pub mod mcp;
 pub mod object_edit;
+pub mod fit_report;
+pub mod text_choices;
 pub mod package;
 pub mod path_anim;
 pub mod path_geometry;
@@ -43,6 +47,8 @@ pub mod provenance;
 pub mod render_edit;
 pub mod scene;
 pub mod settings;
+pub mod text_animator;
+pub mod text_animator_presets;
 pub mod text_style;
 pub mod validate;
 
@@ -743,9 +749,15 @@ pub enum Refusal {
     /// A command was aimed at a channel this engine does not have (12.10, decision Q8): only
     /// the Program channel exists. `channel` is the name as sent, cut short and escaped.
     ChannelNotSupported { request: String, channel: String },
-    /// A command was aimed at a layer the engine does not draw (12.10): only the Program
-    /// channel's main layer is drawn until the engine composes layers.
+    /// The requested layer is outside the Program range or unavailable on the receiving
+    /// peer (12.10).
     LayerNotSupported { request: String, layer: String },
+    /// A scene taken onto a Program layer does not have the canvas (size, working space and colour depth) of the scenes already on
+    /// the other layers (12.10, 12.13): the layers of one Program are composited together, so they share one.
+    LayerCanvasMismatch { layer: String, scene: String, canvas: String, on_air: String },
+    /// A Clear named the page it expects on a Program layer and that is not the page on it (12.10, decision Q8): `expected` is the
+    /// take and revision the operator meant and `on_air` what the layer holds ("nothing" when empty). Nothing was cleared.
+    ClearExpectationUnmet { layer: String, expected: String, on_air: String },
     /// A Cue ID the operator typed breaks a rule (1.13): `fault` says which. `cue_id` is the text as typed, cut short.
     CueIdInvalid { cue_id: String, fault: ids::IdFault },
     /// A Cue ID the show already has, without regard to case (1.13). `held_by` is the key of the scene that holds it.
@@ -1493,7 +1505,15 @@ impl std::fmt::Display for Refusal {
             ),
             Refusal::LayerNotSupported { request, layer } => write!(
                 f,
-                "{request} is aimed at the layer \"{layer}\": only the main layer of the program channel is drawn"
+                "{request} is aimed at the unsupported Program layer \"{layer}\""
+            ),
+            Refusal::LayerCanvasMismatch { layer, scene, canvas, on_air } => write!(
+                f,
+                "{scene} ({canvas}) cannot go on Program layer {layer}: the layers on air share one canvas, and {on_air}"
+            ),
+            Refusal::ClearExpectationUnmet { layer, expected, on_air } => write!(
+                f,
+                "Program layer {layer} was not cleared: the Clear expected {expected}, and the layer holds {on_air}"
             ),
             Refusal::CueIdInvalid { cue_id, fault } => {
                 write!(f, "the Cue ID \"{cue_id}\" is refused: {fault}")
@@ -2364,7 +2384,18 @@ impl Refusal {
             },
             Self::LayerNotSupported {
                 request: "take".into(),
-                layer: "bug".into(),
+                layer: "100000".into(),
+            },
+            Self::LayerCanvasMismatch {
+                layer: "60".into(),
+                scene: "bug".into(),
+                canvas: "1280x720 linearSrgb bits32".into(),
+                on_air: "layer 0 is 1920x1080 linearSrgb bits32".into(),
+            },
+            Self::ClearExpectationUnmet {
+                layer: "60".into(),
+                expected: "lower-third r2".into(),
+                on_air: "lower-third r3".into(),
             },
             Self::CueIdInvalid {
                 cue_id: "two words".into(),
@@ -2757,6 +2788,8 @@ impl Refusal {
             Self::LoadShed { .. } => "loadShed",
             Self::ChannelNotSupported { .. } => "channelNotSupported",
             Self::LayerNotSupported { .. } => "layerNotSupported",
+            Self::LayerCanvasMismatch { .. } => "layerCanvasMismatch",
+            Self::ClearExpectationUnmet { .. } => "clearExpectationUnmet",
             Self::CueIdInvalid { .. } => "cueIdInvalid",
             Self::CueIdDuplicate { .. } => "cueIdDuplicate",
             Self::CueIdLockedOnAir { .. } => "cueIdLockedOnAir",

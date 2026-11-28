@@ -433,6 +433,7 @@ impl EnginePeer for MockEngine {
                 device_tier: self.device_tier,
                 live_allowed: self.live_is_allowed(false),
                 program: self.program.clone(),
+                layers: None,
                 degradations: self.degradations(),
             }),
 
@@ -702,6 +703,7 @@ mod tests {
         assert!(!e.stopping, "a refused stop stops nothing");
         let _ = e.handle(ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }));
         assert_eq!(e.handle(ClientRequest::Stop), EngineReply::Stopping);
         assert!(e.stopping);
@@ -850,6 +852,7 @@ mod tests {
         assert!(e.status().unwrap().program.is_some());
         let reply = e.handle(ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }));
         assert!(matches!(reply, EngineReply::Cleared(_)));
         assert!(e.status().unwrap().program.is_none());

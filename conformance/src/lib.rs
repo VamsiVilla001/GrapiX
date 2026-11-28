@@ -14,6 +14,7 @@ mod diag_bundle;
 mod editor_commands;
 mod editor_publish;
 mod headless;
+mod mcp_scope;
 mod package_handoff;
 mod process_logs;
 mod refusal_audit;
@@ -27,6 +28,7 @@ pub use editor_publish::{
     asset_locality_agrees, editor_publish_suite, lan_with_a_package_directory_is_a_usage_error,
 };
 pub use headless::{headless_render_suite, render_preview_suite};
+pub use mcp_scope::mcp_scope_suite;
 pub use package_handoff::package_handoff_suite;
 pub use process_logs::{
     engine_log_suite, host_log_suite, logged, mcp_log_suite, protected_engine_log_suite,
@@ -332,6 +334,7 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
     // Clear is intent-based too, and answers with a frame.
     let cleared = peer.handle(ClientRequest::Clear(ClearRequest {
         at: TakeAt::NextOpportunity,
+        expected: None,
     }));
     report.record(
         PLANE,
@@ -874,6 +877,7 @@ pub fn timing_plane_suite(report: &mut Report) {
         }),
         ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }),
         ClientRequest::Phase(gx_control_plane::intent::PhaseRequest {
             phase: "continue:score".into(),

@@ -34,6 +34,11 @@ describe("what a key does to the focused row", () => {
     expect(rowCommand("F10", true)).toBe("menu");
     expect(rowCommand("F10")).toBeUndefined();
     expect(rowCommand("a")).toBeUndefined();
+    // XPression's keys: F2 renames, F7 changes the Scene ID; with Shift they are not these commands.
+    expect(rowCommand("F2")).toBe("rename");
+    expect(rowCommand("F7")).toBe("changeId");
+    expect(rowCommand("F2", true)).toBeUndefined();
+    expect(rowCommand("F7", true)).toBeUndefined();
   });
 });
 

@@ -551,6 +551,7 @@ fn drive_control_contract_refusals(report: &mut Report) {
             channels: Vec::new(),
             phases: Vec::new(),
             path_channels: Vec::new(),
+            colour_channels: None,
         },
         data_context: Default::default(),
         assets: Vec::new(),
@@ -1356,6 +1357,55 @@ fn drive_authoring_refusals(report: &mut Report) {
     );
 }
 
+fn drive_stale_cue_plan() -> bool {
+    use gx_contracts::cue_suggest::CueNaming;
+    use gx_playout::{RundownStore, RundownStoreError};
+
+    let path = std::env::temp_dir().join(format!("gx-cue-plan-audit-{}", std::process::id()));
+    let run = || -> Option<bool> {
+        let mut peer = MockEngine::new();
+        let status = peer.status()?;
+        let mut store = RundownStore::create(
+            path.join("show.json"),
+            Rundown::new(vec![RundownEntry {
+                id: "opening".into(),
+                scene: PublishedScene {
+                    take_id: TakeId("audit/rundown".into()),
+                    revision: Revision(1),
+                    document: serde_json::Value::Null,
+                    design_system_version: None,
+                    content_hash: None,
+                    review: Default::default(),
+                },
+                cue_id: None,
+            }]),
+        )
+        .ok()?;
+        let ids = ["opening".to_owned()];
+        let naming = |start| CueNaming::Numbered {
+            prefix: "C-".into(),
+            start,
+            step: 1,
+            pad: 1,
+        };
+        let stale = store.suggest_cue_ids(&ids, naming(1), &status).ok()?;
+        let other = store.suggest_cue_ids(&ids, naming(2), &status).ok()?;
+        store.apply_cue_plan(&ids, &other, &status).ok()?;
+        let refused = matches!(
+            store.apply_cue_plan(&ids, &stale, &status),
+            Err(RundownStoreError::Refused {
+                refusal: Refusal::CuePlanStale
+            })
+        );
+        let latest = RundownStore::load(path.join("show.json")).ok()?;
+        let cue = latest.rundown().entry("opening").ok()?.cue_id.as_ref()?;
+        Some(refused && cue.as_str() == "C-2")
+    };
+    let verified = run().unwrap_or(false);
+    let _ = std::fs::remove_dir_all(&path);
+    verified
+}
+
 fn drive_playout_refusals(report: &mut Report) {
     let scene = PublishedScene {
         take_id: TakeId("audit/rundown".into()),
@@ -1368,6 +1418,7 @@ fn drive_playout_refusals(report: &mut Report) {
     let rundown = Rundown::new(vec![RundownEntry {
         id: "opening".into(),
         scene: scene.clone(),
+        cue_id: None,
     }]);
 
     report.record(
@@ -1390,6 +1441,14 @@ fn drive_playout_refusals(report: &mut Report) {
                 Err(Refusal::RundownEntryUnknown { entry_id }) if entry_id == "missing"
             ),
             "a missing rundown entry was not refused with its identity",
+        ),
+    );
+    report.record(
+        PLANE,
+        "CuePlanStale is produced when a competing Playout Cue ID plan is confirmed",
+        expect(
+            drive_stale_cue_plan(),
+            "a stale confirmation did not refuse by name or rewrote the accepted show",
         ),
     );
     report.record(
@@ -1519,6 +1578,7 @@ fn drive_media_refusals(report: &mut Report) {
             matches!(
                 ClientRequest::Clear(gx_control_plane::intent::ClearRequest {
                     at: gx_control_plane::intent::TakeAt::NextOpportunity,
+                    expected: None,
                 })
                 .authorise(
                     gx_contracts::auth::Role::Editor,
@@ -2300,7 +2360,7 @@ fn load_shed_is_produced() -> bool {
 
 /// 12.10: the same real server and client as the operator check, with a target set.
 fn target_refusals_are_produced() -> bool {
-    use gx_control_plane::message::OutputTarget;
+    use gx_control_plane::message::{OutputTarget, MAIN_LAYER};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     let mut engine = MockEngine::new();
@@ -2334,13 +2394,13 @@ fn target_refusals_are_produced() -> bool {
     };
     client.set_target(Some(OutputTarget {
         channel: "preview".into(),
-        layer: "main".into(),
+        layer: MAIN_LAYER,
     }));
     let channel = matches!(
         client.handle(take()),
         EngineReply::Refused(Refusal::ChannelNotSupported { .. })
     );
-    client.set_target(Some(OutputTarget::program("bug")));
+    client.set_target(Some(OutputTarget::program(100_000)));
     let layer = matches!(
         client.handle(take()),
         EngineReply::Refused(Refusal::LayerNotSupported { .. })
@@ -2401,6 +2461,7 @@ fn is_driven(variant: &str) -> bool {
             | "AssetStoreFailed"
             | "RundownCursorOutOfRange"
             | "RundownEntryUnknown"
+            | "CuePlanStale"
             | "AutomationExecutionDeferred"
             | "ProjectNotFound"
             | "SceneDuplicateObjectId"
@@ -2501,6 +2562,14 @@ fn is_driven(variant: &str) -> bool {
 fn limitations() -> &'static [Limitation] {
     &[
         Limitation {
+            variant: "ClearExpectationUnmet",
+            reason: "it needs a layer with a published scene on air and a Clear that names another take; the render worker's engine tests drive it (task 112 follow-up), and the conformance mock engine has one Program scene and no layers",
+        },
+        Limitation {
+            variant: "LayerCanvasMismatch",
+            reason: "it needs two published scenes of different canvas sizes prepared on a hardware GPU; the render worker's GPU engine tests drive it (task 112), and the conformance engine has no GPU",
+        },
+        Limitation {
             variant: "CueIdInvalid",
             reason: "a Cue ID is held by the show's cue table (`ids::CueTable`, 1.13) and proved by its contract tests; no EnginePeer route carries one until Playout's show uses the table (12.13, 12.15)",
         },
@@ -2515,10 +2584,6 @@ fn limitations() -> &'static [Limitation] {
         Limitation {
             variant: "UnknownCueId",
             reason: "the cue table refuses it (1.13, contract tests); no EnginePeer route carries a Cue ID yet",
-        },
-        Limitation {
-            variant: "CuePlanStale",
-            reason: "the cue table refuses a stale or edited bulk plan (12.15, contract tests); no EnginePeer route carries a Cue ID plan yet",
         },
         Limitation {
             variant: "SceneLabelInvalid",

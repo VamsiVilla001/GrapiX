@@ -4,19 +4,25 @@
 //! Each path is filled in opaque white by Vello GPU into an 8-bit coverage
 //! target the size of its coverage window. A compute pass then composites the
 //! path's paint, in the scene's working space, scaled by that coverage, onto
-//! the layer in float. The window, its integer offset and the compositing
+//! the layer in float. Since 11.61 the instance paths of a region (the glyph
+//! clusters of an animated text, each with its own paint) share coverage
+//! sheets, a cell each, filled by one Vello render, and the compute pass
+//! composites them in order from one draw record per path. The cells come from
+//! `rasterise::plan_coverage`, which the CPU backend draws from too. The window, its integer offset and the compositing
 //! formula are the CPU backend's (`rasterise::VelloCpuRasteriser`), so the two
 //! agree to within Vello GPU's and Vello CPU's coverage, one code value.
 //!
 //! This runs only at prepare (invariant 35); the frame path never draws.
 
-use crate::rasterise::{coverage_window, window_origin, window_transform, PathPaint, PreparedPath};
+use crate::rasterise::{cell_transform, plan_coverage, window_origin, window_transform, PathPaint, PreparedPath, SHEET_SIDE};
 use gx_contracts::Refusal;
 use vello_gpu::peniko::color::palette::css::WHITE;
 
 const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// paint, window, config, two rows, 4 x 4 stop positions, 16 stop colours.
-const DRAW_BYTES: u64 = 16 * 5 + 16 * 4 + 16 * 16;
+/// paint, window, config, two rows, 4 x 4 stop positions, 16 stop colours, the path's cell on its coverage sheet.
+const DRAW_BYTES: u64 = 16 * 5 + 16 * 4 + 16 * 16 + 16;
+/// The word of a draw uniform that holds the cell's x; its y is the next one.
+const CELL_WORD: usize = (16 * 5 + 16 * 4 + 16 * 16) / 4;
 
 /// The Vello GPU renderer and the compose pipeline, built once per device:
 /// building Vello's pipelines takes about a second.
@@ -33,6 +39,14 @@ pub(crate) struct GpuDrawer {
     mask: [wgpu::ComputePipeline; 7],
     /// 3.27: the side, in texels, a layer is drawn in tiles of; `None` takes `TILE_SIDE`. Tests set a small one.
     tile_side: Option<u32>,
+    /// 11.61: the compose pass's bind layout: `layout` with the uniform at a dynamic offset, so the paths of a run share one buffer
+    /// of draw records and one bind group.
+    compose_layout: wgpu::BindGroupLayout,
+    /// 11.61: instance paths share coverage sheets, as the CPU backend's do (`rasterise::plan_coverage`). Tests switch it off to draw
+    /// every path alone, the drawing as it was before 11.61, and compare.
+    share_sheets: bool,
+    /// 11.61: the side of a shared sheet; `None` takes `SHEET_SIDE`, which is what the CPU backend plans with. Tests set a small one.
+    sheet_side: Option<u32>,
 }
 
 /// A layer drawn in one buffer must fit this many bytes (and the device's binding limit); a larger one is drawn tile by tile, so an 8K layer
@@ -46,12 +60,14 @@ const MASK_BYTES: u64 = 64;
 
 const FIT_BYTES: u64 = 16 * 8;
 
-/// The compose pass's uniform for one path over one window.
+/// The compose pass's uniform for one path over one window: the path's draw record. `cell` is the corner of its cell in the coverage
+/// texture the pass reads.
 fn draw_uniform(
     paint: &PathPaint,
     window_origin: [f64; 2],
     window: (u32, u32, u32, u32),
     stride: u32,
+    cell: (u32, u32),
 ) -> [u8; DRAW_BYTES as usize] {
     let (x0, y0, w, h) = window;
     let mut f = [0_f32; DRAW_BYTES as usize / 4];
@@ -81,6 +97,10 @@ fn draw_uniform(
     for (k, dest) in bytes.chunks_exact_mut(4).enumerate() {
         let word = if (4..12).contains(&k) {
             u[k - 4]
+        } else if k == CELL_WORD {
+            cell.0
+        } else if k == CELL_WORD + 1 {
+            cell.1
         } else {
             f[k].to_bits()
         };
@@ -145,9 +165,50 @@ impl GpuDrawer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
+        // 11.61: the compose pass reads its draw record at a dynamic offset.
+        let compose_entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty,
+            count: None,
+        };
+        let compose_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gx-draw-compose"),
+            entries: &[
+                compose_entry(
+                    0,
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                ),
+                compose_entry(
+                    1,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                ),
+                compose_entry(
+                    2,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(DRAW_BYTES),
+                    },
+                ),
+            ],
+        });
+        let compose_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("gx-draw-compose"),
+            bind_group_layouts: &[Some(&compose_layout)],
+            immediate_size: 0,
+        });
         let compose = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("gx-draw-compose"),
-            layout: Some(&pipeline_layout),
+            layout: Some(&compose_pipeline_layout),
             module: &module,
             entry_point: Some("compose"),
             compilation_options: Default::default(),
@@ -235,7 +296,21 @@ impl GpuDrawer {
             mask_layout,
             mask,
             tile_side: None,
+            compose_layout,
+            // On (user, 28 Nov 2026), with the CPU backend drawing from the same plan: a path moved by whole pixels to a cell rounds
+            // differently in f32 than the path drawn alone (one 8-bit coverage step in a few edge pixels), so both backends place
+            // every instance path in the same cell and stay the same numbers.
+            share_sheets: true,
+            sheet_side: None,
         }
+    }
+
+    /// Whether instance paths share coverage sheets (`false`: every path alone, as before 11.61), and the side of a shared sheet
+    /// (`None` for `SHEET_SIDE`).
+    #[cfg(test)]
+    pub(crate) fn set_sheets(&mut self, share: bool, side: Option<u32>) {
+        self.share_sheets = share;
+        self.sheet_side = side;
     }
 
     /// Draw in tiles of `side` texels even when the layer would fit (tests of 3.27); `None` goes back to the budget.
@@ -857,78 +932,128 @@ impl GpuDrawer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        for path in paths {
-            let paint = path.paint();
-            if !paint.visible() {
-                continue;
-            }
-            let Some(window) = coverage_window(path, origin, width, height) else {
-                continue;
-            };
-            let (_, _, w, h) = window;
+        // 11.61: the coverage of every drawn path, from the one plan the CPU backend draws from too (`rasterise::plan_coverage`). A
+        // path that is not an instance path has a sheet of its own, the size of its window: one Vello render, one compose dispatch and
+        // one submission, the drawing as it was. The instance paths of the region (the glyph clusters of an animated text) share
+        // sheets: one Vello render fills every cell of a sheet, and the compose pass composites the paths in order, each from its own
+        // draw record (its cell, window and paint): the per-glyph instance data.
+        let side = self.sheet_side.unwrap_or(SHEET_SIDE);
+        let plan = plan_coverage(paths, origin, width, height, side, self.share_sheets);
+        if plan.sheets.iter().any(|sheet| sheet.shared) && side > device.limits().max_texture_dimension_2d {
+            // The CPU backend packs to `side` whatever the device; packing to less here would move the cells apart from its.
+            return Err(refuse(format!(
+                "a shared coverage sheet of {side} pixels a side exceeds the device's texture limit"
+            )));
+        }
+        let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(1);
+        let slot = DRAW_BYTES.div_ceil(align) * align;
+        // A shared sheet is rendered when its first path is reached, and kept for its later ones.
+        let mut kept: std::collections::HashMap<usize, wgpu::Texture> = std::collections::HashMap::new();
+        let mut first = 0;
+        while first < plan.placements.len() {
+            // A run: the paths in a row whose coverage is on one sheet. They are composited by one pass.
+            let sheet_index = plan.placements[first].sheet;
+            let run_len = plan.placements[first..]
+                .iter()
+                .take_while(|placement| placement.sheet == sheet_index)
+                .count();
+            let run = &plan.placements[first..first + run_len];
+            let sheet = plan.sheets[sheet_index];
+            let (w, h) = (sheet.width, sheet.height);
             let (Ok(w16), Ok(h16)) = (u16::try_from(w), u16::try_from(h)) else {
                 return Err(refuse(format!("coverage window {w}x{h} exceeds u16")));
             };
-            crate::render_work::gpu_build();
-            let coverage = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("gx-draw-coverage"),
-                size: wgpu::Extent3d {
-                    width: w,
-                    height: h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: COVERAGE_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
-            let view = coverage.create_view(&Default::default());
-            // One submission per path: Vello uploads each scene's strips with
+            // One submission per render: Vello uploads each scene's strips with
             // queue writes, which take effect at the next submission, so two
-            // paths recorded into one encoder would both read the last
-            // path's strips.
+            // scenes recorded into one encoder would both read the last
+            // scene's strips.
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gx-draw"),
             });
-            let mut scene = vello_gpu::Scene::new(w16, h16);
-            scene.set_transform(window_transform(origin, window));
-            scene.set_fill_rule(path.fill_rule());
-            scene.set_paint(WHITE);
-            scene.fill_path(path.outline());
-            self.renderer
-                .render(
-                    &scene,
-                    &mut self.resources,
-                    device,
-                    queue,
-                    &mut encoder,
-                    &vello_gpu::RenderSize {
-                        width: w16,
-                        height: h16,
-                    },
-                    &view,
-                    None,
-                    &vello_gpu::TextureBindings::new(),
-                    vello_gpu::TargetInit::Clear(vello_gpu::ClearSettings::default()),
-                )
-                .map_err(|e| refuse(format!("Vello GPU could not draw the path: {e:?}")))?;
-            let bytes = draw_uniform(paint, window_origin(origin, window), window, stride);
+            let coverage = match kept.get(&sheet_index) {
+                Some(coverage) => coverage.clone(),
+                None => {
+                    crate::render_work::gpu_build();
+                    let coverage = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("gx-draw-coverage"),
+                        size: wgpu::Extent3d {
+                            width: w,
+                            height: h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: COVERAGE_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                    let mut scene = vello_gpu::Scene::new(w16, h16);
+                    // Every path of this sheet: its placements are this run's and later ones.
+                    for cell in plan.placements[first..].iter().filter(|cell| cell.sheet == sheet_index) {
+                        let path = paths[cell.path];
+                        scene.set_transform(cell_transform(origin, cell.window, cell.at));
+                        scene.set_fill_rule(path.fill_rule());
+                        scene.set_paint(WHITE);
+                        if let Some(clip) = path.clip() {
+                            scene.push_clip_layer(clip);
+                        }
+                        scene.fill_path(path.outline());
+                        if path.clip().is_some() {
+                            scene.pop_layer();
+                        }
+                    }
+                    self.renderer
+                        .render(
+                            &scene,
+                            &mut self.resources,
+                            device,
+                            queue,
+                            &mut encoder,
+                            &vello_gpu::RenderSize {
+                                width: w16,
+                                height: h16,
+                            },
+                            &coverage.create_view(&Default::default()),
+                            None,
+                            &vello_gpu::TextureBindings::new(),
+                            vello_gpu::TargetInit::Clear(vello_gpu::ClearSettings::default()),
+                        )
+                        .map_err(|e| refuse(format!("Vello GPU could not draw the path: {e:?}")))?;
+                    if sheet.shared {
+                        kept.insert(sheet_index, coverage.clone());
+                    }
+                    coverage
+                }
+            };
+            let view = coverage.create_view(&Default::default());
+            // One draw record per path of the run, one after another in one buffer; the pass reads each at its offset.
+            let mut records = vec![0_u8; slot as usize * run.len()];
+            for (k, cell) in run.iter().enumerate() {
+                let bytes = draw_uniform(
+                    paths[cell.path].paint(),
+                    window_origin(origin, cell.window),
+                    cell.window,
+                    stride,
+                    cell.at,
+                );
+                let start = k * slot as usize;
+                records[start..start + DRAW_BYTES as usize].copy_from_slice(&bytes);
+            }
             crate::render_work::gpu_build();
             let uniform = wgpu::util::DeviceExt::create_buffer_init(
                 device,
                 &wgpu::util::BufferInitDescriptor {
-                    label: Some("gx-draw-paint"),
-                    contents: &bytes,
+                    label: Some("gx-draw-records"),
+                    contents: &records,
                     usage: wgpu::BufferUsages::UNIFORM,
                 },
             );
             crate::render_work::gpu_build();
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gx-draw"),
-                layout: &self.layout,
+                layout: &self.compose_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -940,7 +1065,11 @@ impl GpuDrawer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: uniform.as_entire_binding(),
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &uniform,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(DRAW_BYTES),
+                        }),
                     },
                 ],
             });
@@ -949,10 +1078,15 @@ impl GpuDrawer {
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.compose);
-            pass.set_bind_group(0, &group, &[]);
-            pass.dispatch_workgroups(w.div_ceil(16), h.div_ceil(16), 1);
+            // In the order the paths were given: a dispatch sees what the one before it wrote.
+            for (k, cell) in run.iter().enumerate() {
+                let (_, _, cell_width, cell_height) = cell.window;
+                pass.set_bind_group(0, &group, &[(k as u64 * slot) as u32]);
+                pass.dispatch_workgroups(cell_width.div_ceil(16), cell_height.div_ceil(16), 1);
+            }
             drop(pass);
             queue.submit([encoder.finish()]);
+            first += run_len;
         }
         self.apply_masks(
             device, queue, object, &layer, stride, width, height, origin, masks,
@@ -1573,4 +1707,155 @@ mod tests {
             );
         }
     }
+
+    /// 11.61: paths like those of an animated text over a plate: many small instance paths (the glyph clusters), each with its own
+    /// paint, turned and placed off the pixel grid, neighbours overlapping; under them a large path and over them a gradient that are
+    /// not instances; one instance the region cuts on two sides and one that is invisible.
+    fn glyph_like_paths(origin: [f64; 2], width: u32, height: u32) -> Vec<PreparedPath> {
+        let (w, h) = (f64::from(width), f64::from(height));
+        let solid = |r: f32, g: f32, b: f32, a: f32| PathPaint::Solid(WorkingRgba { r: r * a, g: g * a, b: b * a, a });
+        let mut paths = vec![PreparedPath::new(
+            "plate".into(),
+            solid(0.1, 0.2, 0.6, 0.7),
+            RoundedRect::new(origin[0] + 6.5, origin[1] + 5.25, origin[0] + w - 9.0, origin[1] + h - 7.5, 9.0).to_path(0.01),
+            OutlineFill::NonZero,
+        )];
+        let columns = 16;
+        let rows = 4;
+        for k in 0..columns * rows {
+            let (column, row) = (f64::from(k % columns), f64::from(k / columns));
+            // 0.37 and 0.61 of a pixel a step: every glyph lands at a different sub-pixel place. Steps of 11.3: neighbours overlap.
+            let centre = (origin[0] + 14.0 + column * 11.37, origin[1] + 16.0 + row * 13.61);
+            let shape: BezPath = if k % 3 == 0 {
+                Circle::new((0.0, 0.0), 6.2).to_path(0.01)
+            } else {
+                RoundedRect::new(-6.5, -4.0, 6.5, 4.0, 1.5).to_path(0.01)
+            };
+            let turned = Affine::translate(centre) * Affine::rotate(f64::from(k) * 0.21) * Affine::scale(0.8 + f64::from(k % 5) * 0.12);
+            // Every eleventh glyph is invisible: it keeps its cell and is not drawn.
+            let alpha = if k % 11 == 5 { 0.0 } else { 0.15 + 0.8 * (k % 7) as f32 / 6.0 };
+            paths.push(
+                PreparedPath::new(
+                    "glyph".into(),
+                    solid(0.9, 0.3 + 0.1 * (k % 4) as f32, 0.2, alpha),
+                    turned * shape,
+                    if k % 4 == 1 { OutlineFill::EvenOdd } else { OutlineFill::NonZero },
+                )
+                .instanced(),
+            );
+        }
+        // An instance the region cuts on its right and bottom edges: it keeps its cell and is drawn alone.
+        paths.push(
+            PreparedPath::new(
+                "glyph".into(),
+                solid(0.2, 0.9, 0.4, 0.5),
+                Circle::new((origin[0] + w - 4.0, origin[1] + h - 6.0), 9.0).to_path(0.01),
+                OutlineFill::NonZero,
+            )
+            .instanced(),
+        );
+        paths.push(PreparedPath::new(
+            "sheen".into(),
+            PathPaint::Gradient(Box::new(PathGradient {
+                radial: false,
+                rows: [1.3 / w, 0.4 / h, -0.2 - 1.3 / w * origin[0] - 0.4 / h * origin[1], 0.0, 0.0, 0.0],
+                spread: GradientSpread::Reflect,
+                stops: vec![
+                    (0.0, WorkingRgba { r: 0.3, g: 0.3, b: 0.3, a: 0.3 }),
+                    (1.0, WorkingRgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                ],
+            })),
+            vello_gpu::kurbo::Rect::new(origin[0] + 20.25, origin[1] + 9.5, origin[0] + w * 0.7, origin[1] + h * 0.8).to_path(0.01),
+            OutlineFill::NonZero,
+        ));
+        paths
+    }
+
+    /// 11.61: instance paths drawn through shared coverage sheets, on DX12 and on Vulkan. The GPU and the CPU backend draw from one
+    /// plan, so they are the same numbers to a float's last place, with sheets shared (the default), with a small sheet side that
+    /// makes several sheets, and with every path alone. Sharing is NOT the path-by-path drawing bit for bit: a path moved by whole
+    /// pixels to its cell rounds differently in f32, and its coverage comes out one 8-bit step off in a few edge pixels. That is
+    /// held to one coverage step, in under one pixel in fifty, and is why the two backends must share the plan.
+    #[test]
+    #[ignore = "requires hardware GPU on DX12 and Vulkan; explicit 11.61 drawing gate"]
+    fn gpu_sheets_are_the_cpu_backends_and_within_one_coverage_step_of_path_by_path() {
+        use crate::rasterise::rasterise_with;
+        for (name, backends) in [("dx12", wgpu::Backends::DX12), ("vulkan", wgpu::Backends::VULKAN)] {
+            let gpu = crate::gpu::negotiate_for_test(backends);
+            let (device, queue) = gpu.device_queue().unwrap_or_else(|| panic!("a hardware GPU on {name}"));
+            let mut drawer = GpuDrawer::new(device);
+            for (width, height, origin) in [(210_u32, 76_u32, [0.0, 0.0]), (233, 90, [-17.0, 230.0])] {
+                let paths = glyph_like_paths(origin, width, height);
+                let refs: Vec<&PreparedPath> = paths.iter().collect();
+                // What the plan is: one shared sheet for the glyphs that are drawn whole, and a sheet each for the plate, the
+                // sheen and the glyph the region cuts.
+                let plan = plan_coverage(&refs, origin, width, height, SHEET_SIDE, true);
+                let shared: Vec<_> = plan.sheets.iter().filter(|sheet| sheet.shared).collect();
+                assert_eq!(shared.len(), 1, "{name}: the glyphs share one sheet");
+                assert_eq!(plan.sheets.len(), 4, "{name}: and the plate, the sheen and the cut glyph have their own");
+                let in_cells = plan.placements.iter().filter(|p| plan.sheets[p.sheet].shared).count();
+                assert_eq!(in_cells, 64 - 6, "{name}: every visible glyph is in a cell (6 of the 64 are invisible)");
+
+                let mut gpu_draw = |share: bool, side: Option<u32>| {
+                    drawer.set_sheets(share, side);
+                    let texture = drawer.draw(device, queue, "glyphs", &refs, origin, width, height, &[], None).unwrap();
+                    read_float(device, queue, &texture)
+                };
+                let cpu_draw = |share: bool, side: u32| {
+                    let mut surface = RasterSurface::window(width, height, origin);
+                    rasterise_with(&refs, &mut surface, side, share);
+                    surface.pixels().iter().flat_map(|p| [p.r, p.g, p.b, p.a]).collect::<Vec<f32>>()
+                };
+                // The worst channel difference, and how many pixels differ at all.
+                let apart = |left: &[f32], right: &[f32]| {
+                    let mut worst = 0.0_f32;
+                    let mut differing = 0_usize;
+                    for (a, b) in left.chunks_exact(4).zip(right.chunks_exact(4)) {
+                        let pixel = a.iter().zip(b).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+                        worst = worst.max(pixel);
+                        differing += usize::from(pixel > 0.0);
+                    }
+                    (worst, differing)
+                };
+                let pixels = (width * height) as usize;
+                let step = 1.0 / 255.0 + 1e-6;
+
+                // The same numbers on both backends, however the coverage is laid out.
+                let gpu_alone = gpu_draw(false, None);
+                let gpu_shared = gpu_draw(true, None);
+                let gpu_small = gpu_draw(true, Some(64));
+                let cpu_alone = cpu_draw(false, SHEET_SIDE);
+                let cpu_shared = cpu_draw(true, SHEET_SIDE);
+                let cpu_small = cpu_draw(true, 64);
+                assert!(cpu_alone.chunks_exact(4).filter(|p| p[3] > 0.0).count() > 4000, "{name}: the layer is drawn");
+                for (label, gpu, cpu) in [
+                    ("every path alone", &gpu_alone, &cpu_alone),
+                    ("sheets shared", &gpu_shared, &cpu_shared),
+                    ("sheets of 64", &gpu_small, &cpu_small),
+                ] {
+                    let (worst, differing) = apart(gpu, cpu);
+                    assert!(
+                        worst <= 1e-5,
+                        "{name} {width}x{height} at {origin:?}, {label}: the GPU is {worst} from the CPU backend in {differing} pixels"
+                    );
+                }
+                // Sharing against path by path: one coverage step at most, in few pixels, and not nothing.
+                for (label, shared) in [("sheets shared", &gpu_shared), ("sheets of 64", &gpu_small)] {
+                    let (worst, differing) = apart(shared, &gpu_alone);
+                    assert!(
+                        worst <= step && differing * 50 < pixels,
+                        "{name} {width}x{height} at {origin:?}, {label}: {differing} of {pixels} pixels differ from the path-by-path drawing, worst {worst} ({:.2} steps)",
+                        worst * 255.0
+                    );
+                }
+                assert_ne!(
+                    apart(&gpu_shared, &gpu_alone).1,
+                    0,
+                    "{name} {width}x{height}: sharing sheets is now the path-by-path drawing bit for bit; the reason both backends share one plan is gone"
+                );
+            }
+            drawer.set_sheets(true, None);
+        }
+    }
 }
+

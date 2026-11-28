@@ -261,22 +261,15 @@ pub(crate) fn normalize_weight(weight: u16) -> Result<u16, Refusal> {
     Ok(weight)
 }
 
-/// 1.x default: Arial, sans-serif. Deduped, capped at 8.
+/// Keep the explicitly requested project fallback families, deduped and capped at eight.
 pub(crate) fn normalize_fallbacks(values: &[String]) -> Vec<String> {
-    let cleaned: Vec<String> = if values.is_empty() {
-        vec!["Arial".into(), "sans-serif".into()]
-    } else {
-        values
-            .iter()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .collect()
-    };
     let mut seen = std::collections::HashSet::new();
-    cleaned
-        .into_iter()
-        .filter(|v| seen.insert(v.clone()))
+    values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty() && seen.insert(*value))
         .take(8)
+        .map(str::to_owned)
         .collect()
 }
 
@@ -288,6 +281,12 @@ pub(crate) fn short_hash(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fallback_normalization_keeps_only_explicit_families() {
+        assert!(normalize_fallbacks(&[]).is_empty());
+        assert_eq!(normalize_fallbacks(&[" Inter ".into(), "".into(), "Inter".into()]), ["Inter"]);
+    }
 
     #[test]
     fn file_font_identity_is_content_derived_and_stable() {

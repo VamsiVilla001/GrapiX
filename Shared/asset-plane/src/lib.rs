@@ -27,8 +27,8 @@ pub use preflight::{
     AssetTransferServer, RetryPolicy, ASSET_TRANSFER_CHUNK_BYTES, MAX_ASSET_FRAME_BYTES,
 };
 pub use publish::{
-    declared_locality, fetch_bytes, preview_scene, publish_scene, AssetPublishPeer,
-    AssetPublishServer, CalmGate, FetchError, FetchReply, LocalityReply, PreviewError,
+    declared_locality, fetch_bytes, fit_scene, preview_scene, publish_scene, AssetPublishPeer,
+    AssetPublishServer, CalmGate, FetchError, FetchReply, FitError, FitJob, FitReply, LocalityReply, PreviewError,
     PreviewImage, PreviewJob, PreviewReply, PreviewRequest, PublishClientError, PublishRefusal,
     PublishReply, PublishRequest, MAX_CALM_WAIT, MAX_PUBLISH_FRAME_BYTES,
 };

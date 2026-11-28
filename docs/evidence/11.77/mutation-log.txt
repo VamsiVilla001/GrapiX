@@ -1,0 +1,49 @@
+1 selection order ignored -> CAUGHT by follows the selection order when asked, so the ele; takes selection order from the order the first key
+2 layer order reversed -> CAUGHT by can stagger earlier with a negative step, writing ; follows the keys that moved: each key id with its 
+3 unknown element ranked first -> CAUGHT by puts an element the scene does not have after the 
+4 one element is enough -> CAUGHT by is dimmed on the KEYFRAME bar with the same reason; needs keys, then keys on two elements
+5 no keys not noticed by the blocker -> CAUGHT by is dimmed on the KEYFRAME bar with the same reason; needs keys, then keys on two elements
+6 centre uses ceil -> CAUGHT by keeps the middle PAIR together when the count is e
+7 centre is off by half -> CAUGHT by is the distance from the middle with From centre: ; keeps the middle PAIR together when the count is e
+8 reverse does nothing -> CAUGHT by is the other way round with Reverse, so the first ; moves the first element last with Reverse
+9 fractional step allowed -> CAUGHT by refuses a step of 0 by name, and a step that is no
+10 step of 0 allowed through -> CAUGHT by refuses a step of 0 by name, and a step that is no
+11 from centre with two allowed -> CAUGHT by refuses From centre with fewer than three elements
+12 unknown element allowed -> CAUGHT by refuses keys of an element the scene does not have
+13 step not applied -> CAUGHT by can stagger earlier with a negative step, writing ; follows the keys that moved: each key id with its 
+14 selection does not follow the keys -> CAUGHT by follows the keys that moved: each key id with its 
+15 sign missing in label -> CAUGHT by is labelled with how many elements, the step and t
+16 plural of a negative step -> CAUGHT by is labelled with how many elements, the step and t
+17 from centre not in label -> CAUGHT by is labelled with how many elements, the step and t
+18 reverse not in label -> CAUGHT by is labelled with how many elements, the step and t
+19 keys that stay are written -> CAUGHT by does not write the keys that stay where they are; follows the selection order when asked, so the ele
+20 move target ignores the delta -> CAUGHT by can stagger earlier with a negative step, writing ; follows the selection order when asked, so the ele
+21 writes in the wrong order -> CAUGHT by can stagger earlier with a negative step, writing ; lets a run of selected keys slide onto frames the 
+22 collision not checked -> CAUGHT by allows keys to move through frames their own selec; follows the layer order, so a different order of s
+23 Stagger never dimmed -> CAUGHT by is dimmed on the KEYFRAME bar with the same reason
+
+SUMMARY
+ 1 selection order ignored                    CAUGHT by follows the selection order when asked, so the ele; takes selection order from the order the first key
+ 2 layer order reversed                       CAUGHT by can stagger earlier with a negative step, writing ; follows the keys that moved: each key id with its 
+ 3 unknown element ranked first               CAUGHT by puts an element the scene does not have after the 
+ 4 one element is enough                      CAUGHT by is dimmed on the KEYFRAME bar with the same reason; needs keys, then keys on two elements
+ 5 no keys not noticed by the blocker         CAUGHT by is dimmed on the KEYFRAME bar with the same reason; needs keys, then keys on two elements
+ 6 centre uses ceil                           CAUGHT by keeps the middle PAIR together when the count is e
+ 7 centre is off by half                      CAUGHT by is the distance from the middle with From centre: ; keeps the middle PAIR together when the count is e
+ 8 reverse does nothing                       CAUGHT by is the other way round with Reverse, so the first ; moves the first element last with Reverse
+ 9 fractional step allowed                    CAUGHT by refuses a step of 0 by name, and a step that is no
+10 step of 0 allowed through                  CAUGHT by refuses a step of 0 by name, and a step that is no
+11 from centre with two allowed               CAUGHT by refuses From centre with fewer than three elements
+12 unknown element allowed                    CAUGHT by refuses keys of an element the scene does not have
+13 step not applied                           CAUGHT by can stagger earlier with a negative step, writing ; follows the keys that moved: each key id with its 
+14 selection does not follow the keys         CAUGHT by follows the keys that moved: each key id with its 
+15 sign missing in label                      CAUGHT by is labelled with how many elements, the step and t
+16 plural of a negative step                  CAUGHT by is labelled with how many elements, the step and t
+17 from centre not in label                   CAUGHT by is labelled with how many elements, the step and t
+18 reverse not in label                       CAUGHT by is labelled with how many elements, the step and t
+19 keys that stay are written                 CAUGHT by does not write the keys that stay where they are; follows the selection order when asked, so the ele
+20 move target ignores the delta              CAUGHT by can stagger earlier with a negative step, writing ; follows the selection order when asked, so the ele
+21 writes in the wrong order                  CAUGHT by can stagger earlier with a negative step, writing ; lets a run of selected keys slide onto frames the 
+22 collision not checked                      CAUGHT by allows keys to move through frames their own selec; follows the layer order, so a different order of s
+23 Stagger never dimmed                       CAUGHT by is dimmed on the KEYFRAME bar with the same reason
+23 of 23 caught

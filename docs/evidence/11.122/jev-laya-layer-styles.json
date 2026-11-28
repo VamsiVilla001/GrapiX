@@ -1,0 +1,261 @@
+{
+ "input": {
+  "state": {
+   "decision": "Library layer styles: the Layer styles tab of the Library panel (Figma B13, plan row 11.122), backend and frontend, asked BEFORE coding (claude, 26 Nov 2026).",
+   "facts": "The Library panel has tabs Colours, Text styles, Layer styles, Backgrounds, Fonts and Assets; Colours now works (named solid colours kept in the project's .gpx, applied by COPY, so editing or deleting one never changes a graphic). Layer styles is still dimmed. The scene model has no separate layer-style field (Photoshop layer styles are plan row 11.60, not built): what an object has is an effect stack, an ordered list of effect instances (each with an id, an enabled switch, its settings and optionally the ids of masks of that object that limit it), edited as one undoable setEffects command; the engine renders effects such as Drop shadow and Glow, and an effect's settings can be keyframed on the timeline by the channel effects.<effectId>.<setting>. Photoshop's inner shadow, bevel, gradient overlay and stroke style are not effects the engine has, so a library item cannot honestly contain them. A project is a folder with one .gpx document. Owner rules: a control that does nothing is dimmed naming the row; a value shown must be one the app holds; a refusal names its reason; library items belong to one project and are not copied between projects; what changes how a graphic LOOKS is never silently changed by a library edit.",
+   "proposed": "A library layer style is a named, ordered stack of 1 to 32 effects stored in the project: an id, a name (1 to 64 characters, unique in the project ignoring case) and the effects with their static settings and enabled switches. It is made from the effect stack of the selected object (one object with at least one effect). Mask limits are not kept (a mask belongs to one object) and keyframes are not kept (static settings only), and the card says so. The selected style's card offers Add to effects (appended to the selected objects' own effects under fresh ids) and Replace effects (dimmed with the reason when an object's effects are keyframed, since replacing would orphan the keys), Rename, Update from selection and Delete. Applying COPIES the effects: nothing links a graphic to the library, so editing or deleting a style never changes a graphic. The card lists each effect by its catalogue name with on or off, and says how many objects of the open graphic have exactly this stack now and that this is what it counts."
+  },
+  "questions": {
+   "content": {
+    "type": "choice",
+    "instructions": "What is a library layer style in this first slice?",
+    "criteria": {
+     "A": "A named stack of the effects the engine already renders (drop shadow, glow and the rest of the catalogue), kept with their settings.",
+     "B": "A Photoshop-style set (drop shadow, inner shadow, outer glow, bevel, stroke, gradient overlay), shown even though the engine cannot render most of them.",
+     "C": "A named single effect."
+    }
+   },
+   "link": {
+    "type": "choice",
+    "instructions": "When a library layer style is applied to an object, what is stored in the object?",
+    "criteria": {
+     "A": "A copy of the effects. Editing or deleting the library style changes no graphic.",
+     "B": "A reference to the library style, so editing it updates every graphic that uses it.",
+     "C": "A copy now, with a reference added later if the owner asks."
+    }
+   },
+   "new": {
+    "type": "choice",
+    "instructions": "How does a person make a layer style?",
+    "criteria": {
+     "A": "From the effect stack of the selected object (one object with at least one effect); an existing style can be updated from the selection.",
+     "B": "Only by picking effects one by one inside the Library.",
+     "C": "Only by importing a Photoshop style file."
+    }
+   },
+   "apply": {
+    "type": "choice",
+    "instructions": "What does applying a style to the selected objects do?",
+    "criteria": {
+     "A": "Two actions: Add to effects (kept beside the object's own effects) and Replace effects (dimmed with the reason when the object's effects are keyframed).",
+     "B": "Only Replace effects, silently removing keyframes of the old effects.",
+     "C": "Only Add to effects."
+    }
+   },
+   "kept": {
+    "type": "choice",
+    "instructions": "What of an object's effects does a library style keep?",
+    "criteria": {
+     "A": "The effects, their order, their enabled switches and their static settings. Not the keyframes and not the limits to the object's own masks, and the card says so.",
+     "B": "Everything, including keyframes and mask limits, pointing at ids that mean nothing in another object.",
+     "C": "Only the effect names, with default settings."
+    }
+   },
+   "delete": {
+    "type": "choice",
+    "instructions": "What does deleting a library layer style do?",
+    "criteria": {
+     "A": "Removes the style only; every graphic keeps the effects it was given.",
+     "B": "Refuses while any graphic uses it.",
+     "C": "Removes the style and the effects from every graphic that used it."
+    }
+   },
+   "usage": {
+    "type": "choice",
+    "instructions": "What does a style's card say about use?",
+    "criteria": {
+     "A": "How many objects in the open graphic have exactly this stack now, since nothing links them (and says that is what it counts).",
+     "B": "Nothing about use.",
+     "C": "Which stored scenes use it, read from every scene."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "content": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "link": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "new": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "apply": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.97,
+    "probabilities": {
+     "A": 0.98,
+     "B": 0,
+     "C": 0.02
+    }
+   },
+   "kept": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "delete": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "usage": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 4423,
+   "output_tokens": 0,
+   "state_tokens": 554,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "content": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.3833,
+     "B": 0.3041,
+     "C": 0.3126
+    },
+    "confidence": 0.0051,
+    "answer_confidence": 0.3833,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "link": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.23,
+     "B": 0.0853,
+     "C": 0.6848
+    },
+    "confidence": 0.2653,
+    "answer_confidence": 0.6848,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "new": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.8138,
+     "B": 0.0675,
+     "C": 0.1187
+    },
+    "confidence": 0.4515,
+    "answer_confidence": 0.8138,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "apply": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3261,
+     "B": 0.2352,
+     "C": 0.4387
+    },
+    "confidence": 0.0285,
+    "answer_confidence": 0.4387,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "kept": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4355,
+     "B": 0.3224,
+     "C": 0.242
+    },
+    "confidence": 0.0257,
+    "answer_confidence": 0.4355,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "delete": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3185,
+     "B": 0.3041,
+     "C": 0.3773
+    },
+    "confidence": 0.004,
+    "answer_confidence": 0.3773,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "usage": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5645,
+     "B": 0.1495,
+     "C": 0.2859
+    },
+    "confidence": 0.1217,
+    "answer_confidence": 0.5645,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

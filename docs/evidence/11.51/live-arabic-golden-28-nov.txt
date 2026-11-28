@@ -1,0 +1,6 @@
+Row 11.51, Arabic RTL golden frame, 28 Nov 2026 (cargo test -p gx-render-worker --test colour_reference arabic_text).
+CPU path: ok. GX_TEST_SCALAR_GPU=dx12: ok (83.7 s, first shader compile). GX_TEST_SCALAR_GPU=vulkan: ok (3.5 s).
+Golden: services/render-engine/worker/tests/fixtures/golden/arabic-rtl-320x180.png (320x180 RGBA, ink bbox 20,83 to 192,124).
+Mutant (logical text reversed in apply_direction): FAILED "path 0: the right-hand word is not the first word (mean alpha difference 12.16, worst 255)".
+Mutant (left-to-right embedding forced): survives, correctly; a space between two right-to-left words resolves to right-to-left (UAX #9 N1).
+View: arabic-rtl-golden-28-nov-x3.png (composited on a dark backdrop at 3x).

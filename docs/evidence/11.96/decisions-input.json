@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "How to build the Editor's Layout dropdown and Layouts dialog (plan row 11.96, the Figma E2 screen). Asked before coding, 24 Nov 2026.",
+  "facts": "A complete model of named workspaces already exists in code and is tested: a shipped workspace (Design) that is never changed, the author's saved ones, a session copy that follows each change, a last-good copy; save, save as, reset to saved, reset to shipped, rename, duplicate, delete (not the one in use, not a shipped one), with fallbacks and a store behind Tauri commands. It stores each workspace as a tree of docks. The live page does not use a tree: it arranges panels in four regions (left, centre, right, bottom) in a layout of its own, saved in the browser's local storage, and has no way to turn a tree back into regions reliably (merging of stacked columns makes it ambiguous). A converter from the four-region layout to a tree exists. The Figma Layouts dialog lists Design, Animation, Data, Logic and Review with a Save current as, Rename, Reset layout and Delete row; other plan rows name the workspaces differently (Author, Animate, Effects, Review; Design, Animate, Data binding; Animation, Data and automation, 3D and render, Diagnostics) and the owner has not chosen. Animation, Data and Logic need panels that do not exist yet. A person who already arranged their panels has that arrangement in local storage today.",
+  "options_bridge": "A: carry the page's own four-region layout inside the saved workspace (in its free-form view state) next to the tree, and check on load that the two agree; a workspace made elsewhere that does not carry it is refused by name. B: rebuild the four regions from the tree on load by pattern matching. C: bypass the workspace model and store four-region layouts in a new store.",
+  "options_ship": "A: ship only Design now and let people save their own; the other names wait for the owner. B: ship Animation, Data, Logic and Review as in the screen, building the missing panels as placeholders.",
+  "options_first": "A: the Design workspace starts as the author's current arrangement, so nothing changes on first run. B: reset to the shipped Design."
+ },
+ "questions": {
+  "bridge": {
+   "type": "choice",
+   "instructions": "How should the page's four-region layout travel inside a saved workspace?",
+   "criteria": {
+    "A": "Carry it in the workspace's view state beside the tree and check the two agree on load (refuse by name when they do not).",
+    "B": "Rebuild the regions from the tree on load by pattern matching.",
+    "C": "Bypass the workspace model with a new store of four-region layouts."
+   }
+  },
+  "ship": {
+   "type": "choice",
+   "instructions": "Which workspaces should ship now?",
+   "criteria": {
+    "A": "Only Design, and let people save their own; the other names wait for the owner.",
+    "B": "Animation, Data, Logic and Review as in the screen, with placeholders for missing panels."
+   }
+  },
+  "first_run": {
+   "type": "choice",
+   "instructions": "What should the first run after this change show a person who already arranged their panels?",
+   "criteria": {
+    "A": "Their current arrangement, kept as the Design workspace, so nothing changes.",
+    "B": "The shipped Design arrangement, replacing theirs."
+   }
+  }
+ }
+}

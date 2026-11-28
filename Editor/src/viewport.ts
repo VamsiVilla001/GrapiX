@@ -408,6 +408,18 @@ function applyViewportObjectState(
     material.opacity = object.opacity;
     material.depthWrite = object.opacity >= 1;
   }
+  // 11.132: a keyed solid fill changes per frame, so its colour is put on the material here too (in place, no new material).
+  // Rect, ellipse and mesh materials carry the fill as their colour; text is drawn from a texture and is left to its own path.
+  const fill = (object as { fill?: ColorValue }).fill;
+  if ((object.type === "rect" || object.type === "ellipse" || object.type === "mesh") && fill?.type === "solid") {
+    const paint = resolvePaint(fill);
+    if (paint.kind === "color") {
+      for (const material of materials) {
+        const coloured = material as THREE.Material & { color?: THREE.Color };
+        if (coloured.color !== undefined && !coloured.color.equals(paint.color)) coloured.color.copy(paint.color);
+      }
+    }
+  }
 }
 
 /// Plane primitives are centred by Three; the scene and overlay use a

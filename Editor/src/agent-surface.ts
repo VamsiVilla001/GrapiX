@@ -94,11 +94,15 @@ export interface UiNode {
   readonly value?: string;
   /// An inline editor for the node's existing edit action.
   readonly input?: {
-    readonly type: "text" | "number" | "checkbox";
+    readonly type: "text" | "number" | "checkbox" | "color";
     readonly value: string;
     readonly mixed?: boolean;
   };
   readonly image?: { readonly src: string; readonly alt: string };
+  /// How a state tag is toned (a chip). Presentation only: the words carry the meaning and an agent reads the words, never the colour.
+  readonly tone?: "ok" | "warn" | "danger" | "neutral";
+  /// A CSS colour (`rgba(224, 32, 32, 1)`) a swatch is drawn in. Presentation only: the node's value says the colour in words, and an agent reads those.
+  readonly swatch?: string;
   readonly actions?: readonly UiAction[];
   readonly children?: readonly UiNode[];
 }
@@ -257,6 +261,14 @@ export function renderNode(document: DocumentLike, node: UiNode): ElementLike {
   }
   if (node.expanded !== undefined) {
     element.setAttribute("aria-expanded", String(node.expanded));
+  }
+  if (node.tone !== undefined) {
+    element.setAttribute("data-tone", node.tone);
+  }
+  // Only a plain colour value is accepted: this goes into a style attribute.
+  if (node.swatch !== undefined && /^[#0-9a-zA-Z(),.% ]+$/.test(node.swatch)) {
+    element.setAttribute("data-swatch", "true");
+    element.setAttribute("style", `--swatch: ${node.swatch}`);
   }
   if (node.value !== undefined && node.input === undefined) {
     element.textContent = node.value;

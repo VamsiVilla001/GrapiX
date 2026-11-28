@@ -32,7 +32,7 @@
   --critical: #ff5f56;
   --critical-bg: var(--sk-danger-tint);
   --live: var(--sk-brand-ember);
-  --info: #6fb3d9;
+  --info: var(--sk-info);
 
   --focus: var(--sk-ember);
 
@@ -75,8 +75,8 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 16px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -152,6 +152,9 @@ code {
 
 .bar {
   display: flex;
+  /* A window narrower than the bar needs wraps the status under the controls; before, the Telemetry button was drawn over it. */
+  flex-wrap: wrap;
+  row-gap: var(--s2);
   align-items: flex-end;
   gap: var(--s3);
   flex: 0 0 auto;
@@ -187,13 +190,14 @@ code {
   align-items: flex-end;
   gap: 2px;
   margin-left: auto;
+  flex: 1 1 240px;
   min-width: 0;
 }
 
 .bar__detail {
   font-size: 11px;
   color: var(--ink-dim);
-  max-width: 42ch;
+  max-width: min(42ch, 100%);
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -518,9 +522,10 @@ code {
    * The floor on row 2 is what makes a short window degrade honestly: rather
    * than squeezing those panels to nothing and clipping controls out of
    * existence, the grid itself starts to scroll. */
-  grid-template-rows: auto minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(220px, 1fr);
   grid-template-areas:
     "clock transport output"
+    "clock stacks    stacks"
     "clock program   log";
   overflow-x: hidden;
   overflow-y: auto;
@@ -538,6 +543,9 @@ code {
 .panel--output {
   grid-area: output;
 }
+.panel--stacks {
+  grid-area: stacks;
+}
 .panel--log {
   grid-area: log;
 }
@@ -545,10 +553,11 @@ code {
 @media (max-width: 1180px) {
   .grid {
     grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(220px, 1fr);
+    grid-template-rows: auto auto auto minmax(220px, 1fr);
     grid-template-areas:
       "clock transport"
       "clock output"
+      "clock stacks"
       "program log";
   }
 }
@@ -803,16 +812,238 @@ code {
 }
 
 .phase-controls {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) repeat(4, minmax(84px, auto));
+  /* The name and four buttons need 550px in one row; a narrower card wraps the buttons instead of pushing them over the Output panel. */
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--s2);
-  align-items: end;
+  align-items: flex-end;
   padding-top: var(--s2);
   border-top: 1px solid var(--line);
 }
 
 .phase-controls__name {
+  flex: 1 1 180px;
   min-width: 0;
+}
+
+.phase-controls > .btn {
+  flex: 0 0 auto;
+  min-width: 84px;
+}
+
+/* ----------------------------------------------------------------- stacks */
+
+/* The Stack field: a number with a step each side. It sits beside its own sentence, which says where the next command goes. */
+.field--stack {
+  flex: 0 0 auto;
+}
+
+.transport__mode--inline {
+  flex: 1 1 180px;
+  padding-bottom: 6px;
+}
+
+.stackfield {
+  display: flex;
+  align-items: stretch;
+}
+
+.stackfield .field__input {
+  width: 84px;
+  text-align: center;
+  border-radius: 0;
+}
+
+.btn--step {
+  width: 30px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.stackfield .btn--step:first-child {
+  border-radius: var(--r) 0 0 var(--r);
+}
+
+.stackfield .btn--step:last-child {
+  border-radius: 0 var(--r) var(--r) 0;
+}
+
+.stacks {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.stacks th {
+  padding: 4px var(--s2);
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: left;
+  color: var(--ink-faint);
+}
+
+.stacks td {
+  padding: 6px var(--s2);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.stacks__col-stack {
+  width: 92px;
+}
+
+.stacks__col-state {
+  width: 150px;
+}
+
+/* Wide enough for Continue, Cue out and Clear in one line, so a row is two lines tall (the scene and its frame), not three. */
+.stacks__col-control {
+  width: 440px;
+}
+
+.stacks__result {
+  padding: 4px var(--s2);
+  background: var(--bg-inset);
+  border-left: 3px solid var(--line-strong);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.stacks__result--ok {
+  border-left-color: var(--nominal);
+}
+
+.stacks__result--refused,
+.stacks__result--error {
+  border-left-color: var(--critical);
+  color: var(--critical);
+}
+
+/* A scene on air is the ember row of the design (--sk-onair-row) with a rule on its left edge: not colour alone. */
+.stacks__row.is-onair td {
+  background: var(--sk-onair-row);
+}
+
+.stacks__row.is-onair td:first-child {
+  box-shadow: inset 3px 0 0 var(--live);
+}
+
+/* The stack the next command goes to carries a marker as well as a line, so it reads without colour. */
+.stacks__row.is-selected td {
+  border-top: 1px solid var(--sk-ember);
+  border-bottom: 1px solid var(--sk-ember);
+}
+
+.stacks__pick {
+  padding: 2px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stacks__pick:hover {
+  border-color: var(--line-strong);
+}
+
+.stacks__pick[aria-pressed="true"]::before {
+  content: "\25B8\00a0";
+  color: var(--sk-ember);
+}
+
+.stacks__scene,
+.stacks__then {
+  overflow-wrap: anywhere;
+}
+
+.stacks__scene {
+  font-weight: 600;
+}
+
+.stacks__empty {
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.stacks__meta {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.stacks__then {
+  font-size: 11px;
+  color: var(--warning);
+}
+
+.stacks .chip {
+  margin: 0 4px 3px 0;
+}
+
+.stacks__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.stacks__controls .btn {
+  padding: 4px var(--s2);
+  font-size: 11px;
+}
+
+.stacks__note {
+  margin-top: var(--s2);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* The armed controls: held for one second, the fill is the hold. A release before the end puts it back at once. */
+.btn--armed {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn--armed .btn__text {
+  position: relative;
+}
+
+.btn--armed .btn__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: color-mix(in srgb, currentColor 30%, transparent);
+  pointer-events: none;
+}
+
+.btn--armed.is-holding .btn__fill {
+  width: 100%;
+  transition: width var(--hold-ms, 1000ms) linear;
+}
+
+.btn--armed.is-fired .btn__fill {
+  width: 100%;
+}
+
+.stacks__later {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+}
+
+.stacks__row-ref {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .commit {

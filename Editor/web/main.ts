@@ -17,6 +17,7 @@
 
 import type {
   AnimationSurface,
+  FitReport,
   RationalRate,
   SessionKey,
   CommandOutcome,
@@ -36,8 +37,15 @@ import type {
   SceneEdit,
   SceneKeyframe,
   AssetLibraryItem,
+  AssetUsageReport,
+  LibraryColour,
+  LibraryLayerStyle,
+  TextChoices,
+  LibraryFolderView,
   PreparedAssetBatch,
   PreparedFontBatch,
+  FontConversionTarget,
+  SystemFontScan,
   SceneTarget,
   SessionView,
   TextStyle,
@@ -123,7 +131,7 @@ import {
   type PathHit,
   type Selected,
 } from "../src/path-edit";
-import type { BezierPath, PathOp, VertexKind } from "@grapix/contracts";
+import type { BezierPath, PathOp, SceneObject, VertexKind } from "@grapix/contracts";
 import { animatesPath, linkUsersWords, linkedPathOf, pathChannelOf, pathKeyAt, pathLinkOf } from "../src/path-anim";
 import {
   beginToolDrag,
@@ -135,8 +143,10 @@ import {
   type ToolId,
 } from "../src/transform-tools";
 import { isFirstSave, saveRoute, versionLabel, type SaveState } from "../src/save-model";
-import { APP_MENUS, actionOf, menuTitle } from "../src/app-menu";
+import { APP_MENUS, actionOf, allCommands, menuTitle } from "../src/app-menu";
+import { assignKey, effectiveKeys, removeKey, resetKey, type EffectiveKeys, type Keymap } from "../src/keymap";
 import {
+  SHORTCUTS,
   commandById,
   decideKey,
   refusalLine,
@@ -145,13 +155,31 @@ import {
   type KeyFocus,
 } from "../src/command-registry";
 import { MACHINE_FIELDS, toValue, USER_FIELDS, usageLine, type FieldSpec } from "../src/settings-form";
+import { createSettingsWindow, type KeysHost } from "../src/settings-window-view";
 import { renderAppMenus, type PanelEntry } from "../src/app-menu-view";
 import { presetBlocker, presetBrowserPanel } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
 import { GraphicPreviewRenderer } from "../src/graphic-preview";
 import { viewportSource, wantsEngineFrame, type ViewChoice } from "../src/viewport-source";
 import { backdropLabel, parseBackdrop, serialiseBackdrop, type Backdrop } from "../src/viewport-backdrop";
-import { createEnginePreview, statusWords, type Failure, type PreviewState } from "../src/engine-preview";
+import { createEnginePreview, engineHoverLines, statusWords, type Failure, type PreviewState } from "../src/engine-preview";
+import { contextLine } from "../src/context-line";
+import { describeIdentityEdits, identityEdits } from "../src/scene-identity";
+import { EMPTY_GRAPHIC, controlledIds, elementTag, newElementName } from "../src/elements-list";
+import { dataPanel, parseDelimiter, type CsvDelimiter, type CsvSource } from "../src/data-panel";
+import { libraryEntries, libraryPanel, projectAssetUsage, usageKey, type LibraryFilter, type LibraryTab, type SceneUsage } from "../src/library";
+import { fillBlocker, parseHex } from "../src/library-colours";
+import { addBlocker, effectWords, fromEffectsBlocker, keepable, maskLimits, replaceBlocker, withFreshIds } from "../src/library-layer-styles";
+import { libraryRefusalWords, type FolderImportPlan, type FolderSelection, type PendingImport } from "../src/library-folders";
+import { startCardShown, startView } from "../src/start-graphic";
+import { renderStartCard } from "../src/start-graphic-view";
+import { fontBand } from "../src/font-band";
+import { elementCard } from "../src/element-card";
+import { renderCard, renderPlaceholder } from "../src/element-card-view";
+import { search as searchEverything, type SearchResult, type SearchSources, type SearchView } from "../src/command-search";
+import { createLayoutSwitcher, type LayoutSwitcher, type Outcome as LayoutOutcome } from "../src/layout-switcher";
+import { MANAGE_VALUE, actionsFor, dialogRows, selectOptions } from "../src/layout-switcher-view";
+import { tauriPersistence } from "../src/workspace-persistence";
 import { renderNode } from "../src/agent-surface";
 import { BROADCAST_RATES, parseRateChoice, rateKey, sameRate } from "../src/frame-rate";
 import { sceneImportPanel } from "../src/import-panel";
@@ -206,8 +234,17 @@ import {
   parseFieldInput,
 } from "../src/inspector";
 import {
+  DEFAULT_FONT_CONVERSION,
+  DEFAULT_FONT_FAMILY,
+  FONT_CONVERSIONS,
   FONT_LINK_SOURCES,
   FONT_STATUS_FILTERS,
+  filterInstalledFonts,
+  installedFontKey,
+  installedFontLabel,
+  installedFontRequests,
+  installedFontsSummary,
+  needsDefaultFont,
   fontAssignTargets,
   fontLinkFor,
   fontManagerPanel,
@@ -221,8 +258,7 @@ import {
   type FontLinkSource,
   type FontManagerState,
   type FontPatch,
-  type FontStatusFilter,
-} from "../src/font-manager";
+  type FontStatusFilter, blockingFonts, fontBlockedReason } from "../src/font-manager";
 import {
   browserFontEnvironment,
   FontRegistry,
@@ -243,6 +279,7 @@ import {
   effectsBrowserPanel,
   toggleGroup,
   isRefused as isEffectRefused,
+  isTextAnimatorPreset,
   listingFor,
   moveEffect,
   parameterLabel,
@@ -251,11 +288,11 @@ import {
   removeEffect,
   setEnabled,
   setParameter,
+  textAnimatorPresetEdit,
   type Stack as EffectStack,
 } from "../src/effects-panel";
 import {
   ASSET_FILE_EXTENSIONS,
-  assetManagerPanel,
   assetUsers,
   describeVideoCodec,
   planAssetRelink,
@@ -306,6 +343,7 @@ import {
   renderPropertyKeyControls,
   renderKeyframePanel,
   propertyLabel,
+  supportsScalarProperty,
   toggleIntent,
   type KeyframePanelModel,
   type KeyframeRow,
@@ -337,6 +375,7 @@ import {
   floorFractions,
   groupOf,
   isRefused as isLayoutRefused,
+  LAYOUT_STORAGE_KEY,
   movePanel,
   moveToGroup,
   persistLayout,
@@ -353,6 +392,23 @@ import {
 import { phaseAddress } from "../src/timeline/phases";
 import { keyId, parseKeyId, timelineModel, type TimelineModel } from "../src/timeline/model";
 import { timelineLayers as describeTimelineLayers, layerSignature } from "../src/timeline/layers";
+import { columnMenu, type Column } from "../src/timeline/layer-columns";
+import { BAR_BUTTONS, TIMELINE_MENU, barState, fitZoom, planAddKeys, type BarAction } from "../src/timeline/keyframe-bar";
+import { planStagger, staggerDeltas, staggeredSelection, type StaggerOptions } from "../src/timeline/stagger";
+import { choiceBlocker, choiceEdit, choiceFieldWords, isChoiceGroup, optionReason, parseChoiceId } from "../src/text-choices";
+import { toolbarContext } from "../src/toolbar-context";
+import { DATA_TABS, SCREEN_TABS, dataTab, screenTab, type DataScreenTab, type LibraryScreenTab } from "../src/library-screen";
+import { latestWords, renderTimeWords } from "../src/status-bar";
+import { arrowFrame, colourRowNodes, planColourChange, planColourKeyToggle, type ColourOutcome, type ColourProperty } from "../src/colour-anim";
+import { animatorEdit, animatorRow, parseAnimatorId, parseHeld, type AnimatorOutcome, type HeldKey } from "../src/text-animator";
+import { elementLines, tallyWords, type RecordsState } from "../src/fit-records";
+import { ADD_ROW, addRowBlocker, type AddKind } from "../src/properties-add";
+import { closeAllPopovers, closePopoversOutside, notDrawnWords, wirePopover } from "../src/popover";
+import { CONTEXT_PANELS, OPENED_ONLY_PANELS, sectionsUnder, afterTab, hiddenPanels, shownTab } from "../src/dock-on-demand";
+import { keyCard, planSetInfluence, planSetKeyFrame, planSetKeyValue, planSetPreset } from "../src/timeline/key-card";
+import { publishView, type Blocker } from "../src/publish-checks";
+import { renderPublishChecks } from "../src/publish-checks-view";
+import { renderKeyCard } from "../src/timeline/key-card-view";
 import { formatTimecode, formatFrameLine, formatRate } from "../src/timeline/clock";
 import {
   isRefused as isKeyEditRefused,
@@ -393,6 +449,7 @@ import {
 import {
   scrollViewportByWheel,
   timelineSnapshotFor,
+  showsColumns,
   viewportForBounds,
   watchSurfaceSize,
 } from "../src/timeline/surface";
@@ -521,12 +578,25 @@ const ui = {
   sceneManagerMount: need<HTMLDivElement>("scene-manager-mount"),
   sceneViewToggle: need<HTMLButtonElement>("scene-view-toggle"),
   sceneMenu: need<HTMLDivElement>("scene-context-menu"),
+  columnMenu: need<HTMLDivElement>("column-menu"),
+  keyframeBar: need<HTMLDivElement>("keyframe-bar"),
+  staggerStep: need<HTMLInputElement>("stagger-step"),
+  staggerOrder: need<HTMLSelectElement>("stagger-order"),
+  staggerReverse: need<HTMLInputElement>("stagger-reverse"),
+  staggerCentre: need<HTMLInputElement>("stagger-centre"),
   sceneManagerEmpty: need<HTMLParagraphElement>("scene-manager-empty"),
   canvas: need<HTMLCanvasElement>("viewport"),
   previewPlay: need<HTMLButtonElement>("preview-play"),
   previewStatus: need<HTMLSpanElement>("preview-status"),
   overlay: need<SVGSVGElement>("viewport-overlay"),
   sceneTabs: need<HTMLElement>("scene-tabs"),
+  sceneLabel: need<HTMLInputElement>("scene-label"),
+  elementCard: need<HTMLElement>("element-card"),
+  keyCard: need<HTMLElement>("key-card"),
+  fontBand: need<HTMLElement>("font-band"),
+  fontBandText: need<HTMLElement>("font-band-text"),
+  viewportEmpty: need<HTMLElement>("viewport-empty"),
+  sceneKeyField: need<HTMLElement>("scene-key-field"),
   canvasSize: need<HTMLSpanElement>("canvas-size"),
   canvasRate: need<HTMLSelectElement>("canvas-rate"),
   viewportView: need<HTMLSelectElement>("viewport-view"),
@@ -565,6 +635,7 @@ const ui = {
   guideMove: need<HTMLButtonElement>("guide-move"),
   guideRemove: need<HTMLButtonElement>("guide-remove"),
   guideShow: need<HTMLInputElement>("guide-show"),
+  dataMount: need<HTMLDivElement>("data-mount"),
   bindings: need<HTMLDivElement>("bindings-mount"),
   sampleDataText: need<HTMLTextAreaElement>("sample-data-text"),
   sampleDataApply: need<HTMLButtonElement>("sample-data-apply"),
@@ -581,10 +652,29 @@ const ui = {
   fontFamilyOverride: need<HTMLInputElement>("font-family-override"),
   fontDisplayName: need<HTMLInputElement>("font-display-name"),
   fontLicence: need<HTMLInputElement>("font-licence"),
+  fontInstalled: need<HTMLDetailsElement>("font-installed"),
+  fontInstalledSearch: need<HTMLInputElement>("font-installed-search"),
+  fontInstalledList: need<HTMLSelectElement>("font-installed-list"),
+  fontConversion: need<HTMLSelectElement>("font-conversion"),
+  fontInstalledAdd: need<HTMLButtonElement>("font-installed-add"),
+  fontInstalledStatus: need<HTMLParagraphElement>("font-installed-status"),
   materialMount: need<HTMLDivElement>("material-mount"),
   engineFrame: need<HTMLDivElement>("engine-frame"),
   engineImage: need<HTMLImageElement>("engine-image"),
   engineStatus: need<HTMLSpanElement>("engine-status"),
+  engineChip: need<HTMLSpanElement>("engine-chip"),
+  searchDialog: need<HTMLDialogElement>("search-dialog"),
+  searchInput: need<HTMLInputElement>("search-input"),
+  searchResults: need<HTMLElement>("search-results"),
+  searchMessage: need<HTMLElement>("search-message"),
+  layoutSwitch: need<HTMLElement>("layout-switch"),
+  layoutSelect: need<HTMLSelectElement>("layout-select"),
+  layoutsDialog: need<HTMLDialogElement>("layouts-dialog"),
+  layoutsList: need<HTMLUListElement>("layouts-list"),
+  layoutsMessage: need<HTMLElement>("layouts-message"),
+  layoutsNameForm: need<HTMLFormElement>("layouts-name-form"),
+  layoutsName: need<HTMLInputElement>("layouts-name"),
+  contextLine: need<HTMLElement>("context-line"),
   engineTime: need<HTMLSpanElement>("engine-time"),
   engineDetail: need<HTMLParagraphElement>("engine-detail"),
   effectsMount: need<HTMLDivElement>("effects-mount"),
@@ -664,6 +754,7 @@ const ui = {
   endpoint: need<HTMLInputElement>("endpoint"),
   publish: need<HTMLButtonElement>("publish"),
   publishResult: need<HTMLDivElement>("publish-result"),
+  publishChecks: need<HTMLElement>("publish-checks"),
   log: need<HTMLUListElement>("log"),
   timelineMount: need<HTMLDivElement>("timeline-mount"),
   timelineMeta: need<HTMLSpanElement>("timeline-meta"),
@@ -753,6 +844,9 @@ let selectedFontId: string | undefined;
 /// Font ingest state (11.13). `registeredFonts` is the font list the browser's
 /// font set was last synced to; rendering waits until it matches the scene.
 let fontIngesting = false;
+/// The fonts installed on this PC, read once when the list is first opened (11.13); `undefined` until then.
+let installedFonts: SystemFontScan | undefined;
+let installedFontsLoading = false;
 let fontNotice: string | undefined;
 let fontReport: FontRegistrationReport | undefined;
 let registeredFonts = "";
@@ -773,6 +867,32 @@ const fontRegistry = new FontRegistry(browserFontEnvironment(), async (asset) =>
 });
 let selectedMaterialId: string | undefined;
 let selectedAssetId: string | undefined;
+/** The Library's filter (All, This scene, Unused, Missing). */
+let libraryFilter: LibraryFilter = "all";
+/** Which stored scenes use each asset (by usage key), as the shell worked it out from the project's files; absent until it has answered. */
+let libraryStoredUsage: ReadonlyMap<string, readonly SceneUsage[]> | undefined;
+let libraryUsageProblems: readonly string[] = [];
+let libraryReadGeneration = 0;
+/** The project's Library folders and which folder each asset is in (`cmd_library_folders`); absent until read. */
+let libraryFolderView: LibraryFolderView | undefined;
+let libraryFoldersProblem: string | undefined;
+/** What the Folders list has selected: "all", "unfiled" or a folder id. */
+let libraryFolder: FolderSelection = "all";
+/** A folder import that has been planned and is waiting for the designer to choose Import. */
+let libraryImportPlan: PendingImport | undefined;
+let libraryFolderGeneration = 0;
+/** The Library's tab: Assets, or Colours (11.122). Fonts and Text styles bring their own panels forward instead of becoming the tab. */
+let libraryTab: LibraryTab = "assets";
+/** The project's library colours (`cmd_library_colours`); absent until read. */
+let libraryColours: readonly LibraryColour[] | undefined;
+let libraryColoursProblem: string | undefined;
+let selectedColourId: string | undefined;
+let libraryColoursGeneration = 0;
+/** The project's library layer styles (`cmd_library_layer_styles`); absent until read. */
+let libraryLayerStyles: readonly LibraryLayerStyle[] | undefined;
+let libraryLayerStylesProblem: string | undefined;
+let selectedLayerStyleId: string | undefined;
+let libraryLayerStylesGeneration = 0;
 /// Asset import state (11.39), shown in the Assets panel.
 let assetImporting = false;
 let assetNotice: string | undefined;
@@ -798,6 +918,8 @@ let controlPropertiesKind: string | undefined;
 let marquee: OverlayBounds | undefined;
 let guides: OverlayGuide[] = [];
 let animationSurface: AnimationSurface | null = null;
+/** The text choices of the Properties dock and what the engine draws of them (`cmd_text_choices`, 11.132); undefined until read. */
+let textChoicesSurface: TextChoices | undefined;
 /// 11.65: the engine's picture of the open scene. One render in flight and one
 /// pending; a frame is current only when it is the latest request's.
 // Explicit guides (11.44): the lines the author put on the canvas, kept with the scene, snapped to before any other line.
@@ -809,10 +931,12 @@ function guideWords(guide: { readonly id: number | bigint; readonly axis: "x" | 
 
 function renderGuides(document_: SceneDocument): void {
   const chosen = ui.guideList.value;
-  ui.guideList.replaceChildren(...document_.guides.map((guide) => new Option(guideWords(guide), String(guide.id))));
+  // A scene with no guides is stored without the field (the contract skips an empty list), so it is read as none, as overlay.ts and path-snap.ts do.
+  const held = document_.guides ?? [];
+  ui.guideList.replaceChildren(...held.map((guide) => new Option(guideWords(guide), String(guide.id))));
   if ([...ui.guideList.options].some((option) => option.value === chosen)) ui.guideList.value = chosen;
-  ui.guideList.disabled = document_.guides.length === 0;
-  ui.guideMove.disabled = ui.guideRemove.disabled = document_.guides.length === 0;
+  ui.guideList.disabled = held.length === 0;
+  ui.guideMove.disabled = ui.guideRemove.disabled = held.length === 0;
 }
 
 function guideEdit(kind: "add" | "move" | "remove"): void {
@@ -949,16 +1073,28 @@ function applyViewportSource(): void {
   ui.viewportChip.textContent = engine ? "Engine" : "Draft";
   ui.viewportChip.dataset.source = verdict.source;
   ui.viewportNote.textContent = verdict.note ?? "";
+  // The header keeps name, DRAFT, size and fps (visibility decision of 26 Nov): the note says why the view is Draft, so it is the chip's tooltip.
+  const chip = document.getElementById("viewport-chip");
+  if (chip) chip.title = verdict.note ?? "The fast editing view. Effects, shaped text and masks are drawn only in the Engine view.";
 }
 
 function renderEngineFrame(state: PreviewState): void {
+  const wasReady = lastPreviewState.status !== "unavailable" && lastPreviewState.status !== "refused";
   lastPreviewState = state;
+  // The Publish checks name the engine's state, so they are drawn again when it changes (they were only drawn after a scene check, and said READY while the bar said unavailable).
+  if (wasReady !== (state.status !== "unavailable" && state.status !== "refused")) drawPublishChecks();
   applyViewportSource();
   const words = statusWords(state);
   ui.engineFrame.dataset.status = state.status;
   ui.engineStatus.textContent = words.word;
   ui.engineStatus.dataset.tone = words.tone;
-  ui.engineTime.textContent = state.renderMs === undefined ? "" : `${Math.round(state.renderMs)} ms`;
+  ui.engineChip.textContent = `Engine · ${words.word}`;
+  ui.engineChip.dataset.tone = words.tone;
+  const hover = document.getElementById("engine-hover");
+  if (hover) hover.textContent = engineHoverLines(state).join("\n");
+  ui.engineTime.textContent = renderTimeWords(state.renderMs);
+  const statusRender = document.getElementById("status-render");
+  if (statusRender) statusRender.textContent = renderTimeWords(state.renderMs);
   ui.engineDetail.textContent = state.status === "unavailable" || state.status === "refused" ? (state.detail ?? "") : "";
   ui.engineImage.hidden = state.imageUrl === undefined;
   if (state.imageUrl !== undefined && ui.engineImage.src !== state.imageUrl) ui.engineImage.src = state.imageUrl;
@@ -1070,6 +1206,12 @@ function log(message: string, outcome: Outcome = "plain"): void {
 
   entry.append(when, what);
   ui.log.prepend(entry);
+  // The status bar's one line is the newest message, coloured as its entry is.
+  const latest = document.getElementById("status-latest");
+  if (latest) {
+    latest.textContent = latestWords(message);
+    latest.className = outcome === "plain" ? "" : outcome;
+  }
 
   // A log that grows without bound is a memory leak in a long authoring
   // session. The oldest lines are the least useful.
@@ -1161,6 +1303,7 @@ function adoptView(view: SessionView): void {
   if ((projectSceneProject ?? currentProject) !== presetLibraryProject) void refreshPresetLibrary();
   void syncProjectAssets();
   ui.sceneId.readOnly = view.origin !== undefined;
+  ui.sceneKeyField.hidden = view.origin !== undefined;
   ui.sceneId.title =
     view.origin === undefined
       ? ""
@@ -1187,6 +1330,7 @@ function restoreSession(session: SceneSession): void {
   ui.timelineGraphClose.hidden = true;
   ui.sceneId.value = view.document.id;
   ui.sceneName.value = view.document.name;
+  ui.sceneLabel.value = view.document.sceneLabel ?? "";
   updateHistoryButtons();
   contentRevision += 1;
   renderSceneState();
@@ -1198,12 +1342,12 @@ function restoreSession(session: SceneSession): void {
 /// `setSceneName`, sent just before a save or publish uses it. A bound
 /// scene's id field is read-only: its id is its store address.
 function pendingIdentityEdits(document_: SceneDocument): SceneEdit[] {
-  const edits: SceneEdit[] = [];
-  const id = ui.sceneId.value.trim();
-  const name = ui.sceneName.value.trim();
-  if (!ui.sceneId.readOnly && id !== document_.id) edits.push({ edit: "setSceneId", id });
-  if (name !== document_.name) edits.push({ edit: "setSceneName", name });
-  return edits;
+  return identityEdits(document_, {
+    id: ui.sceneId.value,
+    name: ui.sceneName.value,
+    label: ui.sceneLabel.value,
+    idLocked: ui.sceneId.readOnly,
+  });
 }
 
 /// Whether the active scene holds work its project copy does not: Rust's
@@ -1242,6 +1386,15 @@ function renderSceneTabs(): void {
     item.append(open, close);
     ui.sceneTabs.append(item);
   }
+  // The + opens another graphic: the Scenes list (visibility decision of 26 Nov 2026).
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "scene-tab-add";
+  add.dataset.sceneAction = "add";
+  add.textContent = "+";
+  add.title = "Open another scene";
+  add.setAttribute("aria-label", "Open another scene");
+  ui.sceneTabs.append(add);
   ui.sceneTabs.hidden = tabs.length === 0;
 }
 
@@ -1320,6 +1473,10 @@ async function closeScene(key: number): Promise<void> {
 function onSceneTabsClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  if (target.closest("button.scene-tab-add")) {
+    focusWorkspacePanel("scene-manager");
+    return;
+  }
   const button = target.closest<HTMLButtonElement>("button[data-scene-key][data-scene-action]");
   const key = Number(button?.dataset.sceneKey);
   if (!button || !Number.isSafeInteger(key)) return;
@@ -1352,6 +1509,7 @@ function presentView(view: SessionView, nextSelection?: readonly string[]): void
   // survives an unrelated edit.
   if (previous.id !== view.document.id) ui.sceneId.value = view.document.id;
   if (previous.name !== view.document.name) ui.sceneName.value = view.document.name;
+  if (previous.sceneLabel !== view.document.sceneLabel) ui.sceneLabel.value = view.document.sceneLabel ?? "";
   if (nextSelection !== undefined) selection = [...new Set(nextSelection)];
   contentRevision += 1;
   renderSceneState();
@@ -1777,6 +1935,9 @@ async function onControlContractClick(event: MouseEvent): Promise<void> {
 }
 
 function renderPanels(document_: SceneDocument): void {
+  // The selection can change by a command's answer as well as by setSelection: the on-demand toolbar groups and dock panels follow.
+  syncToolbarContext();
+  applyOnDemand();
   renderProjectManager();
   renderPivotPanel(document_);
   renderGuides(document_);
@@ -1791,6 +1952,13 @@ function renderPanels(document_: SceneDocument): void {
   for (const row of ui.objectManager.querySelectorAll<HTMLElement>('[role="row"]')) {
     row.dataset.hidden = String(row.querySelector('[id$="/visible"]')?.textContent === "hidden");
     row.dataset.locked = String(row.querySelector('[id$="/locked"]')?.textContent === "locked");
+  }
+  // What each element is, on its line: "box", "text · field". The fields are the elements a control or a binding points at.
+  const controlled = controlledIds(document_);
+  const byId = new Map(document_.objects.map((object) => [object.id, object]));
+  for (const row of ui.objectManager.querySelectorAll<HTMLElement>('[role="row"]')) {
+    const object = byId.get(row.id);
+    if (object !== undefined) row.dataset.tag = elementTag(object, controlled);
   }
 
   renderFontManager(document_);
@@ -1808,9 +1976,14 @@ function renderPanels(document_: SceneDocument): void {
     selectedMaterialId === undefined ? {} : { selectedMaterialId },
   );
   ui.materialMount.replaceChildren(renderNode(document, materials) as unknown as Node);
-  ui.assetEmpty.hidden = document_.assets.length > 0;
+  // The Library says its own empty state (no assets yet, no match for a filter), so the old line is never shown.
+  ui.assetEmpty.hidden = true;
   const assetProject = projectSceneProject;
-  const assets = assetManagerPanel(document_, {
+  const libraryUsed = libraryUsage(document_);
+  const assets = libraryPanel(document_, {
+    filter: libraryFilter,
+    ...(libraryUsed === undefined ? {} : { usage: libraryUsed }),
+    usageProblems: libraryUsageProblems,
     ...(selectedAssetId === undefined ? {} : { selectedAssetId }),
     previews: assetPreviews,
     ...(assetProject === undefined
@@ -1823,6 +1996,19 @@ function renderPanels(document_: SceneDocument): void {
         }),
     ...(assetImporting ? { importing: true } : {}),
     ...(assetNotice === undefined ? {} : { notice: assetNotice }),
+    folder: libraryFolder,
+    tab: libraryTab,
+    selectedObjectIds: selection,
+    ...(libraryColours === undefined ? {} : { colours: libraryColours }),
+    ...(libraryColoursProblem === undefined ? {} : { coloursProblem: libraryColoursProblem }),
+    ...(selectedColourId === undefined ? {} : { selectedColourId }),
+    ...(libraryLayerStyles === undefined ? {} : { layerStyles: libraryLayerStyles }),
+    ...(libraryLayerStylesProblem === undefined ? {} : { layerStylesProblem: libraryLayerStylesProblem }),
+    ...(selectedLayerStyleId === undefined ? {} : { selectedLayerStyleId }),
+    effectName: (instance) => (effectSurface === null ? undefined : listingFor(effectSurface, instance)?.name) ?? effectWords(instance),
+    ...(libraryFolderView === undefined ? {} : { folders: libraryFolderView }),
+    ...(libraryFoldersProblem === undefined ? {} : { foldersProblem: libraryFoldersProblem }),
+    ...(libraryImportPlan === undefined ? {} : { importPlan: libraryImportPlan }),
   });
   ui.assetMount.replaceChildren(renderNode(document, assets) as unknown as Node);
   renderTakePagePanel(document_);
@@ -1837,11 +2023,28 @@ function renderPanels(document_: SceneDocument): void {
   ui.animationFrame.max = String(animation.durationFrames);
   ui.animationMount.replaceChildren(renderKeyframePanel(document, animation, animationSurface));
 
+  void restoreCsv();
+  ui.dataMount.replaceChildren(renderNode(document, dataPanel(document_, recordsNow(), csvNow(), csvDelimiter)) as unknown as Node);
   const bindings = bindingPanel(document_, selection);
   ui.bindings.replaceChildren(renderNode(document, bindings) as unknown as Node);
   renderSampleData(document_);
   renderControlContract(document_);
   renderTimeline(document_);
+}
+
+/** The selected element's card above the Properties: one element shows its style, motion and data; none or several say so. */
+function renderElementCard(document_: SceneDocument): void {
+  const chosen = document_.objects.filter((object) => selection.includes(object.id));
+  const only = chosen.length === 1 ? chosen[0] : undefined;
+  ui.elementCard.replaceChildren(
+    only === undefined
+      ? renderPlaceholder(document, chosen.length)
+      : renderCard(document, elementCard(document_, only, autoFitReason(only), elementLines(document_, recordsState.report, only.id)), {
+          openTimeline: () => focusWorkspacePanel("timeline"),
+          openData: () => openDataScreen(),
+          setAction: (action, on) => void setCardAction(only.id, action, on),
+        }),
+  );
 }
 
 function renderInspector(document_: SceneDocument): void {
@@ -1850,7 +2053,7 @@ function renderInspector(document_: SceneDocument): void {
     ? { field: document.activeElement.dataset.inspectorField, value: document.activeElement.value,
         start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : undefined;
   // Bindings and take-page previews must never become editable authored defaults.
-  const inspector = inspectorPanel(document_, selection);
+  const inspector = inspectorPanel(document_, selection, textChoicesSurface);
   const model = keyframePanelModel(document_, selection, animationSurface, currentFrame);
   const sections = inspectorSections(inspector);
   if (sections.length === 0) {
@@ -1877,6 +2080,10 @@ function renderInspector(document_: SceneDocument): void {
       return group;
     }));
   }
+  drawChoiceDropdowns();
+  renderElementCard(document_);
+  renderKeyCardArea(document_);
+  schedulePublishChecks();
   renderMasks(document_);
   refreshInspectorFrame(model);
   if (focused?.field) {
@@ -2202,13 +2409,18 @@ function renderMasks(document_: SceneDocument): void {
 }
 
 function refreshInspectorFrame(model: KeyframePanelModel): void {
+  // The colour rows follow the playhead too (11.132): drawn again, unless their picker is open.
+  if (scene && !(document.activeElement instanceof HTMLInputElement && document.activeElement.type === "color")) {
+    ui.inspector.querySelector(":scope > .colour-section")?.remove();
+    drawColourRows(scene);
+  }
   if (!model.available) return;
   for (const row of model.rows) {
     const element = document.getElementById(`inspector/${row.property}`);
     if (!element) continue;
     const input = element.querySelector<HTMLInputElement>("[data-inspector-field]");
     if (input && document.activeElement !== input) {
-      input.value = row.value === null ? "" : row.property === "opacity" ? `${row.value * 100}%` : String(row.value);
+      input.value = row.value === null ? "" : row.property === "opacity" || animatorRow(row.property)?.input === "unit" ? `${Math.round(row.value * 10000) / 100}%` : String(row.value);
       input.placeholder = row.value === null ? "Mixed" : "";
     }
     const previousControls = element.querySelector(".property-key-controls");
@@ -2322,7 +2534,9 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
   const layers = describeTimelineLayers(document_);
   layerPresentation = new Map([...layers].map(([id, layer]) => [id, layer.barColour]));
   const bounds = ui.timelineMount.getBoundingClientRect();
-  // The header column is 210px of the grid; the stage gets the rest.
+  // The header column is 540px with the PARENT, BLEND and MATTE columns and 240px without them (a Timeline docked at the
+  // side keeps its stage); the stylesheet follows this attribute, and the stage gets the rest.
+  ui.timelineMount.closest<HTMLElement>(".timeline-bar")?.setAttribute("data-columns", showsColumns(bounds.width) ? "on" : "off");
   timelineViewport = viewportForBounds(
     timelineViewport,
     bounds,
@@ -2598,18 +2812,84 @@ function keyAtStagePoint(
 /// Every refusal here is named — a collision, a frame off the timeline, an
 /// empty clipboard. Nothing is silently dropped, because a key that vanished
 /// without a reason is motion an author cannot get back.
-async function runKeyEdit(plan: EditPlan): Promise<void> {
+async function runKeyEdit(plan: EditPlan): Promise<boolean> {
   if (isKeyEditRefused(plan)) {
     log(`timeline: ${plan.refused}`, "bad");
+    // Nothing changed, so the card goes back to what is stored: a dropdown or number field would otherwise keep showing the refused choice.
+    if (scene) renderKeyCardArea(scene);
+    return false;
+  }
+  return runGesture(plan.edits, plan.label);
+}
+
+/** The keyframe card instead of the element card while keys are selected (B3): time, value, interpolation, and the element's menus. */
+function renderKeyCardArea(document_: SceneDocument): void {
+  const card = selectedKeys.size === 0 ? undefined : keyCard(document_, [...selectedKeys], document_.canvas.frameRate);
+  ui.keyCard.hidden = card === undefined;
+  ui.elementCard.hidden = card !== undefined;
+  if (card === undefined) {
+    ui.keyCard.replaceChildren();
     return;
   }
-  await runGesture(plan.edits, plan.label);
+  const moment = card.moment;
+  const keys = [...selectedKeys];
+  const model = (): TimelineModel => currentTimelineModel(document_);
+  ui.keyCard.replaceChildren(
+    renderKeyCard(document, card, {
+      frame: (frame) => {
+        if (moment === undefined) return;
+        const delta = frame - moment.frame;
+        void (async () => {
+          if (await runKeyEdit(planSetKeyFrame(model(), keys, frame))) {
+            // The keys are named by their frame, so the selection follows them to the new one.
+            setKeySelection(keys.map((id) => id.replace(/\/\d+$/, `/${Number(id.slice(id.lastIndexOf("/") + 1)) + delta}`)));
+          }
+        })();
+      },
+      value: (property, shown) => {
+        if (moment !== undefined) void runKeyEdit(planSetKeyValue(document_, keyId(moment.objectId, property, moment.frame), shown));
+      },
+      influence: (side, percent) => void runKeyEdit(planSetInfluence(document_, keys, side, percent)),
+      easing: (easing) => {
+        if (easing.startsWith("preset:")) {
+          void runKeyEdit(planSetPreset(document_, keys, easing.slice("preset:".length)));
+          return;
+        }
+        const named = animationSurface?.easings.find((candidate) => candidate === easing);
+        if (named) void runKeyEdit(planSetEasing(model(), keys, named));
+      },
+      action: (action) => {
+        if (action === "linear" || action === "hold") void runKeyEdit(planSetEasing(model(), keys, action));
+        else if (action === "ease") easeKeys("both");
+        else openGraphForKey(keys[0]);
+      },
+    }),
+  );
+}
+
+/** The curve of a key's property, in the timeline's graph. */
+function openGraphForKey(id: string | undefined): void {
+  if (!scene || id === undefined) return;
+  const parts = id.split("/");
+  const model = currentTimelineModel(scene);
+  const index = model.tracks.findIndex((track) => track.objectId === parts[0] && track.property === parts[1]);
+  if (index < 0) {
+    log("timeline: that key's property has no row in the timeline to open a graph for", "bad");
+    return;
+  }
+  graphTrack = index;
+  ui.timelineGraphClose.hidden = false;
+  contentRevision += 1;
+  paintTimeline(model);
+  log(`timeline: graph for ${model.tracks[index]!.label}`);
+  focusWorkspacePanel("timeline");
 }
 
 function setKeySelection(next: Iterable<string>): void {
   selectedKeys = new Set(next);
   selectionRevision += 1;
   syncTimelineControls();
+  if (scene) renderKeyCardArea(scene);
   if (scene) paintTimeline(currentTimelineModel(scene));
 }
 
@@ -2636,6 +2916,12 @@ function onTimelineClick(event: MouseEvent): void {
     const replacement = [...ui.timelineMount.querySelectorAll<HTMLButtonElement>("[data-timeline-toggle]")]
       .find((button) => button.dataset.timelineToggle === objectId);
     replacement?.focus({ preventScroll: true });
+    return;
+  }
+
+  const cell = target.closest<HTMLElement>("[data-layer-column]");
+  if (cell) {
+    openColumnMenu(cell);
     return;
   }
 
@@ -2843,6 +3129,151 @@ function easeKeys(kind: EasyEaseKind): void {
   if (scene) void runKeyEdit(planEasyEase(currentTimelineModel(scene), [...selectedKeys], kind));
 }
 
+/** `+ Add (K)`: a key at the playhead on every property the selected elements already animate. */
+function addKeysAtPlayhead(): void {
+  if (!scene) return;
+  const easing = DEFAULT_EASING();
+  if (!easing) {
+    log("keyframe refused: the animation contract declares no easing", "bad");
+    return;
+  }
+  void runKeyEdit(planAddKeys(scene, selection, currentFrame, easing));
+}
+
+/** Zoom so the whole scene fits the stage, from its first frame. */
+function zoomToFit(): void {
+  if (!scene) return;
+  const model = currentTimelineModel(scene);
+  const fit = fitZoom(model.durationFrames, timelineViewport.width);
+  ui.timelineZoom.value = String(fit.pixelsPerFrame);
+  timelineViewport = { ...timelineViewport, pixelsPerFrame: fit.pixelsPerFrame, startFrame: 0 };
+  renderTimeline(scene, false);
+  if (!fit.fits) log("zoom to fit: the scene is longer than the timeline can show, even at the smallest zoom", "bad");
+}
+
+/** The KEYFRAME bar's buttons, drawn once from the list in `keyframe-bar.ts`. */
+function buildKeyframeBar(): void {
+  const label = document.createElement("span");
+  label.className = "keyframe-bar-label";
+  label.textContent = "Keyframe";
+  ui.keyframeBar.replaceChildren(label);
+  for (const spec of BAR_BUTTONS) {
+    if (spec.right && !ui.keyframeBar.querySelector(".keyframe-bar-gap")) {
+      const gap = document.createElement("span");
+      gap.className = "keyframe-bar-gap";
+      ui.keyframeBar.append(gap);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.barAction = spec.action;
+    button.textContent = spec.label;
+    button.title = spec.hint;
+    if (spec.primary) button.classList.add("primary");
+    if (spec.right) button.classList.add("ghost");
+    ui.keyframeBar.append(button);
+    if (spec.action === "stagger") {
+      // Stagger's settings, on demand (visibility decision of 26 Nov 2026): the caret opens them; Stagger runs with them at once.
+      const caret = document.createElement("button");
+      caret.type = "button";
+      caret.id = "stagger-settings";
+      caret.className = "keyframe-bar-caret";
+      caret.textContent = "▾";
+      caret.title = "Stagger settings: step, order, reverse, from centre";
+      caret.setAttribute("aria-label", "Stagger settings");
+      caret.setAttribute("aria-haspopup", "dialog");
+      caret.setAttribute("aria-expanded", "false");
+      ui.keyframeBar.append(caret);
+    }
+  }
+  ui.keyframeBar.addEventListener("click", (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-bar-action]");
+    if (button === null || button.disabled) return;
+    runBarAction(button.dataset.barAction as BarAction);
+  });
+}
+
+function runBarAction(action: BarAction): void {
+  if (action === "auto-key") {
+    // A switch that works with no scene open. The Animation panel's checkbox stays the one switch: the bar presses it.
+    ui.autoKey.checked = !ui.autoKey.checked;
+    ui.autoKey.dispatchEvent(new Event("change", { bubbles: true }));
+    return;
+  }
+  if (!scene) return;
+  const model = currentTimelineModel(scene);
+  const keys = [...selectedKeys];
+  switch (action) {
+    case "prev":
+    case "play":
+    case "next":
+      // The Preview's own buttons do it: one transport, whichever button is pressed.
+      document.getElementById(action === "prev" ? "preview-previous" : action === "play" ? "preview-play" : "preview-next")?.click();
+      syncKeyframeBar();
+      break;
+    case "add":
+      addKeysAtPlayhead();
+      break;
+    case "linear":
+      void runKeyEdit(planSetEasing(model, keys, "linear"));
+      break;
+    case "hold":
+      void runKeyEdit(planSetEasing(model, keys, "hold"));
+      break;
+    case "ease":
+      easeKeys("both");
+      break;
+    case "ease-in":
+      easeKeys("in");
+      break;
+    case "ease-out":
+      easeKeys("out");
+      break;
+    case "stagger":
+      staggerKeys();
+      break;
+    case "fit":
+      zoomToFit();
+      break;
+  }
+}
+
+/** Enable the buttons the selection allows, and say why each other one cannot be pressed. */
+function syncKeyframeBar(): void {
+  const state = barState(scene, [...selectedKeys], selection, autoKey);
+  for (const button of ui.keyframeBar.querySelectorAll<HTMLButtonElement>("button[data-bar-action]")) {
+    const spec = BAR_BUTTONS.find((candidate) => candidate.action === button.dataset.barAction);
+    const now = state[button.dataset.barAction as BarAction];
+    button.disabled = now.disabled !== undefined;
+    button.title = now.disabled ?? spec?.hint ?? "";
+    button.setAttribute("aria-pressed", String(now.active === true));
+    button.classList.toggle("active", now.active === true);
+  }
+  // Play shows whether the preview is playing, as the Preview's own button does.
+  const playing = document.getElementById("preview-play")?.getAttribute("aria-pressed") === "true";
+  const play = ui.keyframeBar.querySelector<HTMLButtonElement>('button[data-bar-action="play"]');
+  if (play) {
+    play.setAttribute("aria-pressed", String(playing));
+    play.classList.toggle("active", playing);
+    play.textContent = playing ? "Pause" : "Play";
+  }
+}
+
+/** Stagger the selected keys by the settings in the Keys group (11.77): one gesture, and the selection follows the keys that moved. */
+function staggerKeys(): void {
+  if (!scene) return;
+  const keys = [...selectedKeys];
+  const options: StaggerOptions = {
+    step: ui.staggerStep.value.trim() === "" ? 0 : Number(ui.staggerStep.value),
+    order: ui.staggerOrder.value === "selection" ? "selection" : "layer",
+    reverse: ui.staggerReverse.checked,
+    fromCentre: ui.staggerCentre.checked,
+  };
+  const made = staggerDeltas(scene, keys, options);
+  void runKeyEdit(planStagger(scene, currentTimelineModel(scene), keys, options)).then((done) => {
+    if (done && "deltas" in made) setKeySelection(staggeredSelection(keys, made.deltas));
+  });
+}
+
 function deleteKeys(): void {
   if (!scene) return;
   void runKeyEdit(planDelete([...selectedKeys]));
@@ -2994,6 +3425,7 @@ function syncTimelineControls(): void {
     presetsLegend.textContent =
       objects.length === 0 ? "Presets \u00b7 select an object" : objects.length === 1 ? `Presets \u00b7 ${objects[0]!.name}` : `Presets \u00b7 ${objects.length} objects`;
   }
+  syncKeyframeBar();
   document.getElementById("tl-group-keys")?.setAttribute("data-idle", String(keyCount === 0));
   document.getElementById("tl-group-presets")?.setAttribute("data-idle", String(objects.length === 0));
 
@@ -3079,11 +3511,18 @@ function renderPresetBrowser(document_: SceneDocument): void {
  *  drift invariant 18 exists to prevent. */
 async function loadObjectKinds(): Promise<void> {
   try {
-    for (const kind of await shell().invoke<string[]>("cmd_object_kinds")) {
+    const kinds = await shell().invoke<string[]>("cmd_object_kinds");
+    for (const kind of kinds) {
       const option = document.createElement("option");
       option.value = kind;
       option.textContent = kind;
       ui.objectKind.append(option);
+    }
+    // The three Add buttons work only for a kind Rust offers: a button that Rust would refuse is not shown as available.
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-add-kind]")) {
+      const offered = kinds.includes(button.dataset.addKind ?? "");
+      button.disabled = !offered;
+      button.title = offered ? "" : "This build cannot add that yet";
     }
   } catch (error) {
     // An empty menu with a stated reason; never a hard-coded stand-in list.
@@ -3405,6 +3844,7 @@ function updatePlaybackControls(): void {
   ui.previewPlay.setAttribute("aria-pressed", String(playing));
   ui.previewStatus.textContent = `${playing ? "Playing" : "Paused"} at frame ${currentFrame}`;
   applyViewportSource();
+  syncKeyframeBar();
 }
 
 function pausePreview(reason: string): void {
@@ -3580,7 +4020,7 @@ function keyFocus(event: KeyboardEvent): KeyFocus {
 function onCommandKey(event: KeyboardEvent): void {
   // Text selected anywhere on the page is copied as text, not as keys.
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && (window.getSelection()?.toString() ?? "") !== "") return;
-  const decision = decideKey(event, keyFocus(event), commandContext());
+  const decision = decideKey(event, keyFocus(event), commandContext(), keyTable.shortcuts);
   if (decision.kind === "pass") return;
   if (decision.kind === "refused") {
     if (decision.quiet) return;
@@ -3604,6 +4044,7 @@ const PEN_FAMILY_BUTTONS: readonly string[] = ["tool-pen", "tool-vertex-add", "t
 
 function updateHistoryButtons(): void {
   const view = activeSession(workspace)?.view;
+  ui.contextLine.textContent = contextLine(view?.document);
   ui.undo.disabled = view === undefined || view.undoDepth === 0;
   ui.redo.disabled = view === undefined || view.redoDepth === 0;
   showRibbonStates();
@@ -3898,12 +4339,15 @@ const DEFAULT_EASING = (): SceneEasing | undefined =>
 async function editPropertyValue(property: string, value: number): Promise<void> {
   const model = activeKeyframeModel();
   const row = selectedAnimationRow(property);
-  if (!model?.available || !row) return;
+  // A property with no value yet (leading that is still "auto") has no diamond row, but it can be set: the edit goes to the selected objects that have it.
+  const objectIds = row?.objectIds ?? settableSelection(property);
+  const rowLabel = row?.label ?? propertyLabel(property);
+  if (!model?.available || objectIds.length === 0) return;
   if (!Number.isFinite(value)) {
-    log(`edit refused: ${row.label} needs a finite value`, "bad");
+    log(`edit refused: ${rowLabel} needs a finite value`, "bad");
     return;
   }
-  const edits: SceneEdit[] = row.objectIds.map((objectId) => ({
+  const edits: SceneEdit[] = objectIds.map((objectId) => ({
     edit: "editProperty",
     objectId,
     property,
@@ -3913,12 +4357,19 @@ async function editPropertyValue(property: string, value: number): Promise<void>
     // does. Auto-Key additionally starts animation on unkeyed properties.
     autoKey: autoKey || (scene?.timeline.channels.some((channel) => channel.objectId === objectId && channel.property === property && channel.keys.length > 0) ?? false),
   }));
-  const scope = row.objectIds.length > 1 ? ` on ${row.objectIds.length} objects` : "";
-  const alreadyAnimated = scene?.timeline.channels.some((channel) => row.objectIds.includes(channel.objectId) && channel.property === property && channel.keys.length > 0);
+  const scope = objectIds.length > 1 ? ` on ${objectIds.length} objects` : "";
+  const alreadyAnimated = scene?.timeline.channels.some((channel) => objectIds.includes(channel.objectId) && channel.property === property && channel.keys.length > 0);
   const label = autoKey || alreadyAnimated
-    ? `Keyed ${row.label} = ${value} at frame ${model.currentFrame}${scope}`
-    : `Set ${row.label} = ${value}${scope}`;
+    ? `Keyed ${rowLabel} = ${value} at frame ${model.currentFrame}${scope}`
+    : `Set ${rowLabel} = ${value}${scope}`;
   await runGesture(edits, label);
+}
+
+/** The selected objects that have this animatable property, whether or not it has a value to show a diamond for yet. */
+function settableSelection(property: string): string[] {
+  const surface = animationSurface;
+  if (!scene || surface === null) return [];
+  return scene.objects.filter((object) => selection.includes(object.id) && supportsScalarProperty(surface, object.type, property)).map((object) => object.id);
 }
 
 /** Toggle keys for a property across the selection: remove when every selected
@@ -4023,6 +4474,250 @@ async function moveKeyframe(rowElement: HTMLElement, row: KeyframeRow): Promise<
   if (moved) setCurrentFrame(toFrame);
 }
 
+/** The popovers of the visibility decision of 26 Nov: the Composition popover on the composition name, the not-drawn list on the
+ *  footer chip. Escape or a press outside closes them; the controls inside keep their own wiring. */
+function wireOnDemandPopovers(): void {
+  const pairs: { button: HTMLElement; popover: HTMLElement; close: () => void }[] = [];
+  const all = [
+    ["composition-open", "composition-popover"],
+    ["not-drawn-chip", "not-drawn-popover"],
+    ["stagger-settings", "stagger-popover"],
+    ["timeline-keys-open", "tl-group-keys"],
+    ["timeline-presets-open", "tl-group-presets"],
+    ["timeline-phases-open", "tl-group-phases"],
+    ["status-message", "log-popover"],
+  ] as const;
+  for (const [buttonId, popoverId] of all) {
+    const button = document.getElementById(buttonId);
+    const popover = document.getElementById(popoverId);
+    if (!button || !popover) continue;
+    const onOpen = popoverId === "stagger-popover" ? () => placeUnder(button, popover) : undefined;
+    pairs.push({ button, popover, close: wirePopover(button, popover, onOpen) });
+  }
+  document.getElementById("status-library")?.addEventListener("click", () => openLibraryScreen());
+  document.getElementById("library-screen-close")?.addEventListener("click", () => closeLibraryScreen());
+  document.getElementById("library-screen-tabs")?.addEventListener("click", (event) => {
+    const tab = (event.target as Element).closest<HTMLButtonElement>("button[data-screen-tab]");
+    if (tab) showLibraryScreenTab(tab.dataset.screenTab as LibraryScreenTab);
+  });
+  document.getElementById("data-screen-open")?.addEventListener("click", () => openDataScreen());
+  document.getElementById("data-screen-close")?.addEventListener("click", () => closeDataScreen());
+  document.getElementById("data-screen-tabs")?.addEventListener("click", (event) => {
+    const tab = (event.target as Element).closest<HTMLButtonElement>("button[data-screen-tab]");
+    if (tab) showDataScreenTab(tab.dataset.screenTab as DataScreenTab);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || closeAllPopovers()) return;
+    if (libraryScreenOpen()) { event.preventDefault(); closeLibraryScreen(); }
+    else if (dataScreenOpen()) { event.preventDefault(); closeDataScreen(); }
+  }, true);
+  // The timeline's right-click: the on-demand groups, where the keys are.
+  ui.timelineMount.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    openTimelineMenu(event);
+  });
+  document.addEventListener("pointerdown", (event) => closePopoversOutside(event.target, pairs), true);
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape" && closeAllPopovers()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    true,
+  );
+}
+
+/** Put a popover under the button that opened it, inside the timeline. */
+function placeUnder(button: HTMLElement, popover: HTMLElement): void {
+  const host = popover.offsetParent?.getBoundingClientRect();
+  const at = button.getBoundingClientRect();
+  if (!host) return;
+  popover.style.left = `${Math.max(8, at.left - host.left - 120)}px`;
+  popover.style.top = `${at.bottom - host.top + 4}px`;
+}
+
+/** The timeline's right-click menu: what is on demand for the keys (visibility decision of 26 Nov 2026). */
+function openTimelineMenu(event: MouseEvent): void {
+  ui.keyframeMenu.replaceChildren();
+  for (const [id, label] of TIMELINE_MENU) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.role = "menuitem";
+    button.textContent = label;
+    button.dataset.invoke = id;
+    ui.keyframeMenu.append(button);
+  }
+  ui.keyframeMenu.hidden = false;
+  const width = ui.keyframeMenu.offsetWidth;
+  const height = ui.keyframeMenu.offsetHeight;
+  ui.keyframeMenu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8))}px`;
+  ui.keyframeMenu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`;
+  ui.keyframeMenu.querySelector<HTMLButtonElement>("button")?.focus();
+}
+
+/**
+ * The text choices as dropdown fields (Figma B3d v2): the rendered group keeps its options (what an agent reads), the page adds the
+ * field that shows the value and opens them, and writes each dimmed option's reason under it.
+ */
+function drawChoiceDropdowns(): void {
+  for (const group of ui.inspector.querySelectorAll<HTMLElement>('[role="group"][id^="inspector/"]')) {
+    if (!isChoiceGroup(group.id)) continue;
+    const valueText = [...group.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent ?? "").join("");
+    const list = document.createElement("div");
+    list.className = "choice-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", group.getAttribute("aria-label") ?? "");
+    list.hidden = true;
+    for (const item of [...group.querySelectorAll<HTMLElement>(':scope > [role="listitem"]')]) {
+      const button = item.querySelector<HTMLButtonElement>("button");
+      const reason = optionReason(button?.dataset.unavailable, item.getAttribute("aria-selected") === "true");
+      if (button && reason !== undefined) {
+        const words = document.createElement("span");
+        words.className = "choice-reason";
+        words.textContent = reason;
+        button.append(words);
+      }
+      list.append(item);
+    }
+    const field = document.createElement("button");
+    field.type = "button";
+    field.className = "choice-field";
+    field.dataset.choiceField = group.id;
+    field.setAttribute("aria-haspopup", "listbox");
+    field.setAttribute("aria-expanded", "false");
+    field.textContent = choiceFieldWords(valueText);
+    group.append(field, list);
+  }
+}
+
+/**
+ * The Fill and Stroke rows (11.132, `colour-anim.ts`): a section after Transform, one row per colour every selected element can
+ * animate, with its picker, diamond and arrows.
+ */
+function drawColourRows(document_: SceneDocument): void {
+  const nodes = colourRowNodes(document_, selection, animationSurface ?? undefined, currentFrame);
+  if (nodes.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "property-section colour-section";
+  const heading = document.createElement("h3");
+  heading.textContent = "Colour";
+  section.append(heading, ...nodes.map((node) => {
+    const row = renderNode(document, node) as unknown as HTMLElement;
+    // The node's words (hex and alpha, or Mixed) stand before the picker: a row with an input draws no value of its own.
+    if (node.input !== undefined) {
+      const words = document.createElement("span");
+      words.className = "colour-words";
+      words.textContent = node.value ?? "";
+      row.prepend(words);
+    }
+    return row;
+  }));
+  const sections = [...ui.inspector.querySelectorAll<HTMLElement>(":scope > .property-section")];
+  const transform = sections.find((candidate) => candidate.querySelector(":scope > h3, :scope > summary")?.textContent === "Transform");
+  if (transform) transform.after(section);
+  else ui.inspector.append(section);
+}
+
+async function runColour(plan: ColourOutcome): Promise<void> {
+  if ("refused" in plan) {
+    log(`colour refused: ${plan.refused}`, "bad");
+    return;
+  }
+  if (plan.edits.length === 0) return;
+  await runEdits([...plan.edits], plan.label, "inspector");
+}
+
+function onColourRowChange(event: Event): void {
+  const input = event.target instanceof HTMLInputElement && event.target.type === "color" ? event.target : null;
+  const property = input?.dataset.for?.startsWith("colour/") ? (input.dataset.for.slice("colour/".length) as ColourProperty) : undefined;
+  if (!input || !property || !scene) return;
+  const easing = DEFAULT_EASING();
+  if (!easing) return;
+  void runColour(planColourChange(scene, selection, property, input.value, currentFrame, autoKey, easing));
+}
+
+function onColourRowClick(event: MouseEvent): void {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-for^="colour/"]') : null;
+  if (!button || button.disabled || !scene) return;
+  const property = button.dataset.for!.slice("colour/".length) as ColourProperty;
+  const action = button.dataset.action;
+  if (action === "key") {
+    const easing = DEFAULT_EASING();
+    if (easing) void runColour(planColourKeyToggle(scene, selection, property, currentFrame, easing));
+  } else if (action === "prev" || action === "next") {
+    const frame = arrowFrame(scene, selection, property, currentFrame, action);
+    if (frame !== undefined) setCurrentFrame(frame);
+  }
+}
+
+/** Open or close a text choice's list; only one is open. */
+function onChoiceFieldClick(event: MouseEvent): void {
+  const field = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-choice-field]") : null;
+  if (!field) return;
+  const list = field.nextElementSibling as HTMLElement | null;
+  const opening = list?.hidden === true;
+  closeChoiceLists();
+  if (list && opening) {
+    list.hidden = false;
+    field.setAttribute("aria-expanded", "true");
+    list.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }
+}
+
+function closeChoiceLists(): boolean {
+  let any = false;
+  for (const list of ui.inspector.querySelectorAll<HTMLElement>(".choice-list:not([hidden])")) {
+    list.hidden = true;
+    list.previousElementSibling?.setAttribute("aria-expanded", "false");
+    any = true;
+  }
+  return any;
+}
+
+/** A text choice in the Properties dock (11.132): one setObjectField over the selected text objects. */
+/** Why Auto-fit cannot be pressed for this element: the text choices ask the engine's drawability check; undefined when it can. */
+function autoFitReason(object: SceneObject): string | undefined {
+  if (object.type !== "text") return undefined;
+  if (textChoicesSurface === undefined) return "the text choices have not been read from the engine";
+  return choiceBlocker(textChoicesSurface, [object], "autoFit", "shrink");
+}
+
+/** A Data block button (Figma B2v2): Auto-fit sets the text's fit, Hide when empty its held value; each one undoable edit. */
+async function setCardAction(objectId: string, action: "auto-fit" | "hide-when-empty", on: boolean): Promise<void> {
+  if (!scene) return;
+  const field = action === "hide-when-empty" ? { name: "hideWhenEmpty", value: on } : { name: "autoFit", value: on ? "shrink" : "none" };
+  const label = action === "hide-when-empty" ? `Hide when empty ${on ? "on" : "off"}` : `Auto-fit ${on ? "on" : "off"}`;
+  await runEdits([{ edit: "setObjectField", objectIds: [objectId], field } as SceneEdit], label, "inspector");
+}
+
+/** The text animator section (11.61): Add, Remove, and the Shape and Basis choices; each is one setTextAnimator. */
+async function runAnimator(outcome: AnimatorOutcome): Promise<void> {
+  if ("refused" in outcome) {
+    log(`text animator refused: ${outcome.refused}`, "bad");
+    return;
+  }
+  await runEdits([...outcome.edits], outcome.label, "inspector");
+}
+
+function onAnimatorClick(event: MouseEvent): void {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-for^="inspector/textAnimator/"]') : null;
+  if (!button || button.disabled || !scene) return;
+  const parsed = parseAnimatorId(button.dataset.action === "choose" ? button.dataset.for! : `${button.dataset.for!.replace(/\/(add|remove)$/, "")}/${button.dataset.action}`);
+  if (parsed === undefined) return;
+  void runAnimator(animatorEdit(scene, selection, parsed.part, parsed.value));
+}
+
+function onTextChoiceClick(event: MouseEvent): void {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-action="choose"]') : null;
+  if (!button || button.disabled || !scene) return;
+  const choice = parseChoiceId(button.dataset.for ?? "");
+  if (choice === undefined) return;
+  const label = button.closest('[role="group"]')?.getAttribute("aria-label") ?? choice.field;
+  void runEdits([choiceEdit(scene, selection, choice.field, choice.value)], `Set ${label} to ${button.textContent ?? choice.value}`, "inspector");
+}
+
 function onAnimationClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -4066,6 +4761,57 @@ function onAnimationChange(event: Event): void {
   }
 }
 
+function closeColumnMenu(): void {
+  ui.columnMenu.hidden = true;
+  ui.columnMenu.replaceChildren();
+}
+
+const COLUMN_EDIT_LABEL: Readonly<Record<Column, string>> = { parent: "Change parent", blend: "Change blend mode", matte: "Set track matte" };
+
+/** The PARENT, BLEND or MATTE menu of one layer, under its cell. Each choice sends the batch `layer-columns.ts` built for it. */
+function openColumnMenu(cell: HTMLElement): void {
+  const document_ = scene;
+  const object = document_?.objects.find((candidate) => candidate.id === cell.dataset.objectId);
+  const column = cell.dataset.layerColumn as Column | undefined;
+  if (document_ === null || document_ === undefined || object === undefined || column === undefined) return;
+  const menu = columnMenu(document_, object, column);
+  ui.columnMenu.replaceChildren();
+  ui.columnMenu.setAttribute("aria-label", `${menu.title} of ${object.name}`);
+  for (const item of menu.items) {
+    if (item.heading) {
+      const heading = document.createElement("p");
+      heading.className = "column-menu-heading";
+      heading.textContent = item.label;
+      ui.columnMenu.append(heading);
+      continue;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.role = item.checked === undefined ? "menuitem" : "menuitemradio";
+    if (item.checked !== undefined) button.setAttribute("aria-checked", String(item.checked));
+    button.textContent = item.label;
+    if (item.edits === undefined) {
+      button.disabled = true;
+      button.title = item.refused ?? "";
+    } else {
+      const edits = item.edits;
+      button.addEventListener("click", () => {
+        closeColumnMenu();
+        sendMaskEdit([...edits], COLUMN_EDIT_LABEL[column]);
+      });
+    }
+    ui.columnMenu.append(button);
+  }
+  ui.columnMenu.hidden = false;
+  const box = cell.getBoundingClientRect();
+  const width = ui.columnMenu.offsetWidth;
+  const height = ui.columnMenu.offsetHeight;
+  ui.columnMenu.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - width - 8))}px`;
+  const below = box.bottom + 2;
+  ui.columnMenu.style.top = `${below + height > window.innerHeight - 8 ? Math.max(8, box.top - height - 2) : below}px`;
+  (ui.columnMenu.querySelector<HTMLButtonElement>("button[aria-checked=true]") ?? ui.columnMenu.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus();
+}
+
 function closeKeyframeMenu(): void {
   ui.keyframeMenu.hidden = true;
   ui.keyframeMenu.replaceChildren();
@@ -4104,6 +4850,11 @@ function openKeyframeMenu(event: MouseEvent, onlyProperty?: string): void {
 function onKeyframeMenuClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  // The page's own [data-invoke] handler presses the opener; the menu only closes.
+  if (target.closest("button[data-invoke]")) {
+    closeKeyframeMenu();
+    return;
+  }
   const button = target.closest<HTMLButtonElement>("button[data-animation-action][data-property]");
   const action = button?.dataset.animationAction;
   const property = button?.dataset.property;
@@ -4128,6 +4879,23 @@ function onInspectorChange(event: Event): void {
   if (!scene) return;
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
+  // The animator's Amount, Smoothness and eases are held percents, set with the rest of the animator (11.61).
+  const heldId = target.dataset.for === undefined ? undefined : parseAnimatorId(target.dataset.for);
+  if (heldId !== undefined && heldId.value === undefined && ["amount", "smoothness", "easeHigh", "easeLow"].includes(heldId.part)) {
+    const parsed = parseHeld(heldId.part as HeldKey, target.value);
+    if ("refused" in parsed) {
+      log(`text animator refused: ${parsed.refused}`, "bad");
+      renderInspector(scene);
+      return;
+    }
+    void runAnimator(animatorEdit(scene, selection, heldId.part, parsed.percent));
+    return;
+  }
+  // The animator's Randomize order checkbox is a held value, set with the rest of the animator (11.61).
+  if (target.dataset.for === "inspector/textAnimator/randomize") {
+    void runAnimator(animatorEdit(scene, selection, "randomize", target.checked));
+    return;
+  }
   const field = target.dataset.inspectorField;
   if (!field) return;
   const raw = target.type === "checkbox" ? String(target.checked) : target.value;
@@ -4137,7 +4905,7 @@ function onInspectorChange(event: Event): void {
     renderInspector(scene);
     return;
   }
-  if (typeof parsed.value === "number" && animationSurface?.properties.includes(field) && selectedAnimationRow(field)) {
+  if (typeof parsed.value === "number" && animationSurface?.properties.includes(field) && (selectedAnimationRow(field) || settableSelection(field).length > 0)) {
     pendingInspectorFields.add(field);
     void editPropertyValue(field, parsed.value).finally(() => {
       if (scene) renderInspector(scene);
@@ -4188,7 +4956,9 @@ function setActiveTool(tool: PageTool): void {
   }
   ui.overlay.dataset.tool = tool;
   showPenCreates();
+  applyOnDemand();
   renderOverlayLayer();
+  if (scene) drawStartCard(scene);
 }
 
 // ---------------------------------------------------------------------------
@@ -4990,7 +5760,22 @@ function currentPenPlan(): PenPlan {
   return scene ? penPlan(scene, selection, penCreates) : { kind: "shape" };
 }
 
+/** Show the toolbar groups the tool and the selection call for (toolbar-context.ts); hide the rest, which stay one key or menu away. */
+function syncToolbarContext(): void {
+  const shown = toolbarContext(activeTool, selection.length);
+  const set = (id: string, on: boolean): void => {
+    const element = document.getElementById(id);
+    if (element) element.hidden = !on;
+  };
+  set("pen-context", shown.pen);
+  set("tool-hand", shown.hand);
+  set("tool-zoom", shown.zoom);
+  set("line-up-tools", shown.lineUp);
+  set("line-up-sep", shown.lineUp);
+}
+
 function showPenCreates(): void {
+  syncToolbarContext();
   const plan = currentPenPlan();
   ui.penCreatesNote.textContent = penPlanWords(plan);
   ui.penCreatesNote.classList.toggle("menu-refused", "refused" in plan);
@@ -5274,6 +6059,24 @@ async function createObject(): Promise<void> {
   }
   const name = window.prompt(`Name for the new ${kind}`, kind);
   if (name === null) return;
+  await addElementNamed(kind, name);
+}
+
+/** Add an element of `kind` straight away, named for what it is ("Box", "Box 2"), as the list's three buttons do. */
+async function addElement(kind: string): Promise<void> {
+  if (!scene) {
+    log("Add: no scene is open", "bad");
+    return;
+  }
+  await addElementNamed(kind, newElementName(kind, scene.objects));
+}
+
+async function addElementNamed(kind: string, name: string): Promise<void> {
+  // Text needs a font in the scene and a blank scene has none: it takes the default font first (11.13), as its own undo entry, and says so.
+  if (scene && needsDefaultFont(scene, kind) && !(await addDefaultFont())) {
+    log(`Add text: the scene has no font and ${DEFAULT_FONT_FAMILY} could not be added (${fontNotice ?? "see the Fonts panel"})`, "bad");
+    return;
+  }
   await runEdits([{ edit: "createObject", kind, name }], {
     label: (effects) => {
       for (const effect of effects) {
@@ -5387,7 +6190,37 @@ function fontManagerState(): FontManagerState {
   };
 }
 
+/** The band over the picture when a font blocks Publish, and the stage's words over an empty graphic. */
+function renderStageStates(document_: SceneDocument): void {
+  const state = fontManagerState();
+  const blocking = blockingFonts(document_, state);
+  const band = fontBand(blocking.map((font) => ({ fontId: font.fontId, displayName: font.displayName, status: fontStatus(font, state).status })));
+  ui.fontBand.hidden = band === undefined;
+  ui.fontBandText.textContent = band?.message ?? "";
+  ui.fontBand.dataset.fontId = band?.firstFontId ?? "";
+  drawStartCard(document_);
+}
+
+/** The Start card (B1) over an empty graphic: the tiles, and the project's other graphics to open. It gets out of the way of a drawing tool. */
+function drawStartCard(document_: SceneDocument): void {
+  const shown = startCardShown(document_.objects.length, activeTool);
+  ui.viewportEmpty.hidden = !shown;
+  if (!shown) return;
+  const view = startView({
+    document: document_,
+    scenes: projectCatalog !== undefined && projectCatalog.project === currentProject ? projectCatalog.scenes : undefined,
+    currentSceneId: projectSceneId,
+  });
+  document.getElementById("viewport-start")!.replaceChildren(
+    renderStartCard(document, view, {
+      tile: (action) => void (action === "add-box" ? addElement("rect") : importSvg()),
+      open: (sceneId) => void openProjectScene(sceneId),
+    }) as unknown as Node,
+  );
+}
+
 function renderFontManager(document_: SceneDocument): void {
+  renderStageStates(document_);
   ui.fontEmpty.hidden = document_.fonts.length > 0;
   const state = fontManagerState();
   ui.fontMount.replaceChildren(renderNode(document, fontManagerPanel(document_, state)) as unknown as Node);
@@ -5417,6 +6250,8 @@ function onFontManagerClick(event: MouseEvent): void {
   if (button?.dataset.for === "font-manager") {
     if (button.dataset.action === "ingestFiles") void ingestFontFiles();
     else if (button.dataset.action === "ingestLink") void ingestFontLink();
+    else if (button.dataset.action === "ingestInstalled") openInstalledFonts();
+    else if (button.dataset.action === "addDefault") void addDefaultFont();
     // The same publish as the toolbar's; the panel only adds the font blocker.
     else if (button.dataset.action === "publish") void publish();
     return;
@@ -5619,6 +6454,8 @@ async function assignFont(fontId: string): Promise<void> {
 async function ingestFonts(
   label: string,
   prepare: (target: SceneTarget) => Promise<PreparedFontBatch>,
+  // The family and display name boxes are for the next font file the author picks; the default and installed fonts keep their own names.
+  applyTypedNames = true,
 ): Promise<boolean> {
   const session = activeSession(workspace);
   if (!session || fontIngesting) return false;
@@ -5629,10 +6466,12 @@ async function ingestFonts(
     const prepared = await prepare({ target: "session", session: session.key });
     const batch = {
       ...prepared,
-      fonts: withIngestNames(prepared.fonts, {
-        family: ui.fontFamilyOverride.value,
-        displayName: ui.fontDisplayName.value,
-      }),
+      fonts: applyTypedNames
+        ? withIngestNames(prepared.fonts, {
+            family: ui.fontFamilyOverride.value,
+            displayName: ui.fontDisplayName.value,
+          })
+        : prepared.fonts,
     };
     const skipped = batch.sources
       .filter((source) => source.disposition.kind !== "added")
@@ -5652,9 +6491,11 @@ async function ingestFonts(
     fontNotice = outcome ? `${added}${skippedNote}` : undefined;
     if (!outcome) return false;
     // The names and licence were for this ingest; the next one starts blank.
-    ui.fontFamilyOverride.value = "";
-    ui.fontDisplayName.value = "";
-    ui.fontLicence.value = "";
+    if (applyTypedNames) {
+      ui.fontFamilyOverride.value = "";
+      ui.fontDisplayName.value = "";
+      ui.fontLicence.value = "";
+    }
     return true;
   } catch (error) {
     fontNotice = `Font ingest refused: ${describe(error)}`;
@@ -5664,6 +6505,80 @@ async function ingestFonts(
     fontIngesting = false;
     if (scene) renderPanels(scene);
   }
+}
+
+/// The conversion the author chose for installed fonts; WOFF2 until they choose.
+function chosenFontConversion(): FontConversionTarget {
+  const chosen = FONT_CONVERSIONS.find((entry) => entry.conversion === ui.fontConversion.value);
+  return chosen?.conversion ?? DEFAULT_FONT_CONVERSION;
+}
+
+/// Open the installed-fonts list and read the fonts on first use. Listing reads a few tables of each file, never a whole file.
+function openInstalledFonts(): void {
+  ui.fontInstalled.open = true;
+  void loadInstalledFonts();
+  ui.fontInstalledSearch.focus();
+}
+
+async function loadInstalledFonts(): Promise<void> {
+  if (installedFonts !== undefined || installedFontsLoading) return;
+  installedFontsLoading = true;
+  ui.fontInstalledStatus.textContent = "Reading the installed fonts…";
+  try {
+    installedFonts = await shell().invoke<SystemFontScan>("cmd_system_fonts_list");
+    renderInstalledFonts();
+  } catch (error) {
+    ui.fontInstalledStatus.textContent = `Installed fonts could not be listed: ${describe(error)}`;
+    log(ui.fontInstalledStatus.textContent, "bad");
+  } finally {
+    installedFontsLoading = false;
+  }
+}
+
+/// Draw the list for the search box; the rows picked before the search stay picked.
+function renderInstalledFonts(): void {
+  if (installedFonts === undefined) return;
+  const picked = new Set([...ui.fontInstalledList.selectedOptions].map((option) => option.value));
+  const shown = filterInstalledFonts(installedFonts, ui.fontInstalledSearch.value);
+  ui.fontInstalledList.replaceChildren(
+    ...shown.map((entry) => {
+      const option = new Option(installedFontLabel(entry), installedFontKey(entry));
+      option.selected = picked.has(option.value);
+      return option;
+    }),
+  );
+  ui.fontInstalledStatus.textContent = installedFontsSummary(installedFonts, shown.length);
+  // The files that could not be read are named, with the reason, where the pointer rests on the summary.
+  ui.fontInstalledStatus.title = installedFonts.skipped.map((file) => `${file.fileName} ${file.reason}`).join("\n");
+}
+
+/// Take the picked installed fonts into the scene as one `addFonts` edit, stored as the author chose. They stay on this PC (never packaged).
+async function addInstalledFonts(): Promise<void> {
+  if (installedFonts === undefined) return;
+  const requests = installedFontRequests(installedFonts, [...ui.fontInstalledList.selectedOptions].map((option) => option.value));
+  if (requests.length === 0) {
+    fontNotice = "Pick one or more installed fonts first";
+    if (scene) renderFontManager(scene);
+    return;
+  }
+  const conversion = chosenFontConversion();
+  const added = await ingestFonts(
+    `${requests.length} installed font(s)`,
+    (target) => shell().invoke<PreparedFontBatch>("cmd_font_prepare_system", { target, requests, conversion }),
+    false,
+  );
+  if (added) ui.fontInstalledList.selectedIndex = -1;
+}
+
+/// Take the default font (Arial, regular first, then bold, italic and bold italic where they are installed) in from this PC as WOFF2.
+/// Returns whether the scene now has it; a PC without Arial is refused by name and nothing else is put in its place.
+async function addDefaultFont(): Promise<boolean> {
+  return ingestFonts(
+    DEFAULT_FONT_FAMILY,
+    (target) =>
+      shell().invoke<PreparedFontBatch>("cmd_font_prepare_default", { target, conversion: DEFAULT_FONT_CONVERSION }),
+    false,
+  );
 }
 
 /// Remove one font explicitly (11.13). The panel refuses a font in use before
@@ -5792,6 +6707,7 @@ function renderEffects(document_: SceneDocument): void {
         showUnported: ui.effectsShowUnported.checked,
         expanded: effectsOpen,
         ...(blocker === undefined ? {} : { targetBlocker: blocker }),
+        ...(object === undefined ? {} : { targetType: object.type }),
       }),
     ) as unknown as Node,
   );
@@ -5845,7 +6761,15 @@ function onEffectsBrowserClick(event: MouseEvent): void {
     if (listing) void commitEffects(object.id, addEffect(effectsOf(object), listing), `Applied ${listing.name} to ${object.name}`);
   } else if (button.dataset.action === "applyPreset") {
     const preset = effectSurface.presets.find((candidate) => `preset/${candidate.id}` === nodeId);
-    if (preset) void commitEffects(object.id, addPreset(effectsOf(object), preset), `Applied preset ${preset.name} to ${object.name}`);
+    if (preset && isTextAnimatorPreset(preset)) {
+      // A text animator preset (11.61) is the animator and its keys from the playhead, one undoable edit; not an effect stack.
+      const edit = textAnimatorPresetEdit(object, preset, currentFrame);
+      if (isEffectRefused(edit)) log(`effects: ${edit.refused}`, "bad");
+      // The frame is a JSON number on the wire; the generated type says bigint (u64), as everywhere else frames are sent.
+      else void runEdits([{ ...edit, atFrame: edit.atFrame as unknown as bigint } as SceneEdit], `Applied ${preset.name} to ${object.name} at frame ${currentFrame}`, "inspector");
+    } else if (preset) {
+      void commitEffects(object.id, addPreset(effectsOf(object), preset), `Applied preset ${preset.name} to ${object.name}`);
+    }
   }
 }
 
@@ -6024,6 +6948,17 @@ async function syncProjectAssets(): Promise<void> {
     projectAssetStored = new Set();
     projectAssetProblems = [];
     projectAssetListing = undefined;
+    libraryFolderView = undefined;
+    libraryFoldersProblem = undefined;
+    libraryFolder = "all";
+    libraryImportPlan = undefined;
+    libraryColours = undefined;
+    libraryColoursProblem = undefined;
+    selectedColourId = undefined;
+    libraryLayerStyles = undefined;
+    libraryLayerStylesProblem = undefined;
+    selectedLayerStyleId = undefined;
+    libraryTab = "assets";
   }
   if (project === undefined) {
     startAssetPreviews(document_.assets);
@@ -6074,10 +7009,451 @@ async function syncProjectAssets(): Promise<void> {
     projectAssetListing = project;
     projectAssetLibrary = library;
     projectAssetStored = new Set(library.flatMap((asset) => (asset.checksum === undefined ? [] : [asset.checksum])));
+    void refreshLibraryFolders();
+    void refreshLibraryColours();
+    void refreshLibraryLayerStyles();
   }
   projectAssetProblems = problems;
   startAssetPreviews([...document_.assets, ...projectAssetLibrary]);
   if (scene) renderPanels(scene);
+}
+
+/** Read the project's Library folders and the folder of each asset. A reply that comes after the author has moved to another project is dropped. */
+async function refreshLibraryFolders(): Promise<void> {
+  const project = projectSceneProject;
+  const generation = ++libraryFolderGeneration;
+  if (project === undefined) {
+    libraryFolderView = undefined;
+    libraryFoldersProblem = undefined;
+    return;
+  }
+  try {
+    const view = await shell().invoke<LibraryFolderView>("cmd_library_folders", { project });
+    if (generation !== libraryFolderGeneration || projectSceneProject !== project) return;
+    libraryFolderView = view;
+    libraryFoldersProblem = undefined;
+  } catch (error) {
+    if (generation !== libraryFolderGeneration || projectSceneProject !== project) return;
+    libraryFolderView = undefined;
+    libraryFoldersProblem = `the project's folders could not be read: ${describe(error)}`;
+  }
+  if (scene) renderPanels(scene);
+}
+
+/** Read the project's library colours. A reply that comes after the author has moved to another project is dropped. */
+async function refreshLibraryColours(): Promise<void> {
+  const project = projectSceneProject;
+  const generation = ++libraryColoursGeneration;
+  if (project === undefined) {
+    libraryColours = undefined;
+    libraryColoursProblem = undefined;
+    return;
+  }
+  try {
+    const read = await shell().invoke<LibraryColour[]>("cmd_library_colours", { project });
+    if (generation !== libraryColoursGeneration || projectSceneProject !== project) return;
+    libraryColours = read;
+    libraryColoursProblem = undefined;
+    if (selectedColourId !== undefined && !read.some((colour) => colour.id === selectedColourId)) selectedColourId = undefined;
+  } catch (error) {
+    if (generation !== libraryColoursGeneration || projectSceneProject !== project) return;
+    libraryColours = undefined;
+    libraryColoursProblem = `the project's colours could not be read: ${describe(error)}`;
+  }
+  if (scene) renderPanels(scene);
+}
+
+/** Read the project's library layer styles. A reply that comes after the author has moved to another project is dropped. */
+async function refreshLibraryLayerStyles(): Promise<void> {
+  const project = projectSceneProject;
+  const generation = ++libraryLayerStylesGeneration;
+  if (project === undefined) {
+    libraryLayerStyles = undefined;
+    libraryLayerStylesProblem = undefined;
+    return;
+  }
+  try {
+    const read = await shell().invoke<LibraryLayerStyle[]>("cmd_library_layer_styles", { project });
+    if (generation !== libraryLayerStylesGeneration || projectSceneProject !== project) return;
+    libraryLayerStyles = read;
+    libraryLayerStylesProblem = undefined;
+    if (selectedLayerStyleId !== undefined && !read.some((style) => style.id === selectedLayerStyleId)) selectedLayerStyleId = undefined;
+  } catch (error) {
+    if (generation !== libraryLayerStylesGeneration || projectSceneProject !== project) return;
+    libraryLayerStyles = undefined;
+    libraryLayerStylesProblem = `the project's layer styles could not be read: ${describe(error)}`;
+  }
+  if (scene) renderPanels(scene);
+}
+
+/** The Library's layer style actions (11.122): choose a style, make one from the selected object's effects, add it to or replace the selection's effects by copy, update, rename, delete. */
+async function libraryLayerStyleAction(action: string, id: string): Promise<void> {
+  const project = projectSceneProject;
+  if (project === undefined || !scene) return;
+  const open = scene;
+  const selected = libraryLayerStyles?.find((style) => style.id === selectedLayerStyleId);
+  assetNotice = undefined;
+  const fromSelection = (): { effects: EffectInstance[]; dropped: number; objectName: string } | undefined => {
+    const blocked = fromEffectsBlocker(open, selection);
+    const object = open.objects.find((candidate) => candidate.id === selection[0]);
+    if (blocked !== undefined || object === undefined) {
+      libraryFolderFailed("The layer style was not saved", blocked ?? "select an object with effects");
+      return undefined;
+    }
+    return { effects: keepable(effectsOf(object)), dropped: maskLimits(effectsOf(object)), objectName: object.name };
+  };
+  const droppedWords = (dropped: number): string =>
+    dropped === 0 ? "" : ` ${dropped} effect${dropped === 1 ? " was" : "s were"} limited to a mask of the object: the style applies ${dropped === 1 ? "it" : "them"} to the whole layer.`;
+  switch (action) {
+    case "layerStyle": {
+      selectedLayerStyleId = id.slice("style/".length);
+      renderPanels(open);
+      return;
+    }
+    case "newStyleFromEffects": {
+      const made = fromSelection();
+      if (made === undefined) return;
+      const name = window.prompt("Name for the new layer style", `${made.objectName} style`);
+      if (name === null) return;
+      try {
+        selectedLayerStyleId = await shell().invoke<string>("cmd_library_layer_style_create", { project, name, effects: made.effects });
+        log(`Made the Library layer style ${name}.${droppedWords(made.dropped)}`, "good");
+        if (made.dropped > 0) assetNotice = `Made the layer style ${name}.${droppedWords(made.dropped)}`;
+      } catch (error) {
+        libraryFolderFailed("The layer style was not made", error);
+        return;
+      }
+      await refreshLibraryLayerStyles();
+      return;
+    }
+    case "addStyle": {
+      if (selected === undefined) return;
+      const why = addBlocker(open, selection);
+      if (why !== undefined) {
+        libraryFolderFailed("The layer style was not applied", why);
+        return;
+      }
+      const edits = open.objects
+        .filter((object) => selection.includes(object.id))
+        .map((object) => ({ edit: "setEffects" as const, objectId: object.id, effects: [...effectsOf(object), ...withFreshIds(effectsOf(object), selected.effects)] }));
+      await runEdits(edits, `Added the layer style ${selected.name}${edits.length > 1 ? ` to ${edits.length} objects` : ""}`);
+      return;
+    }
+    case "replaceStyle": {
+      if (selected === undefined) return;
+      const why = replaceBlocker(open, selection);
+      if (why !== undefined) {
+        libraryFolderFailed("The layer style was not applied", why);
+        return;
+      }
+      const edits = open.objects
+        .filter((object) => selection.includes(object.id))
+        .map((object) => ({ edit: "setEffects" as const, objectId: object.id, effects: withFreshIds([], selected.effects) }));
+      await runEdits(edits, `Replaced the effects with the layer style ${selected.name}${edits.length > 1 ? ` on ${edits.length} objects` : ""}`);
+      return;
+    }
+    case "updateStyle": {
+      if (selected === undefined) return;
+      const made = fromSelection();
+      if (made === undefined) return;
+      try {
+        await shell().invoke("cmd_library_layer_style_set", { project, styleId: selected.id, effects: made.effects });
+        log(`Updated the Library layer style ${selected.name} from ${made.objectName}; graphics given its effects keep their copy.${droppedWords(made.dropped)}`, "good");
+        if (made.dropped > 0) assetNotice = `Updated the layer style ${selected.name}.${droppedWords(made.dropped)}`;
+      } catch (error) {
+        libraryFolderFailed("The layer style was not updated", error);
+        return;
+      }
+      await refreshLibraryLayerStyles();
+      return;
+    }
+    case "renameStyle": {
+      if (selected === undefined) return;
+      const name = window.prompt(`Rename ${selected.name}`, selected.name);
+      if (name === null) return;
+      try {
+        await shell().invoke("cmd_library_layer_style_rename", { project, styleId: selected.id, name });
+        log(`Renamed the Library layer style to ${name}`, "good");
+      } catch (error) {
+        libraryFolderFailed("The layer style was not renamed", error);
+        return;
+      }
+      await refreshLibraryLayerStyles();
+      return;
+    }
+    case "deleteStyle": {
+      if (selected === undefined) return;
+      try {
+        await shell().invoke("cmd_library_layer_style_delete", { project, styleId: selected.id });
+        selectedLayerStyleId = undefined;
+        log(`Deleted the Library layer style ${selected.name}; graphics given its effects keep their copy`, "good");
+      } catch (error) {
+        libraryFolderFailed("The layer style was not deleted", error);
+        return;
+      }
+      await refreshLibraryLayerStyles();
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+/** The Library's colour actions (11.122): choose a colour, make one from the selected fill or from hex, apply one to the selection by copy, rename, change, delete. */
+async function libraryColourAction(action: string, id: string): Promise<void> {
+  const project = projectSceneProject;
+  if (project === undefined || !scene) return;
+  const selected = libraryColours?.find((colour) => colour.id === selectedColourId);
+  assetNotice = undefined;
+  const make = async (name: string, color: LibraryColour["color"]): Promise<void> => {
+    try {
+      selectedColourId = await shell().invoke<string>("cmd_library_colour_create", { project, name, color });
+      log(`Made the Library colour ${name}`, "good");
+    } catch (error) {
+      libraryFolderFailed("The colour was not made", error);
+      return;
+    }
+    await refreshLibraryColours();
+  };
+  switch (action) {
+    case "colour": {
+      selectedColourId = id.slice("colour/".length);
+      renderPanels(scene);
+      return;
+    }
+    case "newColourFromFill": {
+      const blocked = fillBlocker(scene, selection);
+      const object = scene.objects.find((candidate) => candidate.id === selection[0]);
+      const paint = object?.fill;
+      if (blocked !== undefined || object === undefined || paint === undefined || paint.type !== "solid") {
+        libraryFolderFailed("The colour was not made", blocked ?? "select an object with a solid fill");
+        return;
+      }
+      const name = window.prompt("Name for the new colour", `${object.name} fill`);
+      if (name === null) return;
+      await make(name, paint.color);
+      return;
+    }
+    case "newColourHex": {
+      const name = window.prompt("Name for the new colour", "New colour");
+      if (name === null) return;
+      const typed = window.prompt("The colour as hex: #RGB, #RRGGBB or #RRGGBBAA (read as sRGB)", "#808080");
+      if (typed === null) return;
+      const read = parseHex(typed);
+      if ("refused" in read) {
+        libraryFolderFailed("The colour was not made", read.refused);
+        return;
+      }
+      await make(name, read.colour);
+      return;
+    }
+    case "applyFill":
+    case "applyStroke": {
+      if (selected === undefined) return;
+      const slot = action === "applyFill" ? "fill" : "stroke";
+      await runEdits(
+        [{ edit: "setPaint", objectIds: [...selection], slot, paint: { type: "solid", color: selected.color } }],
+        `Applied the colour ${selected.name} as ${slot}${selection.length > 1 ? ` on ${selection.length} objects` : ""}`,
+      );
+      return;
+    }
+    case "renameColour": {
+      if (selected === undefined) return;
+      const name = window.prompt(`Rename ${selected.name}`, selected.name);
+      if (name === null) return;
+      try {
+        await shell().invoke("cmd_library_colour_rename", { project, colourId: selected.id, name });
+        log(`Renamed the Library colour to ${name}`, "good");
+      } catch (error) {
+        libraryFolderFailed("The colour was not renamed", error);
+        return;
+      }
+      await refreshLibraryColours();
+      return;
+    }
+    case "editColour": {
+      if (selected === undefined) return;
+      const typed = window.prompt(`${selected.name} as hex: #RGB, #RRGGBB or #RRGGBBAA (read as sRGB${selected.color.space === "srgb" ? "" : `; it is ${selected.color.space} now`})`, "");
+      if (typed === null) return;
+      const read = parseHex(typed);
+      if ("refused" in read) {
+        libraryFolderFailed("The colour was not changed", read.refused);
+        return;
+      }
+      try {
+        await shell().invoke("cmd_library_colour_set", { project, colourId: selected.id, color: read.colour });
+        log(`Changed the Library colour ${selected.name}; graphics painted with it keep their copy`, "good");
+      } catch (error) {
+        libraryFolderFailed("The colour was not changed", error);
+        return;
+      }
+      await refreshLibraryColours();
+      return;
+    }
+    case "deleteColour": {
+      if (selected === undefined) return;
+      try {
+        await shell().invoke("cmd_library_colour_delete", { project, colourId: selected.id });
+        selectedColourId = undefined;
+        log(`Deleted the Library colour ${selected.name}; graphics painted with it keep their copy`, "good");
+      } catch (error) {
+        libraryFolderFailed("The colour was not deleted", error);
+        return;
+      }
+      await refreshLibraryColours();
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+/** Read the project's library again (after a folder import added assets), then its folders and usage. */
+async function reloadProjectLibrary(): Promise<void> {
+  const project = projectSceneProject;
+  if (project === undefined) return;
+  try {
+    const library = await shell().invoke<AssetLibraryItem[]>("cmd_project_assets", { project });
+    if (projectSceneProject !== project) return;
+    projectAssetListing = project;
+    projectAssetLibrary = library;
+    projectAssetStored = new Set(library.flatMap((asset) => (asset.checksum === undefined ? [] : [asset.checksum])));
+    startAssetPreviews([...(scene?.assets ?? []), ...library]);
+  } catch (error) {
+    projectAssetProblems = [...projectAssetProblems, `project assets unreadable: ${describe(error)}`];
+  }
+  await refreshLibraryFolders();
+  void refreshLibraryUsage();
+  if (scene) renderPanels(scene);
+}
+
+/** Say a folder action failed, in the Library's own notice and in the log: the backend's reason is the message. */
+function libraryFolderFailed(what: string, error: unknown): void {
+  assetNotice = `${what}: ${libraryRefusalWords(typeof error === "string" ? error : describe(error))}`;
+  log(assetNotice, "bad");
+  if (scene) renderPanels(scene);
+}
+
+/** The Library's folder actions: choose, make, rename, delete, move an asset, and Import folder (plan, review, apply). */
+async function libraryFolderAction(action: string, id: string): Promise<void> {
+  const project = projectSceneProject;
+  if (project === undefined) return;
+  const real = libraryFolder !== "all" && libraryFolder !== "unfiled" ? libraryFolder : undefined;
+  const nameOf = (folderId: string): string => libraryFolderView?.folders.find((folder) => folder.id === folderId)?.name ?? folderId;
+  assetNotice = undefined;
+  switch (action) {
+    case "folder": {
+      libraryFolder = id.slice("library/folder/".length);
+      if (scene) renderPanels(scene);
+      return;
+    }
+    case "newFolder": {
+      const name = window.prompt(real === undefined ? "Name for the new folder" : `Name for the new folder inside ${nameOf(real)}`, "New folder");
+      if (name === null) return;
+      try {
+        const created = await shell().invoke<string>("cmd_library_folder_create", { project, name, parentId: real ?? null });
+        libraryFolder = created;
+        log(`Made Library folder ${name}`, "good");
+      } catch (error) {
+        libraryFolderFailed("The folder was not made", error);
+        return;
+      }
+      await refreshLibraryFolders();
+      return;
+    }
+    case "renameFolder": {
+      if (real === undefined) return;
+      const name = window.prompt(`Rename ${nameOf(real)}`, nameOf(real));
+      if (name === null) return;
+      try {
+        await shell().invoke("cmd_library_folder_rename", { project, folderId: real, name });
+        log(`Renamed Library folder to ${name}`, "good");
+      } catch (error) {
+        libraryFolderFailed("The folder was not renamed", error);
+        return;
+      }
+      await refreshLibraryFolders();
+      return;
+    }
+    case "deleteFolder": {
+      if (real === undefined) return;
+      const gone = nameOf(real);
+      try {
+        await shell().invoke("cmd_library_folder_delete", { project, folderId: real });
+        libraryFolder = "all";
+        log(`Deleted Library folder ${gone}`, "good");
+      } catch (error) {
+        libraryFolderFailed("The folder was not deleted", error);
+        return;
+      }
+      await refreshLibraryFolders();
+      return;
+    }
+    case "moveTo": {
+      if (selectedAssetId === undefined) return;
+      const target = id.slice("library/move/".length);
+      try {
+        await shell().invoke("cmd_library_asset_move", { project, assetId: selectedAssetId, folderId: target === "unfiled" ? null : target });
+      } catch (error) {
+        libraryFolderFailed("The asset was not moved", error);
+        return;
+      }
+      await refreshLibraryFolders();
+      return;
+    }
+    case "importFolder": {
+      let directory: string | undefined;
+      try {
+        const picked = await openFileDialog({ directory: true, multiple: false });
+        directory = typeof picked === "string" ? picked : undefined;
+      } catch (error) {
+        libraryFolderFailed("The folder could not be chosen", error);
+        return;
+      }
+      if (directory === undefined) return;
+      try {
+        const plan = await shell().invoke<FolderImportPlan>("cmd_library_import_folder_plan", { project, directory });
+        libraryImportPlan = { directory, plan };
+      } catch (error) {
+        libraryFolderFailed("The folder could not be read for import", error);
+        return;
+      }
+      if (scene) renderPanels(scene);
+      return;
+    }
+    case "importCancel": {
+      libraryImportPlan = undefined;
+      if (scene) renderPanels(scene);
+      return;
+    }
+    case "importApply": {
+      const pending = libraryImportPlan;
+      if (pending === undefined || assetImporting) return;
+      assetImporting = true;
+      assetNotice = `Importing ${pending.plan.rootName}…`;
+      if (scene) renderPanels(scene);
+      try {
+        const added = await shell().invoke<number>("cmd_library_import_folder_apply", {
+          project,
+          directory: pending.directory,
+          planFingerprint: pending.plan.planFingerprint,
+        });
+        assetNotice = `Imported ${added} asset${added === 1 ? "" : "s"} from ${pending.plan.rootName}`;
+        log(assetNotice, "good");
+        libraryImportPlan = undefined;
+      } catch (error) {
+        // The shell rebuilds the plan before it writes and refuses a changed folder; the review stays so the designer can read why, and cancel or choose again.
+        assetNotice = `The import was refused: ${describe(error)}`;
+        log(assetNotice, "bad");
+      } finally {
+        assetImporting = false;
+      }
+      await reloadProjectLibrary();
+      return;
+    }
+    default:
+      return;
+  }
 }
 
 /** Make a preview for every asset that does not have one yet. */
@@ -6192,35 +7568,246 @@ function onAssetManagerClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
-  if (button?.dataset.for === "asset-manager") {
-    if (button.dataset.action === "importFiles" && !button.disabled) void importAssetFiles();
-    return;
-  }
-  if (button?.dataset.action === "addToScene" && button.dataset.for?.startsWith("project-asset/") && !button.disabled) {
-    const assetId = button.dataset.for.slice("project-asset/".length);
-    const item = projectAssetLibrary.find((candidate) => candidate.assetId === assetId);
-    if (item) {
-      void runEdits([{ edit: "addAssets", assets: [item] }], `Added ${item.name} from the project library`, "assets");
+  if (button !== null) {
+    if (button.disabled) return;
+    const id = button.dataset.for ?? "";
+    switch (button.dataset.action) {
+      case "importFiles":
+        if (id === "asset-manager") void importAssetFiles();
+        return;
+      case "folder":
+      case "newFolder":
+      case "renameFolder":
+      case "deleteFolder":
+      case "moveTo":
+      case "importFolder":
+      case "importApply":
+      case "importCancel":
+        void libraryFolderAction(button.dataset.action, id);
+        return;
+      case "filter": {
+        const next = id.slice("library/filter/".length);
+        if (next === "all" || next === "scene" || next === "unused" || next === "missing") {
+          libraryFilter = next;
+          renderPanels(scene);
+        }
+        return;
+      }
+      case "tab": {
+        const tab = id.slice("library/tab/".length);
+        if (tab === "fonts") focusWorkspacePanel("fonts");
+        else if (tab === "text-styles") focusWorkspacePanel("text-styles");
+        else if (tab === "colours" || tab === "layer-styles" || tab === "assets") {
+          libraryTab = tab;
+          renderPanels(scene);
+        }
+        return;
+      }
+      case "colour":
+      case "newColourFromFill":
+      case "newColourHex":
+      case "applyFill":
+      case "applyStroke":
+      case "renameColour":
+      case "editColour":
+      case "deleteColour":
+        void libraryColourAction(button.dataset.action, id);
+        return;
+      case "layerStyle":
+      case "newStyleFromEffects":
+      case "addStyle":
+      case "replaceStyle":
+      case "updateStyle":
+      case "renameStyle":
+      case "deleteStyle":
+        void libraryLayerStyleAction(button.dataset.action, id);
+        return;
+      case "addToScene": {
+        const entry = libraryEntryFor(selectedAssetId);
+        if (entry) void runEdits([{ edit: "addAssets", assets: [entry.asset] }], `Added ${entry.asset.name} from the project library`, "assets");
+        return;
+      }
+      case "relink": {
+        const entry = libraryEntryFor(selectedAssetId);
+        const own = entry === undefined ? undefined : scene.assets.find((candidate) => usageKey(candidate) === usageKey(entry.asset));
+        if (own) void relinkAsset(own.assetId);
+        return;
+      }
+      default:
+        return;
     }
-    return;
   }
-  const row = target.closest<HTMLLIElement>('li[role="listitem"][id^="asset/"]');
-  const asset = scene.assets.find((candidate) => `asset/${candidate.assetId}` === row?.id);
-  if (!asset) return;
-
-  selectedAssetId = asset.assetId;
+  const card = target.closest<HTMLLIElement>('li[role="listitem"][id^="asset/"]');
+  const cardId = card?.id.slice("asset/".length);
+  const entry = cardId === undefined || cardId.includes("/") ? undefined : libraryEntryFor(cardId);
+  if (!entry) return;
+  selectedAssetId = entry.asset.assetId;
   renderPanels(scene);
-  if (button?.dataset.action === "relink" && !button.disabled) {
-    void relinkAsset(asset.assetId);
+  const ownId = scene.assets.find((candidate) => usageKey(candidate) === usageKey(entry.asset))?.assetId ?? entry.asset.assetId;
+  const users = entry.inScene ? assetUsers(scene, ownId) : [];
+  log(
+    !entry.inScene
+      ? `Asset ${entry.asset.name} is in the project; this graphic does not use it.`
+      : users.length === 0
+        ? `Asset ${entry.asset.name} is used by no objects.`
+        : `Asset ${entry.asset.name} is used by object(s): ${users.join(", ")}.`,
+  );
+}
+
+/** The Library's entry for an asset id: the project's asset, or one the open graphic holds that the project does not yet. */
+function libraryEntryFor(assetId: string | undefined): ReturnType<typeof libraryEntries>[number] | undefined {
+  if (assetId === undefined || !scene) return undefined;
+  const assetProject = projectSceneProject;
+  return libraryEntries(scene, assetProject === undefined ? {} : { project: assetProject, projectLibrary: projectAssetLibrary }).find(
+    (entry) => entry.asset.assetId === assetId,
+  );
+}
+
+/** The scenes that use each asset: the shell's answer for the stored scenes, with the open graphic taken as it is now (it may have unsaved changes). */
+function libraryUsage(document_: SceneDocument): ReturnType<typeof projectAssetUsage> | undefined {
+  if (projectSceneProject === undefined || libraryStoredUsage === undefined) return undefined;
+  const openId = projectSceneId ?? document_.id;
+  const usage = new Map<string, SceneUsage[]>();
+  for (const [key, scenes] of libraryStoredUsage) usage.set(key, scenes.filter((use) => use.sceneId !== openId));
+  const live = projectAssetUsage([{ sceneId: openId, name: document_.name, document: document_ }]);
+  for (const [key, scenes] of live) usage.set(key, [...(usage.get(key) ?? []), ...scenes]);
+  return usage;
+}
+
+/** Ask the shell which stored scenes use each asset (it reads the project's own files), so the Library can say so. A scene that will not read is named, not dropped. */
+async function refreshLibraryUsage(): Promise<void> {
+  const project = currentProject;
+  const catalog = projectCatalog;
+  if (project === undefined || catalog === undefined || catalog.project !== project) {
+    libraryStoredUsage = undefined;
+    libraryUsageProblems = [];
     return;
   }
+  const generation = ++libraryReadGeneration;
+  let report: AssetUsageReport;
+  try {
+    report = await shell().invoke<AssetUsageReport>("cmd_project_asset_usage", { project });
+  } catch (error) {
+    if (generation !== libraryReadGeneration || currentProject !== project) return;
+    libraryStoredUsage = undefined;
+    libraryUsageProblems = [`Usage could not be read: ${describe(error)}`];
+    if (scene) renderPanels(scene);
+    return;
+  }
+  if (generation !== libraryReadGeneration || currentProject !== project) return;
+  const names = new Map(catalog.scenes.map((listed) => [listed.sceneId, listed.name] as const));
+  libraryStoredUsage = new Map(report.entries.map((entry) => [entry.key, entry.scenes.map((use) => ({ sceneId: use.sceneId, name: use.name }))] as const));
+  libraryUsageProblems = report.problems.filter((problem) => problem.sceneId !== projectSceneId).map((problem) => `${names.get(problem.sceneId) ?? problem.sceneId}: ${problem.reason}`);
+  if (scene) renderPanels(scene);
+}
 
-  const users = assetUsers(scene, asset.assetId);
-  log(
-    users.length === 0
-      ? `Asset ${asset.name} is used by no objects.`
-      : `Asset ${asset.name} is used by object(s): ${users.join(", ")}.`,
-  );
+// --- The record check (11.153): the engine measures each record's text in its box; the Editor shows what it said -----------------------------
+
+let recordsState: RecordsState = {};
+/** The graphic's version when the report was made: a later one makes the report stale. */
+let recordsCheckedAt: number | undefined;
+
+/** The report as the panels show it now: stale when the graphic has changed since the check. */
+function recordsNow(): RecordsState {
+  const stale = recordsState.report !== undefined && scene !== null && recordsCheckedAt !== sceneVersion(scene);
+  return stale ? { ...recordsState, stale: true } : recordsState;
+}
+
+async function checkRecords(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session || !scene || recordsState.checking === true) return;
+  const endpoint = ui.endpoint.value.trim();
+  const version = sceneVersion(scene);
+  recordsState = { ...recordsState, checking: true };
+  renderPanels(scene);
+  drawPublishChecks();
+  try {
+    const report = await shell().invoke<FitReport>("cmd_fit_report", { endpoint, target: { target: "session", session: session.key } });
+    recordsState = { report };
+    recordsCheckedAt = version;
+    const toFix = report.records.some((record) => record.elements.some((element) => element.result === "overflows" || ((element.result === "empty" || element.result === "missing") && !element.hidden)));
+    log(`Record check: ${report.records.length === 0 ? "no records" : tallyWords(report)}`, toFix ? "bad" : "good");
+  } catch (error) {
+    recordsState = { problem: `The engine could not check the records: ${describe(error)}` };
+    log(`Record check failed: ${describe(error)}`, "bad");
+  }
+  if (scene) renderPanels(scene);
+  drawPublishChecks();
+}
+
+// --- The project's CSV (11.153 slice C): the shell keeps a copy in the project and the record check reads its rows ---------------------------
+
+/** The CSV each open graphic was last given in this session, by session key (a number); the shell holds the copy, this is what it said on import. */
+const csvSources = new Map<number, CsvSource>();
+/** The delimiter chosen for the next import: the picker opens after it is stated, so the file is read as the designer said. */
+let csvDelimiter: CsvDelimiter = "comma";
+
+function csvNow(): CsvSource | undefined {
+  const session = activeSession(workspace);
+  return session ? csvSources.get(session.key) : undefined;
+}
+
+/** Sessions whose stored CSV the shell has been asked about: once each, so a graphic reopened from a project shows its source. */
+const csvAsked = new Set<number>();
+
+/** Ask the shell whether the project holds a CSV for this graphic (`cmd_project_csv_source`). A graphic not saved in a project has none, and that is not a fault. */
+async function restoreCsv(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session || csvAsked.has(session.key)) return;
+  csvAsked.add(session.key);
+  try {
+    const stored = await shell().invoke<CsvSource | null>("cmd_project_csv_source", { target: { target: "session", session: session.key } });
+    if (stored === null || csvSources.has(session.key)) return;
+    csvSources.set(session.key, stored);
+    if (scene) renderPanels(scene);
+  } catch {
+    // Not saved in a project yet, or the shell is not there: the panel simply shows no CSV.
+  }
+}
+
+async function importCsv(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session || !scene) return;
+  try {
+    const imported = await shell().invoke<CsvSource | null>("cmd_import_project_csv", { target: { target: "session", session: session.key }, delimiter: csvDelimiter });
+    if (imported === null) {
+      log("CSV import: nothing picked, the graphic's data is as it was");
+      return;
+    }
+    csvSources.set(session.key, imported);
+    // The old report measured other records: it is gone, not stale, so nothing says FITS that was not measured against this file.
+    recordsState = {};
+    recordsCheckedAt = undefined;
+    log(`CSV import: ${imported.fileName}, ${imported.rowCount} record${imported.rowCount === 1 ? "" : "s"}, ${imported.columns.length} column${imported.columns.length === 1 ? "" : "s"}`, "good");
+  } catch (error) {
+    log(`CSV import failed: ${describe(error)}`, "bad");
+  }
+  if (scene) renderPanels(scene);
+  drawPublishChecks();
+}
+
+/** The delimiter box on the Data panel: comma, semicolon or tab, in words or as the character. Anything else is refused in words and the box goes back. */
+function onDataPanelChange(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.dataset.for !== "data/csv-delimiter") return;
+  const parsed = parseDelimiter(target.value);
+  if (parsed === undefined) log(`CSV delimiter: "${target.value}" is not comma, semicolon or tab; it stays ${csvDelimiter}`, "bad");
+  else csvDelimiter = parsed;
+  if (scene) renderPanels(scene);
+}
+
+/** The Data panel's buttons: adding sample data brings the sample-data editor into view and focuses it; the other sources wait and say what for. */
+function onDataPanelClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
+  if (button === null || button.disabled) return;
+  if (button.dataset.action === "addCsv") void importCsv();
+  if (button.dataset.action === "addSampleData") {
+    ui.sampleDataText.scrollIntoView({ block: "center" });
+    ui.sampleDataText.focus();
+  }
+  if (button.dataset.action === "checkRecords") void checkRecords();
 }
 
 /// Import image, SVG, video and 3D model files (11.39). The shell classifies
@@ -6435,11 +8022,21 @@ function onSampleDataRevert(): void {
  *  preview obeys the same rule the engine does. */
 function renderUnsupported(reasons: readonly string[]): void {
   ui.unsupportedList.replaceChildren();
-  ui.unsupportedPanel.hidden = reasons.length === 0;
+  ui.unsupportedPanel.hidden = reasons.length === 0 || !openedPanels.has("unsupported");
   for (const reason of reasons) {
     const item = document.createElement("li");
     item.textContent = reason;
     ui.unsupportedList.append(item);
+  }
+  // The viewport footer's chip (visibility decision of 26 Nov): the same list, one click away.
+  const chip = document.getElementById("not-drawn-chip");
+  const list = document.getElementById("not-drawn-list");
+  if (chip && list) {
+    chip.hidden = reasons.length === 0;
+    chip.textContent = notDrawnWords(reasons.length);
+    chip.title = reasons.length === 0 ? "" : `${notDrawnWords(reasons.length)} by this preview: click for the list`;
+    list.replaceChildren(...reasons.map((reason) => Object.assign(document.createElement("li"), { textContent: reason })));
+    if (reasons.length === 0) document.getElementById("not-drawn-popover")?.setAttribute("hidden", "");
   }
   if (reasons.length > 0) {
     log(`${reasons.length} object(s) not drawn in the Draft view (see the Engine preview)`, "bad");
@@ -6475,6 +8072,11 @@ function updateTimeReadouts(): void {
 }
 
 function focusWorkspacePanel(id: string): void {
+  // An on-demand panel is called: it shows until the person goes back to Properties.
+  if ((CONTEXT_PANELS as readonly string[]).includes(id) || (OPENED_ONLY_PANELS as readonly string[]).includes(id)) {
+    openedPanels.add(id);
+    applyOnDemand();
+  }
   const panel = document.querySelector<HTMLElement>(`[data-panel="${id}"]`);
   if (!panel || panel.hidden) return;
   // A panel on a tab that is not showing is brought forward first.
@@ -6614,6 +8216,7 @@ function drawAppMenus(): void {
   const bar = document.querySelector<HTMLElement>(".app-menubar");
   if (!bar) return;
   renderAppMenus(bar, APP_MENUS, {
+    shortcutLabel: (command) => keyTable.keys.get(command)?.[0],
     panels: dockPanelEntries(),
     loadRecent: async () =>
       (await shell().invoke<ListedRecent[]>("cmd_recent_projects")).map((r) => ({
@@ -6661,6 +8264,9 @@ function runNativeAction(native: string, item?: HTMLElement): void {
       setCamera(atPercent(camera, 100, fitScale(), pane, picture));
       break;
     }
+    case "add-key":
+      addKeysAtPlayhead();
+      break;
     case "easy-ease":
       easeKeys("both");
       break;
@@ -6678,6 +8284,9 @@ function runNativeAction(native: string, item?: HTMLElement): void {
       break;
     case "paste-keys":
       pasteKeys();
+      break;
+    case "open-shortcuts":
+      void openSettings("shortcuts");
       break;
     case "open-settings":
       void openSettings();
@@ -6719,6 +8328,9 @@ function runNativeAction(native: string, item?: HTMLElement): void {
       break;
     }
     case "focus-activity": {
+      // The history is behind the status bar's message: open it first.
+      const message = document.getElementById("status-message");
+      if (document.getElementById("log-popover")?.hidden) message?.click();
       const title = document.querySelector<HTMLElement>(".log-title");
       title?.scrollIntoView({ block: "nearest" });
       const list = document.getElementById("log");
@@ -6779,6 +8391,8 @@ async function refreshProjectCatalog(): Promise<void> {
   takePageCatalog = pages;
   renderProjectManager();
   if (scene) renderTakePagePanel(scene);
+  if (scene) drawStartCard(scene);
+  void refreshLibraryUsage();
 }
 
 /// Drop a stale refusal from the take-page state.
@@ -6930,11 +8544,8 @@ async function applyPendingIdentity(): Promise<boolean> {
   if (!scene) return false;
   const edits = pendingIdentityEdits(scene);
   if (edits.length === 0) return true;
-  const parts = edits.map((edit) =>
-    edit.edit === "setSceneId" ? `id ${edit.id}` : edit.edit === "setSceneName" ? `name ${edit.name}` : edit.edit,
-  );
   const outcome = await runEdits(edits, {
-    label: `Set scene ${parts.join(" and ")}`,
+    label: `Set scene ${describeIdentityEdits(edits)}`,
     refusal: "scene identity refused",
   });
   return outcome !== undefined;
@@ -6962,6 +8573,7 @@ let openProject: OpenedProject | undefined;
 function applyOpenedProject(opened: OpenedProject | undefined): void {
   openProject = opened;
   ui.projectSummary.textContent = projectSummary(opened);
+  ui.projectSummary.title = ui.projectSummary.textContent;
   ui.projectClose.disabled = opened === undefined;
   ui.projectSaveAs.disabled = opened === undefined;
 }
@@ -7178,6 +8790,7 @@ async function readSettings(): Promise<SettingsSnapshot | undefined> {
   try {
     settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_get");
     applyPenSettings(settingsSnapshot.user);
+    applyKeymap(settingsSnapshot.user);
   } catch (error) {
     log(`settings unavailable: ${describe(error)}`, "bad");
   }
@@ -7252,9 +8865,103 @@ async function commitSetting(scope: SettingsScope, key: string, spec: FieldSpec,
 
 type SettingValues = Record<string, string | number | boolean>;
 
+/** The keys the person changed (the `shortcuts` user setting) and the keys in force: the Editor's own table with those on top (11.84). */
+let keymap: Keymap = {};
+const knownCommands: ReadonlySet<string> = new Set(allCommands().map((command) => command.id));
+let keyTable: EffectiveKeys = effectiveKeys(SHORTCUTS, {}, knownCommands);
+
+/** Take the keymap from the settings and put it in force: the key handling, the menus' key labels and the Shortcuts page follow it. */
+function applyKeymap(user: UserSettings | undefined): void {
+  if (user === undefined) return;
+  const next: Keymap = Object.fromEntries(Object.entries(user.shortcuts).flatMap(([command, keys]) => (keys === undefined ? [] : [[command, keys] as const])));
+  if (JSON.stringify(next) === JSON.stringify(keymap)) return;
+  keymap = next;
+  keyTable = effectiveKeys(SHORTCUTS, next, knownCommands);
+  drawAppMenus();
+  settingsWindow.keysChanged();
+}
+
+/** Save a new keymap as the user setting. The contract checks it too (a key has one handler); its refusal is the message. */
+async function saveKeymap(next: Keymap): Promise<void> {
+  settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_set", { scope: "user", key: "shortcuts", value: next });
+  applyKeymap(settingsSnapshot.user);
+}
+
+/** What the Shortcuts page asks of the Editor: each answer is in the settings before it comes back, so the page and the key handling never disagree. */
+const keysHost: KeysHost = {
+  commands: allCommands().map((command) => command.id),
+  state: () => keyTable,
+  assign: async (command, key, mode, take) => {
+    const result = assignKey(keymap, SHORTCUTS, knownCommands, command, key, { mode, take });
+    if (result.kind === "clash") return { kind: "clash", key: result.key, holder: result.holder };
+    if (result.kind === "refused") return { kind: "refused", reason: result.reason };
+    try {
+      await saveKeymap(result.keymap);
+    } catch (error) {
+      return { kind: "refused", reason: describe(error) };
+    }
+    const name = commandById(command)?.label ?? command;
+    log(result.took === undefined ? `${name} has the key ${key}` : `${name} has the key ${key}, taken from ${commandById(result.took.command)?.label ?? result.took.command}`, "good");
+    return { kind: "done" };
+  },
+  remove: async (command, key) => {
+    try {
+      await saveKeymap(removeKey(keymap, SHORTCUTS, knownCommands, command, key));
+      log(`${commandById(command)?.label ?? command} no longer has the key ${key}`, "good");
+    } catch (error) {
+      log(`key not removed: ${describe(error)}`, "bad");
+    }
+  },
+  reset: async (command) => {
+    try {
+      await saveKeymap(resetKey(keymap, command));
+      log(`${commandById(command)?.label ?? command} is back to its own keys`, "good");
+    } catch (error) {
+      log(`keys not put back: ${describe(error)}`, "bad");
+    }
+  },
+  resetAll: async () => {
+    try {
+      await saveKeymap({});
+      log("Every shortcut is back to the Editor's own", "good");
+    } catch (error) {
+      log(`keys not put back: ${describe(error)}`, "bad");
+    }
+  },
+};
+
+/** The Settings window's nav and pages (11.81, Figma E4). General is drawn into `settingsWindow.general` by `renderSettings` below, as it always was;
+ *  Shortcuts and the page that waits for row 8.14 are drawn by the view (src/settings-window-view.ts). The two resets belong to General. */
+const settingsWindow = createSettingsWindow(document, ui.settingsBody, {
+  shortcuts: SHORTCUTS,
+  labelOf: (command) => commandById(command)?.label,
+  keys: keysHost,
+  onShow: (page) => {
+    ui.settingsResetUser.hidden = page !== "general";
+    ui.settingsResetMachine.hidden = page !== "general";
+  },
+});
+
+// Closing the window ends a wait for a key: the next key press is the Editor's again.
+ui.settingsDialog.addEventListener("close", () => settingsWindow.cancelRecording());
+
+/** What the General page says first (it was a paragraph of the dialog; it belongs to the page it explains). */
+function settingsLead(): HTMLElement {
+  const lead = document.createElement("p");
+  lead.className = "settings-lead";
+  const bold = (words: string): HTMLElement => {
+    const strong = document.createElement("strong");
+    strong.textContent = words;
+    return strong;
+  };
+  lead.append("Changes are saved as you make them. ", bold("Yours"), " follows you to another computer; ", bold("This computer"), " stays here. What changes how a graphic looks is not here: that belongs to the project.");
+  return lead;
+}
+
 async function renderSettings(): Promise<void> {
   const settings = await readSettings();
-  ui.settingsBody.replaceChildren();
+  const general = settingsWindow.general;
+  general.replaceChildren(settingsLead());
   if (!settings) {
     ui.settingsError.textContent = "Settings could not be read. The reason is in the Activity log.";
     return;
@@ -7286,20 +8993,29 @@ async function renderSettings(): Promise<void> {
       row.append(label, control, help);
       section.append(row);
     }
-    ui.settingsBody.append(section);
+    general.append(section);
   }
 }
 
-async function openSettings(): Promise<void> {
+async function openSettings(page?: string): Promise<void> {
   ui.settingsError.textContent = "";
   await renderSettings();
+  if (page !== undefined) settingsWindow.show(page);
   if (!ui.settingsDialog.open) ui.settingsDialog.showModal();
 }
 
 async function resetSettings(scope: SettingsScope): Promise<void> {
   try {
-    settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_reset", { scope, key: null });
-    log(scope === "user" ? "Your settings were put back to their defaults" : "This computer's settings were put back to their defaults", "good");
+    if (scope === "user") {
+      // Your keys are not among the settings this button is about (Reset all shortcuts, on the Shortcuts page, is their own): put back the ones the General page shows.
+      for (const key of Object.keys(USER_FIELDS)) {
+        settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_reset", { scope, key });
+      }
+      applyPenSettings(settingsSnapshot?.user);
+    } else {
+      settingsSnapshot = await shell().invoke<SettingsSnapshot>("cmd_settings_reset", { scope, key: null });
+    }
+    log(scope === "user" ? "Your settings were put back to their defaults (your keys were left as they are)" : "This computer's settings were put back to their defaults", "good");
     await renderSettings();
   } catch (error) {
     ui.settingsError.textContent = describe(error);
@@ -7792,6 +9508,10 @@ function onSceneListKey(event: KeyboardEvent): void {
   } else if (command === "menu") {
     const box = row.getBoundingClientRect();
     openSceneMenu(row, box.left + 24, box.bottom);
+  } else if (command === "rename" || command === "changeId") {
+    sceneDeleteArm.disarm();
+    const button = row.querySelector<HTMLElement>(`:scope > button[data-action="${command}"]`);
+    if (button) runSceneAction(button);
   } else if (sceneDeleteArm.press(row.id, Date.now())) {
     const button = row.querySelector<HTMLElement>(':scope > button[data-action="delete"]');
     if (button) runSceneAction(button);
@@ -7799,6 +9519,20 @@ function onSceneListKey(event: KeyboardEvent): void {
     log(`press Delete again within 3 seconds to delete ${sceneId}`);
     row.classList.add("delete-armed");
   }
+}
+
+/// Rename (F2) and Change ID (F7) on a Scene Manager row (11.72): open the scene, open the Composition popover and put the cursor in
+/// the Name or Scene ID field. What is typed becomes a `setSceneName` / `setSceneLabel` edit when the scene is saved (11.29).
+async function editSceneIdentity(sceneId: string, field: "name" | "label"): Promise<void> {
+  await openProjectScene(sceneId);
+  if (projectSceneId !== sceneId) return; // the scene did not open: the refusal is already in the Activity log
+  // Let the click that chose a menu item finish first: the page closes popovers on a click outside them, and that click is outside.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const popover = document.getElementById("composition-popover");
+  if (popover?.hidden) document.getElementById("composition-open")?.click();
+  const input = field === "name" ? ui.sceneName : ui.sceneLabel;
+  input.focus();
+  input.select();
 }
 
 function runSceneAction(button: HTMLElement): void {
@@ -7814,6 +9548,12 @@ function runSceneAction(button: HTMLElement): void {
   switch (button.dataset.action) {
     case "open":
       void openProjectScene(sceneId);
+      break;
+    case "rename":
+      void editSceneIdentity(sceneId, "name");
+      break;
+    case "changeId":
+      void editSceneIdentity(sceneId, "label");
       break;
     case "duplicate":
       void duplicateProjectScene(sceneId);
@@ -7927,6 +9667,67 @@ async function saveScene(): Promise<void> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Publish checks (B6): what Check graphic found, drawn above the Publish button.
+// ---------------------------------------------------------------------------
+
+let publishBlockers: readonly Blocker[] | undefined;
+let publishCheckTimer: number | undefined;
+let publishCheckRun = 0;
+let lastPublished: { readonly revision: number; readonly contentHash: string } | undefined;
+
+/** Ask the shell what is wrong with the open draft. `undefined` when it cannot be asked (no scene, or the shell refused). */
+async function askCheckGraphic(): Promise<readonly Blocker[] | undefined> {
+  const session = activeSession(workspace);
+  if (!scene || !session) return undefined;
+  const target: SceneTarget = { target: "session", session: session.key };
+  try {
+    const reply = await shell().invoke<{ blockers: Blocker[] }>("cmd_scene_preflight", { target });
+    return reply.blockers;
+  } catch (error) {
+    log(`publish: the graphic could not be checked: ${describe(error)}`, "bad");
+    return undefined;
+  }
+}
+
+function drawPublishChecks(): void {
+  if (!scene) {
+    ui.publishChecks.replaceChildren();
+    ui.publish.disabled = true;
+    return;
+  }
+  const session = activeSession(workspace);
+  const fontBlockers = blockingFonts(scene, fontManagerState()).map((font) => font.displayName);
+  const view = publishView({
+    name: scene.name,
+    sceneId: projectSceneId ?? ui.sceneId.value,
+    document: scene,
+    blockers: publishBlockers,
+    fontBlockers,
+    engine: lastPreviewState.status === "unavailable" || lastPreviewState.status === "refused" ? "not-ready" : "ready",
+    ...(lastPublished === undefined ? {} : { lastPublish: lastPublished }),
+    records: recordsNow(),
+  });
+  ui.publishChecks.replaceChildren(renderPublishChecks(document, view) as unknown as Node);
+  ui.publish.disabled = !view.canPublish || session === undefined;
+}
+
+/** Check again shortly after the last change, so typing and dragging never wait for the shell. */
+function schedulePublishChecks(): void {
+  drawPublishChecks();
+  if (publishCheckTimer !== undefined) window.clearTimeout(publishCheckTimer);
+  publishCheckTimer = window.setTimeout(() => {
+    publishCheckTimer = undefined;
+    const run = ++publishCheckRun;
+    void askCheckGraphic().then((blockers) => {
+      // A newer check has started, or the scene went away: this answer is about something else.
+      if (run !== publishCheckRun) return;
+      publishBlockers = blockers;
+      drawPublishChecks();
+    });
+  }, 400);
+}
+
 async function publish(): Promise<void> {
   const session = activeSession(workspace);
   if (!scene || !session) {
@@ -7934,8 +9735,32 @@ async function publish(): Promise<void> {
     return;
   }
   const endpoint = ui.endpoint.value.trim();
+  // A font that cannot be used would put the graphic on air in another typeface: Publish is refused, naming it, from every route.
+  const fontReason = fontBlockedReason(blockingFonts(scene, fontManagerState()));
+  if (fontReason !== undefined) {
+    const message = `Publish is blocked: ${fontReason}`;
+    ui.publishResult.className = "result bad";
+    ui.publishResult.textContent = message;
+    ui.publishResult.hidden = false;
+    log(message, "bad");
+    return;
+  }
   ui.publish.disabled = true;
   ui.publishResult.hidden = true;
+
+  // Check graphic is asked again now, never trusted from earlier: what is on the stage is what gets published.
+  const found = await askCheckGraphic();
+  if (found === undefined || found.length > 0) {
+    publishBlockers = found;
+    drawPublishChecks();
+    const message = found === undefined ? "Publish is blocked: the graphic could not be checked." : `Publish is blocked: ${found.map((b) => b.message).join("; ")}`;
+    ui.publishResult.className = "result bad";
+    ui.publishResult.textContent = message;
+    ui.publishResult.hidden = false;
+    log(message, "bad");
+    return;
+  }
+  publishBlockers = found;
 
   try {
     // The scene id is the TakeId, so a typed identity is applied first.
@@ -7950,6 +9775,7 @@ async function publish(): Promise<void> {
     // reporting "published" without them would leave the operator guessing.
     const contentHash = plain(result.contentHash);
     ui.publishResult.className = "result good";
+    lastPublished = { revision: Number(revision), contentHash: String(contentHash) };
     ui.publishResult.textContent = `${takeId} revision ${revision} · hash ${contentHash} · ${publishRoute(result)}`;
     ui.publishResult.hidden = false;
     log(`published ${takeId} revision ${revision} hash ${contentHash} (${publishRoute(result)})`, "good");
@@ -7960,7 +9786,7 @@ async function publish(): Promise<void> {
     ui.publishResult.hidden = false;
     log(message, "bad");
   } finally {
-    ui.publish.disabled = false;
+    drawPublishChecks();
   }
 }
 
@@ -8028,6 +9854,10 @@ async function start(): Promise<void> {
   document.addEventListener("pointerdown", (event) => {
     if (!ui.sceneMenu.hidden && !ui.sceneMenu.contains(event.target as Node)) closeSceneMenu();
   });
+  ui.sceneLabel.addEventListener("input", () => {
+    // A typed Scene ID is unsaved work like a typed name: it becomes a `setSceneLabel` edit when a save or publish uses it.
+    renderSceneTabs();
+  });
   ui.sceneName.addEventListener("input", () => {
     // A typed name is unsaved work in any scene, bound to a project or not
     // (11.29). It becomes a `setSceneName` edit when a save or publish uses
@@ -8037,6 +9867,9 @@ async function start(): Promise<void> {
     renderProjectManager();
   });
   ui.publish.addEventListener("click", () => void publish());
+  ui.publishChecks.addEventListener("click", (event) => {
+    if (event.target instanceof Element && event.target.closest('button[data-action="checkRecords"]') !== null) void checkRecords();
+  });
   ui.takePagePreview.addEventListener("click", () => void previewTakePageValues());
   ui.takePageSave.addEventListener("click", () => void saveTakePage());
   ui.takePageOpen.addEventListener("click", () => void openTakePage());
@@ -8071,6 +9904,9 @@ async function start(): Promise<void> {
   ui.objectManager.addEventListener("click", onObjectManagerClick);
   ui.sceneTabs.addEventListener("click", onSceneTabsClick);
   ui.objectCreate.addEventListener("click", () => void createObject());
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-add-kind]")) {
+    button.addEventListener("click", () => void addElement(button.dataset.addKind ?? ""));
+  }
   ui.objectDuplicate.addEventListener("click", () => void duplicateObject());
   ui.objectRename.addEventListener("click", () => void renameObject());
   ui.objectDelete.addEventListener("click", () => void deleteObject());
@@ -8132,6 +9968,13 @@ async function start(): Promise<void> {
   ui.fontLinkSource.replaceChildren(...FONT_LINK_SOURCES.map((entry) => new Option(entry.label, entry.source)));
   showFontLinkSource();
   ui.fontLinkSource.addEventListener("change", showFontLinkSource);
+  ui.fontConversion.replaceChildren(...FONT_CONVERSIONS.map((entry) => new Option(entry.label, entry.conversion)));
+  ui.fontConversion.value = DEFAULT_FONT_CONVERSION;
+  ui.fontInstalled.addEventListener("toggle", () => {
+    if (ui.fontInstalled.open) void loadInstalledFonts();
+  });
+  ui.fontInstalledSearch.addEventListener("input", renderInstalledFonts);
+  ui.fontInstalledAdd.addEventListener("click", () => void addInstalledFonts());
   ui.fontSearch.addEventListener("input", () => scene && renderFontManager(scene));
   ui.fontStatusFilter.addEventListener("change", () => scene && renderFontManager(scene));
   ui.fontLink.addEventListener("keydown", (event) => {
@@ -8149,6 +9992,8 @@ async function start(): Promise<void> {
   ui.effectControlsMount.addEventListener("click", onEffectControlsClick);
   ui.effectControlsMount.addEventListener("change", onEffectControlsChange);
   ui.assetMount.addEventListener("click", onAssetManagerClick);
+  ui.dataMount.addEventListener("click", onDataPanelClick);
+  ui.dataMount.addEventListener("change", onDataPanelChange);
   ui.bindings.addEventListener("click", onBindingsClick);
   ui.sampleDataApply.addEventListener("click", onSampleDataApply);
   ui.sampleDataRevert.addEventListener("click", onSampleDataRevert);
@@ -8233,6 +10078,7 @@ async function start(): Promise<void> {
   ui.autoKey.addEventListener("change", () => {
     autoKey = ui.autoKey.checked;
     log(`Auto-Key ${autoKey ? "on" : "off"}`);
+    syncKeyframeBar();
   });
   ui.animationMount.addEventListener("click", onAnimationClick);
   ui.animationMount.addEventListener("change", onAnimationChange);
@@ -8244,6 +10090,17 @@ async function start(): Promise<void> {
   });
   ui.inspector.addEventListener("contextmenu", onInspectorContextMenu);
   ui.inspector.addEventListener("click", onAnimationClick);
+  ui.inspector.addEventListener("click", onTextChoiceClick);
+  ui.inspector.addEventListener("click", onAnimatorClick);
+  ui.inspector.addEventListener("click", onChoiceFieldClick);
+  ui.inspector.addEventListener("click", onColourRowClick);
+  ui.inspector.addEventListener("change", onColourRowChange);
+  document.addEventListener("pointerdown", (event) => {
+    if (!(event.target instanceof Element) || !event.target.closest('.property-section [role="group"][id^="inspector/"]')) closeChoiceLists();
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && closeChoiceLists()) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
   ui.inspector.addEventListener("change", onInspectorChange);
   ui.inspector.addEventListener("focusin", () => { if (playback) pausePreview("editing a property"); });
   ui.inspector.addEventListener("keydown", (event) => {
@@ -8266,10 +10123,19 @@ async function start(): Promise<void> {
     if (!ui.keyframeMenu.hidden && !ui.keyframeMenu.contains(event.target as Node)) {
       closeKeyframeMenu();
     }
+    // A press on a cell reopens its menu through the click, so the menu is closed first and not toggled by both.
+    if (!ui.columnMenu.hidden && !ui.columnMenu.contains(event.target as Node)) {
+      closeColumnMenu();
+    }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !ui.sceneMenu.hidden) {
       closeSceneMenu();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === "Escape" && !ui.columnMenu.hidden) {
+      closeColumnMenu();
       event.stopPropagation();
       return;
     }
@@ -8315,6 +10181,12 @@ async function start(): Promise<void> {
     log(`animation contract unavailable: ${describe(error)}`, "bad");
   }
   try {
+    textChoicesSurface = await shell().invoke<TextChoices>("cmd_text_choices");
+  } catch (error) {
+    textChoicesSurface = undefined;
+    log(`text choices unavailable: ${describe(error)}`, "bad");
+  }
+  try {
     effectSurface = await shell().invoke<EffectSurface>("cmd_effect_surface");
   } catch (error) {
     effectSurface = null;
@@ -8339,6 +10211,18 @@ async function start(): Promise<void> {
   await loadProjects(openProject?.name);
   applyStoredLayout();
   wireDocking();
+  void startLayoutSwitcher();
+  wireSearch();
+  wireStageStates();
+  buildKeyframeBar();
+  syncKeyframeBar();
+  // After the bar: Stagger's caret is one of the buttons it wires.
+  wireOnDemandPopovers();
+  // The card's Parent, Blend and Matte open the same menus as the timeline's cells.
+  ui.keyCard.addEventListener("click", (event) => {
+    const cell = (event.target as Element).closest<HTMLElement>("[data-layer-column]");
+    if (cell !== null) openColumnMenu(cell);
+  });
 
   try {
     ui.endpoint.value = await shell().invoke<string>("cmd_default_endpoint");
@@ -8496,7 +10380,7 @@ function commitSplit(region: RegionId, fractions: readonly number[]): void {
     log(next.refused, "bad");
   } else {
     layout = next;
-    persistLayout(window.localStorage, layout);
+    layoutChanged();
     log(`resized the panels of the ${region} dock`, "good");
   }
   renderLayout();
@@ -8566,7 +10450,7 @@ function wireSplitters(): void {
     const next = clearSplit(layout, region);
     if (isLayoutRefused(next)) return;
     layout = next;
-    persistLayout(window.localStorage, layout);
+    layoutChanged();
     renderLayout();
     log(`the panels of the ${region} dock are sized by their content again`, "good");
   });
@@ -8622,6 +10506,240 @@ function renderLayout(): void {
   }
   applyLayoutSizes();
   configureDockHandles();
+  applyOnDemand();
+}
+
+/** The dock panels the person opened by hand (the Panels menu, a Library tab): shown until they go back to Properties. */
+let openedPanels = new Set<string>();
+
+/** Hide the dock panels nothing calls for now, and their tabs (dock-on-demand.ts; visibility decision of 26 Nov). Nothing leaves the
+ *  layout: a hidden panel keeps its place and state, and shows the moment it is called. */
+function applyOnDemand(): void {
+  renderPropertiesAdd();
+  const chosen = scene ? scene.objects.filter((object) => selection.includes(object.id)) : [];
+  const hidden = hiddenPanels({
+    tool: activeTool,
+    selectionHasMasks: chosen.some((object) => ((object as { masks?: unknown[] }).masks ?? []).length > 0),
+    selectionHasEffects: chosen.some((object) => ((object as { effects?: unknown[] }).effects ?? []).length > 0),
+    penMakesMask: (plan => "kind" in plan && plan.kind === "mask")(currentPenPlan()),
+    opened: openedPanels,
+  });
+  for (const id of [...CONTEXT_PANELS, ...OPENED_ONLY_PANELS]) {
+    const element = panelElement(id);
+    // Not drawn also hides itself when the preview draws everything.
+    if (element && !(id === "unsupported" && !hidden.has(id) && ui.unsupportedList.childElementCount === 0)) element.hidden = hidden.has(id);
+    for (const tab of document.querySelectorAll<HTMLElement>(`.dock-tab[data-tab="${id}"]`)) tab.hidden = hidden.has(id);
+  }
+  // A group whose active tab is hidden shows its first member that is not; a group with none shown is hidden.
+  for (const region of REGIONS) {
+    for (const group of layout.regions[region].groups) {
+      const element = document.querySelector<HTMLElement>(`.dock-group[data-group="${group.id}"]`);
+      if (!element) continue;
+      const shown = shownTab(group.panels, group.active, hidden);
+      element.hidden = shown === undefined;
+      // Properties, one list (Figma B3d v2): the called-for context panels stand under it as sections, their tabs not drawn.
+      const sections = sectionsUnder(group.panels, shown, hidden);
+      element.classList.toggle("has-sections", sections.length > 0);
+      for (const member of group.panels) {
+        const asSection = sections.includes(member);
+        panelElement(member)?.classList.toggle("tab-inactive", member !== shown && !asSection);
+        panelElement(member)?.classList.toggle("as-section", asSection);
+        const tab = document.querySelector<HTMLElement>(`.dock-tab[data-tab="${member}"]`);
+        tab?.setAttribute("aria-selected", String(member === shown));
+        if (tab && asSection) tab.hidden = true;
+      }
+    }
+  }
+}
+
+// --- The Library screen (B13): the tabs' panels are brought here and put back ------------------------------------------------------
+
+let libraryScreenTab: LibraryScreenTab = "assets";
+/** The panel on show in the screen, and the marker where it stood in its dock. */
+let libraryScreenHeld: { readonly panel: HTMLElement; readonly marker: Comment; readonly folded: boolean } | undefined;
+/** The panels the screen opened by itself, put away when it closes unless something else called them. */
+const openedByScreen = new Set<string>();
+
+function libraryScreenOpen(): boolean {
+  return document.getElementById("library-screen")?.hidden === false;
+}
+
+function putLibraryPanelBack(): void {
+  if (!libraryScreenHeld) return;
+  const { panel, marker, folded } = libraryScreenHeld;
+  marker.replaceWith(panel);
+  panel.classList.remove("in-library-screen");
+  panel.classList.toggle("panel-section-collapsed", folded);
+  libraryScreenHeld = undefined;
+}
+
+function showLibraryScreenTab(id: LibraryScreenTab): void {
+  const tab = screenTab(id);
+  libraryScreenTab = tab.id;
+  putLibraryPanelBack();
+  // The Assets panel keeps its own tab (assets, colours, layer styles); the others are panels of their own.
+  if (tab.libraryTab !== undefined && tab.libraryTab !== libraryTab) {
+    libraryTab = tab.libraryTab;
+    if (scene) renderPanels(scene);
+  }
+  if ((OPENED_ONLY_PANELS as readonly string[]).includes(tab.panel) && !openedPanels.has(tab.panel)) {
+    openedPanels.add(tab.panel);
+    openedByScreen.add(tab.panel);
+    applyOnDemand();
+  }
+  const panel = panelElement(tab.panel);
+  const body = document.getElementById("library-screen-body");
+  if (panel && body) {
+    const marker = document.createComment(`library-screen:${tab.panel}`);
+    // A panel folded to its heading in the dock is shown open here; it goes back folded.
+    const folded = panel.classList.contains("panel-section-collapsed");
+    panel.replaceWith(marker);
+    panel.classList.remove("panel-section-collapsed");
+    panel.classList.add("in-library-screen");
+    body.replaceChildren(panel);
+    libraryScreenHeld = { panel, marker, folded };
+  }
+  for (const button of document.querySelectorAll<HTMLButtonElement>("#library-screen-tabs button")) {
+    const on = button.dataset.screenTab === tab.id;
+    button.setAttribute("aria-selected", String(on));
+    button.classList.toggle("active", on);
+  }
+}
+
+function openLibraryScreen(start?: LibraryScreenTab): void {
+  const host = document.getElementById("library-screen");
+  const tabs = document.getElementById("library-screen-tabs");
+  if (!host || !tabs) return;
+  closeDataScreen();
+  if (tabs.childElementCount === 0) {
+    for (const tab of SCREEN_TABS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "tab";
+      button.dataset.screenTab = tab.id;
+      button.textContent = tab.label;
+      tabs.append(button);
+    }
+  }
+  host.hidden = false;
+  showLibraryScreenTab(start ?? libraryScreenTab);
+}
+
+function closeLibraryScreen(): void {
+  const host = document.getElementById("library-screen");
+  if (!host || host.hidden) return;
+  putLibraryPanelBack();
+  host.hidden = true;
+  // Opened-only panels go back to being put away when only the screen had called them.
+  for (const id of openedByScreen) openedPanels.delete(id);
+  openedByScreen.clear();
+  applyOnDemand();
+}
+
+// --- The Data screen (B4): the same movement, for the data panels ---------------------------------------------------------------------
+
+let dataScreenTab: DataScreenTab = "bindings";
+let dataScreenHeld: { readonly panel: HTMLElement; readonly marker: Comment; readonly folded: boolean } | undefined;
+
+function dataScreenOpen(): boolean {
+  return document.getElementById("data-screen")?.hidden === false;
+}
+
+function putDataPanelBack(): void {
+  if (!dataScreenHeld) return;
+  const { panel, marker, folded } = dataScreenHeld;
+  marker.replaceWith(panel);
+  panel.classList.remove("in-library-screen");
+  panel.classList.toggle("panel-section-collapsed", folded);
+  dataScreenHeld = undefined;
+}
+
+function showDataScreenTab(id: DataScreenTab): void {
+  const tab = dataTab(id);
+  dataScreenTab = tab.id;
+  putDataPanelBack();
+  const panel = panelElement(tab.panel);
+  const body = document.getElementById("data-screen-body");
+  if (panel && body) {
+    const folded = panel.classList.contains("panel-section-collapsed");
+    const marker = document.createComment(`data-screen:${tab.panel}`);
+    panel.replaceWith(marker);
+    panel.classList.remove("panel-section-collapsed");
+    panel.classList.add("in-library-screen");
+    body.replaceChildren(panel);
+    dataScreenHeld = { panel, marker, folded };
+  }
+  for (const button of document.querySelectorAll<HTMLButtonElement>("#data-screen-tabs button")) {
+    const on = button.dataset.screenTab === tab.id;
+    button.setAttribute("aria-selected", String(on));
+    button.classList.toggle("active", on);
+  }
+}
+
+function openDataScreen(start?: DataScreenTab): void {
+  const host = document.getElementById("data-screen");
+  const tabs = document.getElementById("data-screen-tabs");
+  if (!host || !tabs) return;
+  closeLibraryScreen();
+  if (tabs.childElementCount === 0) {
+    for (const tab of DATA_TABS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "tab";
+      button.dataset.screenTab = tab.id;
+      button.textContent = tab.label;
+      tabs.append(button);
+    }
+  }
+  host.hidden = false;
+  showDataScreenTab(start ?? dataScreenTab);
+}
+
+function closeDataScreen(): void {
+  const host = document.getElementById("data-screen");
+  if (!host || host.hidden) return;
+  putDataPanelBack();
+  host.hidden = true;
+}
+
+/** The Add row at the foot of Properties: its buttons, dimmed with the reason while nothing is selected. */
+function renderPropertiesAdd(): void {
+  const mount = document.getElementById("properties-add");
+  if (!mount) return;
+  if (mount.childElementCount === 0) {
+    const label = document.createElement("span");
+    label.className = "properties-add-label";
+    label.textContent = "Add";
+    mount.append(label);
+    for (const spec of ADD_ROW) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.addTo = spec.kind;
+      button.textContent = spec.label;
+      mount.append(button);
+    }
+    mount.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("button[data-add-to]");
+      if (button && !button.disabled) addToSelection(button.dataset.addTo as AddKind);
+    });
+  }
+  const why = addRowBlocker(selection.length);
+  for (const button of mount.querySelectorAll<HTMLButtonElement>("button[data-add-to]")) {
+    button.disabled = why !== undefined;
+    button.title = why ?? ADD_ROW.find((spec) => spec.kind === button.dataset.addTo)?.hint ?? "";
+  }
+}
+
+function addToSelection(kind: AddKind): void {
+  if (kind === "effect") {
+    focusWorkspacePanel("effects");
+  } else if (kind === "mask") {
+    ui.penCreates.value = "mask";
+    ui.penCreates.dispatchEvent(new Event("change", { bubbles: true }));
+    setActiveTool("pen");
+  } else {
+    setActiveTool("pivot");
+  }
 }
 
 function applyStoredLayout(): void {
@@ -8630,8 +10748,338 @@ function applyStoredLayout(): void {
   for (const note of restored.notes) log(`workspace layout: ${note}`);
   // What was reconciled is said once: the layout the author now has is stored, so the
   // next launch does not repeat a version reset or a dropped panel.
-  if (restored.notes.length > 0) persistLayout(window.localStorage, layout);
+  if (restored.notes.length > 0) layoutChanged();
   renderLayout();
+}
+
+// ---------------------------------------------------------------------------
+// Search everything (Ctrl K). The logic is command-search.ts; this block draws it and runs the one chosen through
+// the paths the page already has: the command registry, the effects browser's apply, the selection.
+// ---------------------------------------------------------------------------
+
+let searchView: SearchView = { groups: [], flat: [] };
+let searchActive = 0;
+
+function searchSources(): SearchSources {
+  const target = scene ? effectTarget(scene) : { object: undefined, blocker: "no scene is open" };
+  return {
+    commandBlocker: (id) => commandUnavailable(id, commandContext()),
+    effects: effectSurface?.effects ?? [],
+    effectTarget: target.object !== undefined ? { name: target.object.name } : { blocker: target.blocker ?? "select an element first" },
+    elements: scene?.objects.map((object) => ({ id: object.id, name: object.name, kind: object.type })) ?? [],
+  };
+}
+
+function openSearch(): void {
+  if (ui.searchDialog.open) {
+    ui.searchDialog.close();
+    return;
+  }
+  ui.searchInput.value = "";
+  ui.searchMessage.textContent = "";
+  ui.searchDialog.showModal();
+  renderSearch();
+  ui.searchInput.focus();
+}
+
+function renderSearch(): void {
+  searchView = searchEverything(ui.searchInput.value, searchSources());
+  searchActive = Math.min(searchActive, Math.max(0, searchView.flat.length - 1));
+  const nodes: HTMLElement[] = [];
+  let index = 0;
+  if (searchView.flat.length === 0) {
+    const none = document.createElement("div");
+    none.className = "search-none";
+    none.textContent = ui.searchInput.value.trim() === "" ? "Nothing to run right now." : "Nothing matches.";
+    nodes.push(none);
+  }
+  for (const group of searchView.groups) {
+    const heading = document.createElement("div");
+    heading.className = "search-group";
+    heading.setAttribute("role", "presentation");
+    heading.textContent = group.label;
+    nodes.push(heading);
+    for (const result of group.results) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.id = `search-option-${index}`;
+      row.className = "search-option";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(index === searchActive));
+      row.dataset.index = String(index);
+      if (result.blocked !== undefined) {
+        row.classList.add("blocked");
+        row.setAttribute("aria-disabled", "true");
+        row.title = result.blocked;
+      }
+      const label = document.createElement("span");
+      label.className = "search-label";
+      label.textContent = result.label;
+      const detail = document.createElement("span");
+      detail.className = "search-detail";
+      detail.textContent = result.detail;
+      row.append(label, detail);
+      nodes.push(row);
+      index += 1;
+    }
+    if (group.more > 0) {
+      const more = document.createElement("div");
+      more.className = "search-more";
+      more.textContent = `${group.more} more: keep typing`;
+      nodes.push(more);
+    }
+  }
+  ui.searchResults.replaceChildren(...nodes);
+  ui.searchInput.setAttribute("aria-activedescendant", searchView.flat.length > 0 ? `search-option-${searchActive}` : "");
+  ui.searchResults.querySelector<HTMLElement>(`#search-option-${searchActive}`)?.scrollIntoView({ block: "nearest" });
+}
+
+function runSearchResult(result: SearchResult | undefined): void {
+  if (result === undefined) return;
+  // A result that cannot run stays on screen with its reason: the person sees why, and keeps the search.
+  if (result.blocked !== undefined) {
+    ui.searchMessage.textContent = `${result.label}: ${result.blocked}`;
+    return;
+  }
+  ui.searchDialog.close();
+  const action = result.action;
+  if (action.kind === "command") {
+    runRegistryCommand(action.commandId);
+  } else if (action.kind === "element") {
+    setSelection([action.objectId]);
+  } else if (scene && effectSurface) {
+    const { object, blocker } = effectTarget(scene);
+    const listing = effectSurface.effects.find((candidate) => candidate.id === action.effectId);
+    if (!object) log(`effects: ${blocker}`, "bad");
+    else if (listing) void commitEffects(object.id, addEffect(effectsOf(object), listing), `Applied ${listing.name} to ${object.name}`);
+  }
+}
+
+/** The words and buttons of the two stage states (S1 empty graphic, S2 a font that blocks Publish). */
+function wireStageStates(): void {
+  document.getElementById("viewport-empty-title")!.textContent = EMPTY_GRAPHIC.title;
+  // Choose a font: the Fonts panel, with the blocking font selected, where Assign and Replace are. Locate: pick the file for it.
+  document.getElementById("font-band-choose")?.addEventListener("click", () => {
+    const fontId = ui.fontBand.dataset.fontId;
+    if (fontId !== undefined && fontId !== "") selectedFontId = fontId;
+    focusWorkspacePanel("fonts");
+    if (scene) renderPanels(scene);
+  });
+  document.getElementById("font-band-locate")?.addEventListener("click", () => {
+    const fontId = ui.fontBand.dataset.fontId;
+    if (fontId !== undefined && fontId !== "") void replaceFont(fontId);
+  });
+}
+
+function wireSearch(): void {
+  document.getElementById("search-open")?.addEventListener("click", openSearch);
+  ui.searchInput.addEventListener("input", () => {
+    searchActive = 0;
+    ui.searchMessage.textContent = "";
+    renderSearch();
+  });
+  ui.searchInput.addEventListener("keydown", (event) => {
+    const count = searchView.flat.length;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (count === 0) return;
+      searchActive = (searchActive + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
+      ui.searchMessage.textContent = "";
+      renderSearch();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      runSearchResult(searchView.flat[searchActive]);
+    }
+  });
+  ui.searchResults.addEventListener("click", (event) => {
+    const index = (event.target as Element).closest<HTMLElement>("[data-index]")?.dataset.index;
+    if (index !== undefined) runSearchResult(searchView.flat[Number(index)]);
+  });
+  ui.searchResults.addEventListener("mousemove", (event) => {
+    const index = (event.target as Element).closest<HTMLElement>("[data-index]")?.dataset.index;
+    if (index !== undefined && Number(index) !== searchActive) {
+      searchActive = Number(index);
+      renderSearch();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Named layouts (11.96): the Layout dropdown and the Layouts dialog. The logic is
+// layout-switcher.ts; this block draws it. A layout is only an arrangement of panels:
+// nothing here touches a scene, the selection or undo.
+// ---------------------------------------------------------------------------
+
+let layoutSwitcher: LayoutSwitcher | undefined;
+let layoutsSelected: string | undefined;
+let layoutsNameMode: "save-as" | "rename" | undefined;
+let layoutsDeleteArmed: string | undefined;
+
+/** The page's layout changed: keep it in the browser's storage as before, and tell the named layouts. */
+function layoutChanged(): void {
+  persistLayout(window.localStorage, layout);
+  layoutSwitcher?.changed(layout);
+  renderLayoutControls();
+}
+
+function showLayoutOutcome(outcome: LayoutOutcome): void {
+  if (outcome.layout !== undefined) {
+    layout = outcome.layout;
+    persistLayout(window.localStorage, layout);
+    renderLayout();
+  }
+  ui.layoutsMessage.textContent = outcome.message;
+  ui.layoutsMessage.dataset.tone = outcome.ok ? "good" : "bad";
+  log(outcome.message, outcome.ok ? "good" : "bad");
+  layoutsDeleteArmed = undefined;
+  renderLayoutControls();
+}
+
+function renderLayoutControls(): void {
+  const items = layoutSwitcher?.items() ?? [];
+  ui.layoutSwitch.hidden = layoutSwitcher === undefined;
+  ui.layoutSelect.replaceChildren(
+    ...selectOptions(items).map((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.value;
+      option.textContent = entry.label;
+      option.title = entry.title;
+      return option;
+    }),
+  );
+  ui.layoutSelect.value = layoutSwitcher?.activeId() ?? "";
+  if (layoutsSelected === undefined || !items.some((item) => item.id === layoutsSelected)) layoutsSelected = layoutSwitcher?.activeId();
+  ui.layoutsList.replaceChildren(
+    ...dialogRows(items).map((row) => {
+      const entry = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(row.id === layoutsSelected));
+      button.dataset.layoutId = row.id;
+      button.classList.toggle("in-use", row.active);
+      const name = document.createElement("span");
+      name.className = "layout-name";
+      name.textContent = row.name;
+      const detail = document.createElement("span");
+      detail.className = "layout-detail";
+      detail.textContent = row.detail;
+      button.append(name, detail);
+      entry.append(button);
+      return entry;
+    }),
+  );
+  const selected = items.find((item) => item.id === layoutsSelected);
+  const state = actionsFor(selected);
+  for (const [id, reason] of [["layouts-rename", state.rename], ["layouts-delete", state.remove], ["layouts-reset", state.reset]] as const) {
+    const button = document.getElementById(id) as HTMLButtonElement;
+    button.disabled = reason !== undefined;
+    button.title = reason ?? "";
+  }
+  const deleteButton = document.getElementById("layouts-delete") as HTMLButtonElement;
+  deleteButton.textContent = layoutsDeleteArmed !== undefined && layoutsDeleteArmed === layoutsSelected ? "Click again to delete" : "Delete";
+  (document.getElementById("layouts-use") as HTMLButtonElement).disabled = selected === undefined || selected.active;
+}
+
+function openLayoutsDialog(mode?: "save-as"): void {
+  renderLayoutControls();
+  if (!ui.layoutsDialog.open) ui.layoutsDialog.showModal();
+  if (mode === "save-as") showLayoutsNameForm("save-as");
+}
+
+function showLayoutsNameForm(mode: "save-as" | "rename"): void {
+  layoutsNameMode = mode;
+  ui.layoutsNameForm.hidden = false;
+  const current = layoutSwitcher?.items().find((item) => item.id === layoutsSelected);
+  ui.layoutsName.value = mode === "rename" ? (current?.name ?? "") : "";
+  ui.layoutsName.focus();
+}
+
+function hideLayoutsNameForm(): void {
+  layoutsNameMode = undefined;
+  ui.layoutsNameForm.hidden = true;
+}
+
+function wireLayoutControls(): void {
+  ui.layoutSelect.addEventListener("change", () => {
+    const value = ui.layoutSelect.value;
+    if (layoutSwitcher === undefined) return;
+    if (value === MANAGE_VALUE) {
+      ui.layoutSelect.value = layoutSwitcher.activeId();
+      openLayoutsDialog();
+      return;
+    }
+    void layoutSwitcher.switchTo(value).then(showLayoutOutcome);
+  });
+  document.getElementById("layouts-open")?.addEventListener("click", () => openLayoutsDialog());
+  document.getElementById("layouts-save-as-open")?.addEventListener("click", () => openLayoutsDialog("save-as"));
+  document.getElementById("layouts-close")?.addEventListener("click", () => ui.layoutsDialog.close());
+  ui.layoutsList.addEventListener("click", (event) => {
+    const id = (event.target as Element).closest<HTMLElement>("[data-layout-id]")?.dataset.layoutId;
+    if (id === undefined) return;
+    layoutsSelected = id;
+    layoutsDeleteArmed = undefined;
+    renderLayoutControls();
+  });
+  ui.layoutsList.addEventListener("dblclick", (event) => {
+    const id = (event.target as Element).closest<HTMLElement>("[data-layout-id]")?.dataset.layoutId;
+    if (id !== undefined && layoutSwitcher !== undefined) void layoutSwitcher.switchTo(id).then(showLayoutOutcome);
+  });
+  document.getElementById("layouts-use")?.addEventListener("click", () => {
+    if (layoutsSelected !== undefined && layoutSwitcher !== undefined) void layoutSwitcher.switchTo(layoutsSelected).then(showLayoutOutcome);
+  });
+  document.getElementById("layouts-save-as")?.addEventListener("click", () => showLayoutsNameForm("save-as"));
+  document.getElementById("layouts-rename")?.addEventListener("click", () => showLayoutsNameForm("rename"));
+  document.getElementById("layouts-reset")?.addEventListener("click", () => {
+    if (layoutsSelected !== undefined && layoutSwitcher !== undefined) void layoutSwitcher.reset(layoutsSelected).then(showLayoutOutcome);
+  });
+  document.getElementById("layouts-delete")?.addEventListener("click", () => {
+    if (layoutsSelected === undefined || layoutSwitcher === undefined) return;
+    // Deleting is the one thing here that cannot be undone, so it takes two clicks.
+    if (layoutsDeleteArmed !== layoutsSelected) {
+      layoutsDeleteArmed = layoutsSelected;
+      renderLayoutControls();
+      return;
+    }
+    void layoutSwitcher.remove(layoutsSelected).then(showLayoutOutcome);
+  });
+  document.getElementById("layouts-name-cancel")?.addEventListener("click", hideLayoutsNameForm);
+  ui.layoutsNameForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (layoutSwitcher === undefined || layoutsNameMode === undefined) return;
+    const mode = layoutsNameMode;
+    const name = ui.layoutsName.value;
+    const done = mode === "save-as" ? layoutSwitcher.saveAs(name) : layoutSwitcher.rename(layoutsSelected ?? "", name);
+    void done.then((outcome) => {
+      if (outcome.ok) hideLayoutsNameForm();
+      showLayoutOutcome(outcome);
+    });
+  });
+}
+
+async function startLayoutSwitcher(): Promise<void> {
+  // What the author arranged before named layouts existed becomes the layout in use, so nothing moves on the first run.
+  const previous = window.localStorage.getItem(LAYOUT_STORAGE_KEY) !== null ? layout : undefined;
+  const switcher = createLayoutSwitcher({
+    persistence: tauriPersistence(shell().invoke),
+    panels: panelsInMarkup,
+    currentLayout: () => layout,
+    previousLayout: previous,
+    say: (message, tone) => log(message, tone),
+  });
+  try {
+    const started = await switcher.start();
+    layoutSwitcher = switcher;
+    if (started.layout !== undefined) {
+      layout = started.layout;
+      persistLayout(window.localStorage, layout);
+      renderLayout();
+    }
+  } catch (error) {
+    log(`Layouts are not available: ${error instanceof Error ? error.message : String(error)}`, "bad");
+  }
+  wireLayoutControls();
+  renderLayoutControls();
 }
 
 function dockPanel(panel: string, region: RegionId, index?: number): void {
@@ -8641,7 +11089,7 @@ function dockPanel(panel: string, region: RegionId, index?: number): void {
     return;
   }
   layout = next;
-  persistLayout(window.localStorage, layout);
+  layoutChanged();
   renderLayout();
   log(`moved ${panel} to ${region}`, "good");
 }
@@ -8671,17 +11119,18 @@ function joinGroup(panel: string, groupId: string, index?: number): void {
     return;
   }
   layout = next;
-  persistLayout(window.localStorage, layout);
+  layoutChanged();
   renderLayout();
   log(`moved ${panel} to tab group ${groupId}`, "good");
 }
 
 /// Show a tab, from a click, the keyboard or the Window menu.
 function showTab(panel: string, focusTab = false): void {
+  openedPanels = afterTab(openedPanels, panel, groupOf(layout, panel)?.group.panels ?? []);
   const next = activateTab(layout, panel);
   if (isLayoutRefused(next)) return;
   layout = next;
-  persistLayout(window.localStorage, layout);
+  layoutChanged();
   renderLayout();
   if (focusTab) document.querySelector<HTMLElement>(`.dock-tab[data-tab="${panel}"]`)?.focus();
 }
@@ -8767,7 +11216,7 @@ function resizeBy(region: RegionId, delta: number): void {
     return;
   }
   layout = next;
-  persistLayout(window.localStorage, layout);
+  layoutChanged();
   renderLayout();
 }
 
@@ -8852,7 +11301,7 @@ function wireDocking(): void {
   const finishResize = (): void => {
     if (!resizeGesture) return;
     resizeGesture.handle.classList.remove("resizing");
-    persistLayout(window.localStorage, layout);
+    layoutChanged();
     log(`resized ${resizeGesture.region} dock`, "good");
     resizeGesture = undefined;
   };
@@ -8878,8 +11327,12 @@ function wireDocking(): void {
 }
 
 function resetLayout(): void {
+  if (layoutSwitcher !== undefined) {
+    void layoutSwitcher.reset(layoutSwitcher.activeId()).then(showLayoutOutcome);
+    return;
+  }
   layout = defaultLayout();
-  persistLayout(window.localStorage, layout);
+  layoutChanged();
   renderLayout();
   log("workspace layout reset to the card-sort layout", "good");
 }

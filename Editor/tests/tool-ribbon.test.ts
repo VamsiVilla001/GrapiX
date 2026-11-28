@@ -214,7 +214,7 @@ describe("the page drives the Pivot panel", () => {
   });
 
   it("is drawn with the panels, leaves a field being typed in alone, and marks the place the pivot is on", () => {
-    expect(main).toMatch(/function renderPanels\(document_: SceneDocument\): void \{\s*renderProjectManager\(\);\s*renderPivotPanel\(document_\);/);
+    expect(main).toMatch(/function renderPanels\(document_: SceneDocument\): void \{[\s\S]{0,400}?renderProjectManager\(\);\s*renderPivotPanel\(document_\);/);
     expect(main).toMatch(/if \(document\.activeElement !== ui\.pivotX\) ui\.pivotX\.value/);
     expect(main).toMatch(/button\.setAttribute\("aria-pressed", String\(button\.dataset\.pivotPlace === view\.place\)\);/);
   });

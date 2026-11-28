@@ -108,6 +108,7 @@ mod tests {
     fn request() -> ClientRequest {
         ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         })
     }
 
@@ -200,6 +201,7 @@ mod tests {
             }),
             ClientRequest::Clear(ClearRequest {
                 at: TakeAt::NextOpportunity,
+                expected: None,
             }),
             ClientRequest::ConfigureOutput(OutputConfig {
                 adapter: "decklink".into(),

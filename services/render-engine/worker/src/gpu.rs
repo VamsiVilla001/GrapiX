@@ -95,7 +95,8 @@ pub(crate) fn negotiate_for_test(backends: wgpu::Backends) -> Gpu {
     negotiate_backends(backends)
 }
 
-fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
+#[doc(hidden)]
+pub fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
     // wgpu 30 has no `Default` for the descriptor; this is the same set of
     // defaults without a display handle (the worker is headless).
     // Choose FXC explicitly for the compositor's baseline WGSL. `Auto`

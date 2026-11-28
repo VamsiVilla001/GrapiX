@@ -1,0 +1,220 @@
+{
+  "fields": [
+    {
+      "field": "textCase",
+      "label": "Case",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "As typed",
+          "value": "original"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Uppercase",
+          "value": "upper"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Lowercase",
+          "value": "lower"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Title case",
+          "value": "title"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Small caps",
+          "value": "small-caps"
+        }
+      ]
+    },
+    {
+      "field": "align",
+      "label": "Align",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Left",
+          "value": "left"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Centre",
+          "value": "center"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Right",
+          "value": "right"
+        }
+      ]
+    },
+    {
+      "field": "verticalAlign",
+      "label": "Vertical align",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Top",
+          "value": "top"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Middle",
+          "value": "middle"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Bottom",
+          "value": "bottom"
+        }
+      ]
+    },
+    {
+      "field": "layout",
+      "label": "Box",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point"
+          ],
+          "label": "Point text",
+          "value": "point"
+        },
+        {
+          "drawnForLayouts": [
+            "paragraph"
+          ],
+          "label": "Paragraph text",
+          "value": "paragraph"
+        }
+      ]
+    },
+    {
+      "field": "writingMode",
+      "label": "Writing mode",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Horizontal",
+          "value": "horizontal-tb"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Vertical, columns right to left",
+          "value": "vertical-rl"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Vertical, columns left to right",
+          "value": "vertical-lr"
+        }
+      ]
+    },
+    {
+      "field": "autoFit",
+      "label": "Fit",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Fixed",
+          "value": "none"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Shrinks to fit",
+          "value": "shrink"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Grows to fit",
+          "value": "fit"
+        }
+      ]
+    },
+    {
+      "field": "overflow",
+      "label": "Overflow",
+      "values": [
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Visible",
+          "value": "visible"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Hidden",
+          "value": "hidden"
+        },
+        {
+          "drawnForLayouts": [
+            "point",
+            "paragraph"
+          ],
+          "label": "Clip",
+          "value": "clip"
+        }
+      ]
+    }
+  ]
+}

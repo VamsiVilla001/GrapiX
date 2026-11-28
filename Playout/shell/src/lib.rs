@@ -24,18 +24,21 @@
 #![forbid(unsafe_code)]
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use gx_contracts::auth::OperatorName;
+use gx_contracts::cue_suggest::{CueNaming, CuePlan};
 use gx_contracts::Refusal;
 use gx_contracts::{ContentHash, Revision, TakeId};
 use gx_control_plane::intent::{
-    ClearRequest, CueRequest, PhaseCommitted, PhaseRequest, TakeAt, TakeCommitted, TakeRequest,
+    ClearRequest, CueRequest, ExpectedProgram, PhaseCommitted, PhaseRequest, TakeAt, TakeCommitted, TakeRequest,
 };
-use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
+use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig, MAIN_LAYER};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::status::{clock_summary, ClockSummary, EngineStatus, PerformanceSummary};
 use gx_control_transport::{Client, Token};
+use gx_playout::{RundownStore, RundownStoreError};
 use serde::{Deserialize, Serialize};
 
 /// The control-plane endpoint Playout connects to by default.
@@ -108,6 +111,7 @@ impl PlayoutError {
 pub struct Connection {
     client: Mutex<Option<Client>>,
     operator: Mutex<Option<OperatorName>>,
+    rundown_path: Option<PathBuf>,
 }
 
 /// Who is signed in to Playout (2.15).
@@ -270,6 +274,7 @@ fn connect_unlogged(
 /// committed, or the refusal code and the reason. Never the credential.
 fn record(
     event: &'static str,
+    layer: i32,
     take_id: Option<&TakeId>,
     revision: Option<Revision>,
     content_hash: Option<&ContentHash>,
@@ -283,6 +288,7 @@ fn record(
     match outcome {
         Ok(frame) => tracing::info!(
             event,
+            layer,
             frame,
             result = "committed",
             take_id,
@@ -297,6 +303,7 @@ fn record(
             };
             tracing::info!(
                 event,
+                layer,
                 result = if refusal.is_some() { "refused" } else { "failed" },
                 refusal,
                 detail = %error,
@@ -310,8 +317,12 @@ fn record(
 }
 
 fn read_status(client: &mut Client) -> Result<OperatorView, PlayoutError> {
+    Ok(OperatorView::of(read_engine_status(client)?))
+}
+
+fn read_engine_status(client: &mut Client) -> Result<EngineStatus, PlayoutError> {
     match client.handle(ClientRequest::Status) {
-        EngineReply::Status(status) => Ok(OperatorView::of(status)),
+        EngineReply::Status(status) => Ok(status),
         EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),
         other => Err(PlayoutError::UnexpectedReply {
             detail: format!("expected status, got {other:?}"),
@@ -345,6 +356,121 @@ fn with_program_client<T>(
         client.set_operator(Some(&operator));
         action(client)
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CueSuggestion {
+    entry_ids: Vec<String>,
+    plan: CuePlan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_air_lock_detail: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppliedCueEntry {
+    entry_id: String,
+    cue_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppliedCuePlan {
+    changed: usize,
+    entries: Vec<AppliedCueEntry>,
+}
+
+fn rundown_error(error: RundownStoreError) -> PlayoutError {
+    match error {
+        RundownStoreError::Refused { refusal } => PlayoutError::refused(refusal),
+        other => PlayoutError::refused(Refusal::TransportFailed {
+            detail: other.to_string(),
+        }),
+    }
+}
+
+fn with_operator_rundown<T>(
+    state: &Connection,
+    request: &'static str,
+    action: impl FnOnce(RundownStore, &EngineStatus) -> Result<T, RundownStoreError>,
+) -> Result<T, PlayoutError> {
+    if state.operator().is_none() {
+        return Err(PlayoutError::refused(Refusal::OperatorRequired {
+            request: request.to_owned(),
+        }));
+    }
+    with_program_client(state, request, |client| {
+        let path = match &state.rundown_path {
+            Some(path) => path.clone(),
+            None => gx_contracts::platform::service_data_root()
+                .map_err(PlayoutError::refused)?
+                .join("playout")
+                .join("rundown.json"),
+        };
+        let store = RundownStore::load(path).map_err(rundown_error)?;
+        let status = read_engine_status(client)?;
+        action(store, &status).map_err(rundown_error)
+    })
+}
+
+fn suggest_cues(
+    state: &Connection,
+    entry_ids: Vec<String>,
+    naming: CueNaming,
+) -> Result<CueSuggestion, PlayoutError> {
+    with_operator_rundown(state, "cuesSuggest", |store, status| {
+        let plan = store.suggest_cue_ids(&entry_ids, naming, status)?;
+        let on_air_lock_detail = plan.lines.iter()
+            .any(|line| matches!(line.refusal, Some(Refusal::CueIdLockedOnAir { .. })))
+            .then_some("This scene and revision are on air. Another entry using the same scene may be the one on air.");
+        Ok(CueSuggestion {
+            entry_ids,
+            plan,
+            on_air_lock_detail,
+        })
+    })
+}
+
+fn apply_cues(
+    state: &Connection,
+    entry_ids: Vec<String>,
+    plan: &CuePlan,
+) -> Result<AppliedCuePlan, PlayoutError> {
+    with_operator_rundown(state, "cuesApply", |mut store, status| {
+        let changed = store.apply_cue_plan(&entry_ids, plan, status)?;
+        let entries = entry_ids
+            .into_iter()
+            .map(|entry_id| {
+                let cue_id = store
+                    .rundown()
+                    .entry(&entry_id)?
+                    .cue_id
+                    .as_ref()
+                    .map(ToString::to_string);
+                Ok(AppliedCueEntry { entry_id, cue_id })
+            })
+            .collect::<Result<Vec<_>, RundownStoreError>>()?;
+        Ok(AppliedCuePlan { changed, entries })
+    })
+}
+
+#[tauri::command]
+fn cmd_cues_suggest(
+    state: tauri::State<'_, Connection>,
+    entry_ids: Vec<String>,
+    naming: CueNaming,
+) -> Result<CueSuggestion, PlayoutError> {
+    suggest_cues(&state, entry_ids, naming)
+}
+
+#[tauri::command]
+fn cmd_cues_apply(
+    state: tauri::State<'_, Connection>,
+    entry_ids: Vec<String>,
+    plan: CuePlan,
+) -> Result<AppliedCuePlan, PlayoutError> {
+    apply_cues(&state, entry_ids, &plan)
 }
 
 /// Current status and the clock indicator derived from it.
@@ -393,20 +519,38 @@ pub fn cue(
     content_hash: Option<ContentHash>,
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
+    cue_on(state, MAIN_LAYER, take_id, revision, content_hash, at)
+}
+
+/// Cue a published revision onto Program layer `layer` (12.10, 12.13). Layer zero is `cue`.
+pub fn cue_on(
+    state: &Connection,
+    layer: i32,
+    take_id: TakeId,
+    revision: Revision,
+    content_hash: Option<ContentHash>,
+    at: TakeAt,
+) -> Result<TakeCommitted, PlayoutError> {
     let note = (take_id.clone(), content_hash.clone(), at);
     let result = with_program_client(state, "cue", |client| {
         committed(
-            client.handle(ClientRequest::Cue(CueRequest {
-                take_id,
-                revision,
-                content_hash,
-                at,
-            })),
+            client
+                .handle_on_layer(
+                    ClientRequest::Cue(CueRequest {
+                        take_id,
+                        revision,
+                        content_hash,
+                        at,
+                    }),
+                    layer,
+                )
+                .finish(),
             "a cue commitment",
         )
     });
     record(
         "operator.cue",
+        layer,
         Some(&note.0),
         Some(revision),
         note.1.as_ref(),
@@ -424,20 +568,39 @@ pub fn take(
     content_hash: Option<ContentHash>,
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
+    take_on(state, MAIN_LAYER, take_id, revision, content_hash, at)
+}
+
+/// Take a published revision to Program layer `layer`. A scene already on that layer leaves through its Out first, or is cut
+/// when it has none; the other layers stay on air. Layer zero is `take`.
+pub fn take_on(
+    state: &Connection,
+    layer: i32,
+    take_id: TakeId,
+    revision: Revision,
+    content_hash: Option<ContentHash>,
+    at: TakeAt,
+) -> Result<TakeCommitted, PlayoutError> {
     let note = (take_id.clone(), content_hash.clone(), at);
     let result = with_program_client(state, "take", |client| {
         committed(
-            client.handle(ClientRequest::Take(TakeRequest {
-                take_id,
-                revision,
-                content_hash,
-                at,
-            })),
+            client
+                .handle_on_layer(
+                    ClientRequest::Take(TakeRequest {
+                        take_id,
+                        revision,
+                        content_hash,
+                        at,
+                    }),
+                    layer,
+                )
+                .finish(),
             "a take commitment",
         )
     });
     record(
         "operator.take",
+        layer,
         Some(&note.0),
         Some(revision),
         note.1.as_ref(),
@@ -449,14 +612,29 @@ pub fn take(
 
 /// Clear Program.
 pub fn clear(state: &Connection, at: TakeAt) -> Result<TakeCommitted, PlayoutError> {
+    clear_on(state, MAIN_LAYER, at, None)
+}
+
+/// Clear Program layer `layer` only; the other layers stay on air. With `expected` set the clear removes the layer's scene only if
+/// it is that take and revision, and otherwise refuses by name and changes nothing (12.10, decision Q8).
+pub fn clear_on(
+    state: &Connection,
+    layer: i32,
+    at: TakeAt,
+    expected: Option<(TakeId, Revision)>,
+) -> Result<TakeCommitted, PlayoutError> {
+    let expected = expected.map(|(take_id, revision)| ExpectedProgram { take_id, revision });
     let result = with_program_client(state, "clear", |client| {
         committed(
-            client.handle(ClientRequest::Clear(ClearRequest { at })),
+            client
+                .handle_on_layer(ClientRequest::Clear(ClearRequest { at, expected }), layer)
+                .finish(),
             "a clear commitment",
         )
     });
     record(
         "operator.clear",
+        layer,
         None,
         None,
         None,
@@ -471,9 +649,22 @@ pub fn phase(
     phase: String,
     at: TakeAt,
 ) -> Result<PhaseCommitted, PlayoutError> {
+    phase_on(state, MAIN_LAYER, phase, at)
+}
+
+/// Enter one authored phase on the scene on Program layer `layer`.
+pub fn phase_on(
+    state: &Connection,
+    layer: i32,
+    phase: String,
+    at: TakeAt,
+) -> Result<PhaseCommitted, PlayoutError> {
     let name = phase.clone();
     let result = with_program_client(state, "phase", |client| {
-        match client.handle(ClientRequest::Phase(PhaseRequest { phase, at })) {
+        match client
+            .handle_on_layer(ClientRequest::Phase(PhaseRequest { phase, at }), layer)
+            .finish()
+        {
             EngineReply::PhaseCommitted(committed) => Ok(committed),
             EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),
             other => Err(PlayoutError::UnexpectedReply {
@@ -484,6 +675,7 @@ pub fn phase(
     match &result {
         Ok(committed) => tracing::info!(
             event = "operator.phase",
+            layer,
             frame = committed.committed.frame,
             result = "committed",
             phase = name.as_str(),
@@ -491,6 +683,7 @@ pub fn phase(
         ),
         Err(error) => tracing::info!(
             event = "operator.phase",
+            layer,
             result = "refused",
             refusal = match error {
                 PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),
@@ -598,9 +791,11 @@ fn cmd_cue(
     revision: u64,
     content_hash: Option<String>,
     frame: Option<u64>,
+    layer: Option<i32>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    cue(
+    cue_on(
         &state,
+        layer.unwrap_or(MAIN_LAYER),
         TakeId(take_id),
         Revision(revision),
         content_hash.map(ContentHash),
@@ -615,9 +810,11 @@ fn cmd_take(
     revision: u64,
     content_hash: Option<String>,
     frame: Option<u64>,
+    layer: Option<i32>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    take(
+    take_on(
         &state,
+        layer.unwrap_or(MAIN_LAYER),
         TakeId(take_id),
         Revision(revision),
         content_hash.map(ContentHash),
@@ -629,16 +826,24 @@ fn cmd_take(
 fn cmd_clear(
     state: tauri::State<'_, Connection>,
     frame: Option<u64>,
+    layer: Option<i32>,
+    expected: Option<ExpectedProgram>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    clear(&state, scheduled(frame))
+    clear_on(
+        &state,
+        layer.unwrap_or(MAIN_LAYER),
+        scheduled(frame),
+        expected.map(|page| (page.take_id, page.revision)),
+    )
 }
 #[tauri::command]
 fn cmd_phase(
     state: tauri::State<'_, Connection>,
     phase: String,
     frame: Option<u64>,
+    layer: Option<i32>,
 ) -> Result<PhaseCommitted, PlayoutError> {
-    self::phase(&state, phase, scheduled(frame))
+    phase_on(&state, layer.unwrap_or(MAIN_LAYER), phase, scheduled(frame))
 }
 
 #[tauri::command]
@@ -701,7 +906,12 @@ pub fn run() {
     let mut log = gx_telemetry::sink::init_process_logging("playout", "shell");
     tracing::info!(event = "playout.start", version = env!("CARGO_PKG_VERSION"));
     let built = gx_shell_log::with_diagnostics_menu(tauri::Builder::default(), "playout")
-        .manage(Connection::default())
+        .manage(Connection {
+            rundown_path: std::env::var_os("GRAPIX_PLAYOUT_RUNDOWN")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from),
+            ..Connection::default()
+        })
         // 2.13: each command runs inside the scope of its call's correlation id.
         .invoke_handler(gx_shell_log::scoped(tauri::generate_handler![
             cmd_log,
@@ -709,6 +919,8 @@ pub fn run() {
             cmd_status,
             cmd_performance,
             cmd_cue,
+            cmd_cues_suggest,
+            cmd_cues_apply,
             cmd_take,
             cmd_clear,
             cmd_phase,
@@ -883,6 +1095,38 @@ mod tests {
     }
 
     #[test]
+    fn a_take_on_a_layer_names_the_layer_to_the_engine_and_in_the_record_and_layer_zero_is_unchanged() {
+        let mut engine = gx_mock_engine::MockEngine::new();
+        engine.publish(TakeId("bug".into()), Revision(1), ContentHash("d".repeat(64)));
+        let server = gx_control_transport::Server::bind("127.0.0.1:0".parse().unwrap(), None, engine).unwrap();
+        let address = server.local_addr().unwrap();
+        std::thread::spawn(move || server.serve());
+        let pin = || Some(ContentHash("d".repeat(64)));
+        let records = logged("layers", || {
+            let state = Connection::default();
+            connect(&state, &address.to_string(), None).expect("connected");
+            sign_in(&state, "Test Operator").expect("signed in");
+            // The mock engine has one Program scene, so another layer is refused by name, saying which, and nothing goes to air.
+            let refused = take_on(&state, 60, TakeId("bug".into()), Revision(1), pin(), TakeAt::NextOpportunity).expect_err("one layer");
+            assert!(
+                matches!(&refused, PlayoutError::Refused { refusal: Refusal::LayerNotSupported { request, layer }, .. } if request == "take" && layer == "60"),
+                "{refused:?}"
+            );
+            assert!(matches!(status(&state).expect("status").status.program, None), "a refused layer take reached Program");
+            // The same route at layer zero is the ordinary take, and a clear of another layer leaves it on air.
+            take_on(&state, MAIN_LAYER, TakeId("bug".into()), Revision(1), pin(), TakeAt::NextOpportunity).expect("taken at zero");
+            assert!(clear_on(&state, -5, TakeAt::NextOpportunity, None).is_err(), "another layer's clear is refused by this engine");
+            assert!(status(&state).expect("status").status.program.is_some(), "a clear of another layer took layer zero off");
+            clear_on(&state, MAIN_LAYER, TakeAt::NextOpportunity, None).expect("cleared at zero");
+        });
+        let refused = event(&records, "operator.take", "refused");
+        assert_eq!(refused["fields"]["layer"], 60, "{refused}");
+        assert_eq!(refused["refusal"], "layerNotSupported");
+        assert_eq!(event(&records, "operator.take", "committed")["fields"]["layer"], 0);
+        assert_eq!(event(&records, "operator.clear", "refused")["fields"]["layer"], -5);
+    }
+
+    #[test]
     fn a_take_committed_and_refused_through_a_real_transport_is_on_record() {
         let mut engine = gx_mock_engine::MockEngine::new();
         engine.publish(
@@ -951,6 +1195,111 @@ mod tests {
         let address = server.local_addr().unwrap();
         std::thread::spawn(move || server.serve());
         address
+    }
+
+    #[test]
+    fn cue_commands_require_an_operator_and_preserve_the_confirmed_show() {
+        use gx_playout::{PublishedScene, Rundown, RundownEntry};
+
+        let _alone = serial();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("gx-playout-cues-{}-{nonce}", std::process::id()));
+        let path = dir.join("rundown.json");
+        let scene = PublishedScene {
+            take_id: TakeId("scorebug".into()),
+            revision: Revision(2),
+            document: serde_json::json!({ "name": "Scoreboard" }),
+            design_system_version: None,
+            content_hash: Some(ContentHash("c".repeat(64))),
+            review: Default::default(),
+        };
+        RundownStore::create(
+            &path,
+            Rundown::new(vec![
+                RundownEntry {
+                    id: "first".into(),
+                    scene: scene.clone(),
+                    cue_id: None,
+                },
+                RundownEntry {
+                    id: "second".into(),
+                    scene,
+                    cue_id: None,
+                },
+            ]),
+        )
+        .unwrap();
+        let state = Connection {
+            rundown_path: Some(path.clone()),
+            ..Connection::default()
+        };
+        let ids = vec!["second".to_owned(), "first".to_owned()];
+        let numbering = |start| CueNaming::Numbered {
+            prefix: "C-".into(),
+            start,
+            step: 1,
+            pad: 2,
+        };
+        assert!(matches!(
+            suggest_cues(&state, ids.clone(), numbering(1)),
+            Err(PlayoutError::Refused {
+                refusal: Refusal::OperatorRequired { .. },
+                ..
+            })
+        ));
+        let address = serve_mock();
+        connect(&state, &address.to_string(), None).unwrap();
+        sign_in(&state, "Test Operator").unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let preview = suggest_cues(&state, ids.clone(), numbering(1)).unwrap();
+        let stale = suggest_cues(&state, ids.clone(), numbering(5)).unwrap();
+        assert_eq!(preview.entry_ids, ids);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        sign_out(&state);
+        assert!(matches!(
+            apply_cues(&state, ids.clone(), &preview.plan),
+            Err(PlayoutError::Refused {
+                refusal: Refusal::OperatorRequired { .. },
+                ..
+            })
+        ));
+        sign_in(&state, "Test Operator").unwrap();
+        let result =
+            serde_json::to_value(apply_cues(&state, ids.clone(), &preview.plan).unwrap()).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "changed": 2,
+                "entries": [
+                    { "entryId": "second", "cueId": "C-01" },
+                    { "entryId": "first", "cueId": "C-02" }
+                ]
+            })
+        );
+        let committed = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            apply_cues(&state, ids.clone(), &stale.plan),
+            Err(PlayoutError::Refused {
+                refusal: Refusal::CuePlanStale,
+                ..
+            })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), committed);
+        take_scorebug(&state).unwrap();
+        let locked = suggest_cues(&state, ids, numbering(3)).unwrap();
+        assert!(locked.on_air_lock_detail.unwrap().contains("Another entry"));
+        assert!(locked
+            .plan
+            .lines
+            .iter()
+            .all(|line| matches!(line.refusal, Some(Refusal::CueIdLockedOnAir { .. }))));
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(dir.join("rundown.json.lock")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 
     fn take_scorebug(state: &Connection) -> Result<TakeCommitted, PlayoutError> {

@@ -1,0 +1,9 @@
+Row 11.51, CJK golden frame and vertical writing mode, 28 Nov 2026.
+CPU: colour_reference 12 passed (new: cjk_text_draws_left_to_right_..., vertical_cjk_draws_upright_in_columns_...). Worker lib 288 passed, conformance 12, contracts 482, Editor 1895.
+DX12: the three golden tests (arabic, cjk, vertical_cjk) ok (171.7 s with the first shader compile). Vulkan: the same three ok (9.2 s).
+Goldens: tests/fixtures/golden/cjk-ltr-320x180.png (ink bbox 20,70 to 163,105), cjk-vertical-rl-320x180.png (ink bbox 30,12 to 118,83).
+Views (dark backdrop, 3x): cjk-ltr-golden-28-nov-x3.png, cjk-vertical-rl-golden-28-nov-x3.png. Vertical-rl: first paragraph (你好) is the right column, second (世界) the left, upright, two cells a column.
+Mutants: vertical-rl columns left to right: FAILED in 3 tests; column break limit doubled: FAILED 1 unit test; reversed logical text: FAILED the Arabic and the CJK tests; dropping `vert` alone survives because `vrt2` is asked for too.
+Font: NotoSansSC-Subset.otf 54,348 bytes from Noto Sans SC Regular (8,331,336 bytes, SHA-256 faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9), github.com/notofonts/noto-cjk, SIL OFL 1.1.
+Language: harfrust 0.3.2 src/hb/buffer.rs "TODO: language must be set"; cosmic-text 0.15 shape.rs reads buffer.language() and never sets it.
+

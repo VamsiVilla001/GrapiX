@@ -3,7 +3,8 @@
 //
 // The two tables are checked by the compiler against the generated settings types, so a setting added to
 // the contract cannot be left out of the window: `satisfies Record<keyof UserSettings, ...>` fails to
-// compile until the new key has a row here.
+// compile until the new key has a row here. The one setting that is not a field is the keymap (`shortcuts`, row 11.84): it is edited on the
+// Shortcuts page, and "Reset my settings" leaves it alone.
 
 import type { MachineSettings, UserSettings } from "@grapix/contracts";
 
@@ -101,7 +102,7 @@ export const USER_FIELDS = {
     help: "Double click finishes the path the Pen is drawing. Enter and Escape always do.",
     kind: "toggle",
   },
-} as const satisfies Record<keyof UserSettings, FieldSpec>;
+} as const satisfies Record<Exclude<keyof UserSettings, "shortcuts">, FieldSpec>;
 
 export const MACHINE_FIELDS = {
   gpuAdapter: {

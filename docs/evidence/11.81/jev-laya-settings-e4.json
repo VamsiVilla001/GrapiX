@@ -1,0 +1,162 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the Editor's Settings window becomes the Figma E4 screen (a sectioned dialog with a left nav) without drawing anything the backend does not do (claude-grapix-f1, 25 Nov 2026; asked BEFORE the build; the UI session's order calls this slice B15, 'E4 Settings, General and Shortcuts').",
+   "facts": "Today (row 11.81, built 23 Nov) Edit > Settings opens one dialog over the settings service: twenty settings in two sections, 'Yours' (eleven: language, ask before deleting, new scene length, new key easing, when the Editor starts, last folder, and the five Pen settings) and 'This computer' (nine: graphics card, smooth edges, picture memory, cache folder, cache size, engine priority, log level, remote control address and port), each saved as it is changed, each saying honestly whether anything reads it yet. The Figma screen E4 draws the same dialog with a left nav (General, Shortcuts, AI and MCP access, Colour and output, Help and diagnostics) and, as its page, 'AI and MCP access, by role not by model name': a table of three roles (Reader, Designer assistant, Reviewer) against Read, Propose, Preview, Request publish and Cue/Clear, a Client token line ('scope: designer assistant, expires in 30 days'), an Audit log line ('every call recorded'), buttons Create token and View audit log, and the sentence 'Access is granted by role and credential, never by the name of the AI provider. No role can cue, take out, clear or change what is on air; only Playout does that.' The spec's E09 lists eleven left sections (General, Project defaults, Viewport, Timeline, Import, Fonts, Cache, Shortcuts and triggers, Remote control, AI agents and MCP, Language) and a Shortcuts table with a search box and conflict chips. What the backend has: the contract's product roles are Editor, Playout and Engine and its closed authorities are Author, Cue, Take, Clear, ConfigureOutput, Stop and Report; there is NO role called Reader, Designer assistant or Reviewer, no command to create a token or give it an expiry, and no command in the Editor shell to read an audit log. The UI session's screen map records this as an open question for the owner (C-17: the E4 roles are not in the contracts); row 8.14 (tiered MCP surface: read, author on draft handles, propose) is active and is the nearest plan row. The Editor's command registry (row 11.31) holds 33 chords for 28 commands (a command may have a second key: Redo has Ctrl Shift Z and Ctrl Y, Pen has G and P, Delete keys has Delete and Backspace); no key can be changed by the user yet (row 11.84, pending, would store choices as settings, and the settings contract has no keymap setting). Rules of the project: no control that does nothing is drawn as working (it is dimmed and names its plan row); a permission is never stated that the backend does not enforce (invariants 17 and 18); the Editor window's code is main.ts, owned by the UI session, so this slice is new module files and a short hand-off.",
+   "built": "Nothing yet."
+  },
+  "questions": {
+   "nav": {
+    "type": "choice",
+    "instructions": "Which sections should the Settings window's left nav list now?",
+    "criteria": {
+     "A": "General and Shortcuts, live; AI and MCP access listed but dimmed, naming the open owner question and row 8.14; the other sections of the spec are not drawn until a row gives them content.",
+     "B": "All eleven sections of the spec, those without content dimmed and naming a row.",
+     "C": "Only General and Shortcuts."
+    }
+   },
+   "shortcuts": {
+    "type": "choice",
+    "instructions": "What should the Shortcuts page be today?",
+    "criteria": {
+     "A": "A read-only table drawn from the command registry: each command with all its keys together, a search box, a conflict chip when two commands share a chord, and a line saying changing a key waits for row 11.84.",
+     "B": "An editable table now, storing the keys as a new setting.",
+     "C": "No Shortcuts page until keys can be changed."
+    }
+   },
+   "ai": {
+    "type": "choice",
+    "instructions": "What should the AI and MCP access entry show today?",
+    "criteria": {
+     "A": "Nothing drawn behind it: the entry is dimmed and says the roles wait for the owner's decision and the tiers for row 8.14.",
+     "B": "The Figma role table as written (Reader, Designer assistant, Reviewer), as fixed text.",
+     "C": "A read-only table of what the contract really has: each product role and the authorities it may hold, with the fixed rule that no AI credential can cue, take, clear or configure outputs."
+    }
+   },
+   "general": {
+    "type": "choice",
+    "instructions": "What should the General page hold?",
+    "criteria": {
+     "A": "The twenty settings exactly as today, in their two sections (Yours, This computer), unchanged in behaviour.",
+     "B": "The settings split across the nav pages by topic.",
+     "C": "One flat list with no sections."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "nav": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.5,
+    "probabilities": {
+     "A": 0.67,
+     "B": 0.2,
+     "C": 0.13
+    }
+   },
+   "shortcuts": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.94,
+    "probabilities": {
+     "A": 0.96,
+     "B": 0,
+     "C": 0.04
+    }
+   },
+   "ai": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.43,
+    "probabilities": {
+     "A": 0.62,
+     "B": 0,
+     "C": 0.38
+    }
+   },
+   "general": {
+    "type": "choice",
+    "choice": "B",
+    "confidence": 0.37,
+    "probabilities": {
+     "A": 0.41,
+     "B": 0.58,
+     "C": 0.01
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 3291,
+   "output_tokens": 0,
+   "state_tokens": 732,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "nav": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.6609,
+     "B": 0.1832,
+     "C": 0.1559
+    },
+    "confidence": 0.2042,
+    "answer_confidence": 0.6609,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "shortcuts": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.271,
+     "B": 0.4778,
+     "C": 0.2512
+    },
+    "confidence": 0.0408,
+    "answer_confidence": 0.4778,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "ai": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5054,
+     "B": 0.1439,
+     "C": 0.3507
+    },
+    "confidence": 0.0977,
+    "answer_confidence": 0.5054,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "general": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.3963,
+     "B": 0.3479,
+     "C": 0.2558
+    },
+    "confidence": 0.0143,
+    "answer_confidence": 0.3963,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

@@ -11,6 +11,9 @@ import {
   keyframeContextItems,
   keyframeForValue,
   keyframePanelModel,
+  baseValueOf,
+  propertyLabel,
+  propertyValueAt,
   toggleIntent,
 } from "../src/keyframe-editor";
 
@@ -148,5 +151,33 @@ describe("keyframe panel model", () => {
     expect(customBezierFromInputs([0.2, 0.8, 0.4, 1])).toEqual({ x1: 0.2, y1: 0.8, x2: 0.4, y2: 1 });
     expect(customBezierFromInputs([-0.1, 0, 0.4, 1])).toBeUndefined();
     expect(customBezierFromInputs([0.2, 0, 1.1, 1])).toBeUndefined();
+  });
+});
+
+describe("the dash offset channel, which is nested in the object's stroke style", () => {
+  const dashed = { join: "round", cap: "square", miterLimit: 2, dash: [8, 4], dashOffset: 6 };
+
+  it("reads the stored offset, or 0 when the object stores no stroke style", () => {
+    const doc = scene([rect("a", { strokeStyle: dashed }), rect("b")]);
+    expect(baseValueOf(doc, "a", "strokeStyle.dashOffset")).toBe(6);
+    expect(baseValueOf(doc, "b", "strokeStyle.dashOffset")).toBe(0);
+  });
+
+  it("does not read a malformed stored offset as a number", () => {
+    const doc = scene([rect("a", { strokeStyle: { ...dashed, dashOffset: "far" } })]);
+    expect(baseValueOf(doc, "a", "strokeStyle.dashOffset")).toBe(0);
+    const infinite = scene([rect("a", { strokeStyle: { ...dashed, dashOffset: Number.POSITIVE_INFINITY } })]);
+    expect(baseValueOf(infinite, "a", "strokeStyle.dashOffset")).toBe(0);
+  });
+
+  it("gives the value at the playhead from its channel, falling back to the stored offset", () => {
+    const channel = { objectId: "a", property: "strokeStyle.dashOffset", keys: [{ frame: 0, value: 0, easing: "linear" }, { frame: 10, value: 100, easing: "linear" }] };
+    const doc = scene([rect("a", { strokeStyle: dashed })], [channel]);
+    expect(propertyValueAt(doc, "a", "strokeStyle.dashOffset", 5)).toBe(50);
+    expect(propertyValueAt(scene([rect("a", { strokeStyle: dashed })]), "a", "strokeStyle.dashOffset", 5)).toBe(6);
+  });
+
+  it("is labelled in words, not as a path", () => {
+    expect(propertyLabel("strokeStyle.dashOffset")).toBe("Dash offset");
   });
 });

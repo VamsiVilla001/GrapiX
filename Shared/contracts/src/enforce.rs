@@ -493,12 +493,16 @@ mod tests {
             text_case: Default::default(),
             decoration: Default::default(),
             overflow: Default::default(),
+            max_lines: None,
+            kerning: None,
             align: Default::default(),
             line_height: None,
             letter_spacing: 0.0,
             word_spacing: 0.0,
             paragraph_spacing: 0.0,
             text_indent: 0.0,
+            baseline_shift: None,
+            text_animator: None,
         })]);
 
         let found = enforce(&scene, &system(), &OverrideLog::new());

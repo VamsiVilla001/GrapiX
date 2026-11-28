@@ -1,0 +1,10 @@
+1 id shown not name CAUGHT
+2 name fallback missing CAUGHT
+3 switched-off font allowed CAUGHT
+4 chosen font allowed CAUGHT
+5 other kinds ignored CAUGHT
+6 mixed shows first CAUGHT
+7 font id parse loose CAUGHT
+8 font not a choice group CAUGHT
+9 plain font row kept CAUGHT
+9 of 9 caught

@@ -18,13 +18,23 @@ export interface RecentEntry {
 }
 
 export interface MenuViewOptions {
+  /** The key in force for a command (the person's changes on top of the Editor's own); the menu model's own label when absent. */
+  readonly shortcutLabel?: (command: string) => string | undefined;
   /** The Editor's dockable panels, for the Display menu's list of the ones the menu does not name. */
   readonly panels: readonly PanelEntry[];
   readonly loadRecent: () => Promise<readonly RecentEntry[]>;
   readonly openRecent: (gpx: string) => void;
 }
 
-function commandButton(command: MenuCommand): HTMLButtonElement {
+/** The key a command shows beside it. The menu model's own label is the Editor's default; the page gives the key in force once the person has changed any (11.84). */
+let shortcutLabelOf: ((command: string) => string | undefined) | undefined;
+
+/** Set where the menu gets the key shown beside a command (`renderAppMenus` does it from its options); undefined is the menu model's own label. */
+export function useShortcutLabels(labelOf: ((command: string) => string | undefined) | undefined): void {
+  shortcutLabelOf = labelOf;
+}
+
+export function commandButton(command: MenuCommand): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.menuItem = command.id;
@@ -33,9 +43,10 @@ function commandButton(command: MenuCommand): HTMLButtonElement {
   const label = document.createElement("span");
   label.textContent = command.label;
   button.append(label);
-  if (command.shortcut !== undefined) {
+  const shown = shortcutLabelOf === undefined ? command.shortcut : shortcutLabelOf(command.id);
+  if (shown !== undefined) {
     const key = document.createElement("kbd");
-    key.textContent = command.shortcut;
+    key.textContent = shown;
     button.append(key);
   }
   switch (actionOf(command)) {
@@ -170,6 +181,7 @@ function nodes(items: readonly MenuNode[], options: MenuViewOptions, into: HTMLE
 
 /** Replace the bar's menus with the model's, before the workspace title. */
 export function renderAppMenus(bar: HTMLElement, menus: readonly Menu[], options: MenuViewOptions): void {
+  useShortcutLabels(options.shortcutLabel);
   for (const old of bar.querySelectorAll(".app-menu")) old.remove();
   const before = bar.querySelector(".workspace-title");
   for (const menu of menus) {

@@ -195,6 +195,24 @@
         </header>
 
         <div class="transport__inputs">
+          <div class="field field--stack">
+            <label class="field__label" for="stackInput">Stack <span class="field__hint">-99,999 to +99,999</span></label>
+            <div class="stackfield">
+              <button class="btn btn--step" id="stackMinus" type="button" aria-label="One stack further back" title="One stack further back">&minus;</button>
+              <input
+                class="field__input field__input--mono"
+                id="stackInput"
+                type="text"
+                value="0"
+                inputmode="numeric"
+                spellcheck="false"
+                autocomplete="off"
+                aria-describedby="stackNote"
+              />
+              <button class="btn btn--step" id="stackPlus" type="button" aria-label="One stack further to the front" title="One stack further to the front">+</button>
+            </div>
+          </div>
+          <p class="transport__mode transport__mode--inline" id="stackNote" aria-live="polite">Every command here goes to stack 0, the main stack.</p>
           <div class="field">
             <label class="field__label" for="takeIdInput">Take id</label>
             <input
@@ -296,6 +314,28 @@
               ACKNOWLEDGE &mdash; ARM ONE COMMAND
             </button>
           </div>
+        </div>
+      </section>
+
+      <!--
+        Stacks (build plan 12.10 and 12.13, Figma P7). What the engine reports on each stack, front to back. The table is drawn by
+        screens/stacks-view.js from the engine status; the controls that have no backend yet are drawn dimmed and name their row.
+      -->
+      <section class="panel panel--stacks" id="stacksPanel" aria-labelledby="stacksPanelTitle">
+        <header class="panel__head">
+          <h2 class="panel__title" id="stacksPanelTitle">Stacks &middot; what is on each, front to back</h2>
+          <span class="panel__note">Higher numbers sit in front. A stack holds one scene; a scene put on an occupied stack replaces it: the old scene plays its Out first, or is cut if it has none.</span>
+        </header>
+
+        <!-- The latest command's result, here as well as in Activity: a refusal must be read where the operator is looking (12.20). -->
+        <p class="stacks__result" id="stacksResult" role="status" aria-live="polite" hidden></p>
+
+        <div id="stacksList"></div>
+
+        <div class="stacks__later" role="group" aria-label="Stack controls that are not built yet">
+          <span class="panel__sub">Not built yet</span>
+          <button class="btn" type="button" disabled title="Clearing every stack needs an arm and then a key, with the operator and the reason on record. Plan row 12.14.">Clear all stacks <span class="stacks__row-ref">row 12.14</span></button>
+          <button class="btn" type="button" disabled title="Hide and solo change only what the Airview window shows, and the Airview window does not exist yet. Plan row 12.17.">Hide &middot; solo in the Airview <span class="stacks__row-ref">row 12.17</span></button>
         </div>
       </section>
 

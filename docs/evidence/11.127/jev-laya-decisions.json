@@ -1,0 +1,118 @@
+{
+ "input": {
+  "state": {
+   "decision": "How to build row 11.127, the terms table: one file of every user-visible product name, read by both apps and by a lint. Asked before coding, 24 Nov 2026.",
+   "facts": "The user chose new display names on 24 Nov 2026 (Cue for Take, Cue ID for Take ID, Preload for the old cue, Stack for Layer, Playline for Sequence, Scene Bank for Scene list, Inputs for Scene data, Airview for Virtual output, Element for Part, Phase for Moment, Play Rules, Data Hub, Replay Lab, Cue Control, Style and Effects as two separate terms). All names stay working titles and a rename must be one edit. The two apps already share web code by copying Shared/web-panels into both (a sync tool and a test keep the copies equal); the Editor is TypeScript bundled with esbuild, Playout is plain JavaScript. The existing Editor and Playout screens contain many visible old words (Take, Layer, Part, Moment) in HTML and strings. The new screens replace them one by one over many slices. The wire protocol keeps its own words (take, cue, phase, clear) and must not change.",
+   "options_where": "A: a JavaScript module in Shared/web-panels with a type file, copied into both apps, read by the apps and by a test. B: a JSON file read at run time by each app. C: two separate tables, one per app.",
+   "options_lint": "A: a ratchet: a test counts the old words in the visible text of both apps and fails if the count rises or a new screen file uses one; the allowed count is written down and goes down as screens are rebuilt. B: a strict lint that fails today on every old word, blocking the gate until every screen is rebuilt. C: no lint; rely on review."
+  },
+  "questions": {
+   "where": {
+    "type": "choice",
+    "instructions": "Where should the terms table live?",
+    "criteria": {
+     "A": "A module in Shared/web-panels with a type file, copied into both apps by the existing sync, read by the apps and the test.",
+     "B": "A JSON file each app reads at run time.",
+     "C": "Two tables, one per app."
+    }
+   },
+   "lint": {
+    "type": "choice",
+    "instructions": "How strict should the lint be while the screens are being rebuilt one at a time?",
+    "criteria": {
+     "A": "A ratchet: old words in visible text may not increase, new screen files may use none, and the allowed count falls as screens are rebuilt.",
+     "B": "Strict from day one: fail on every old word now.",
+     "C": "No lint."
+    }
+   },
+   "wire_untouched": {
+    "type": "noul",
+    "instructions": "Must the terms table change only what a person reads, and leave the wire protocol words (take, cue, phase, clear) and the code names alone?",
+    "criteria": {
+     "true": "Yes: display names only; the wire and the code identifiers do not change.",
+     "false": "No: rename the wire and code to match."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "where": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.97,
+    "probabilities": {
+     "A": 0.98,
+     "B": 0.02,
+     "C": 0
+    }
+   },
+   "lint": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "wire_untouched": {
+    "type": "noul",
+    "noul": 0.98
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1428,
+   "output_tokens": 0,
+   "state_tokens": 403,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "where": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4577,
+     "B": 0.3306,
+     "C": 0.2117
+    },
+    "confidence": 0.0421,
+    "answer_confidence": 0.4577,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "lint": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.1715,
+     "B": 0.1719,
+     "C": 0.6566
+    },
+    "confidence": 0.1978,
+    "answer_confidence": 0.6566,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "wire_untouched": {
+    "type": "noul",
+    "noul": 0.8682,
+    "confidence": 0.8682,
+    "answer_confidence": 0.8682,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

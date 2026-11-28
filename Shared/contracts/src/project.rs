@@ -6,6 +6,10 @@
 //! [`PROJECT_SETTINGS_FILE`] and are upgraded on their first write. The Editor service owns
 //! the files; the types are here so every surface reads the same declaration (invariant 22).
 
+pub mod library_colours;
+pub mod library_folders;
+pub mod library_layer_styles;
+
 use serde::{Deserialize, Serialize};
 
 use crate::color::{ColorDepth, WorkingColorSpace};
@@ -19,7 +23,7 @@ pub const PROJECT_SETTINGS_FILE: &str = "project.json";
 pub const GPX_EXTENSION: &str = "gpx";
 
 /// The project document schema this build writes and reads.
-pub const PROJECT_SCHEMA_VERSION: u32 = 1;
+pub const PROJECT_SCHEMA_VERSION: u32 = 2;
 
 /// The supporting folders of a project, beside its `.gpx` (the way an XPression, Viz or After
 /// Effects project keeps its media), decided by the user on 22 Nov 2026:
@@ -57,13 +61,24 @@ pub fn project_file_name(project: &str) -> String {
 ///
 /// Unknown fields refuse rather than drop, as [`ProjectSettings`] does: a field written by a
 /// newer build and read by an older one would otherwise vanish on the next save.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Not `Eq`: a Library colour holds floating-point components.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectDocument {
     pub schema_version: u32,
     /// The project's name, which is also its folder and its `.gpx` file name.
     pub name: String,
     pub settings: ProjectSettings,
+    #[serde(default)]
+    pub library_folders: library_folders::LibraryFolders,
+    /// The named solid colours of the Library's Colours tab (11.122). A project made before it reads without it, and a project with
+    /// none is written without it, so its document is the one it always was.
+    #[serde(default, skip_serializing_if = "library_colours::LibraryColours::is_untouched")]
+    pub library_colours: library_colours::LibraryColours,
+    /// The named effect stacks of the Library's Layer styles tab (11.122), kept the same way.
+    #[serde(default, skip_serializing_if = "library_layer_styles::LibraryLayerStyles::is_untouched")]
+    pub library_layer_styles: library_layer_styles::LibraryLayerStyles,
 }
 
 impl ProjectDocument {
@@ -72,12 +87,15 @@ impl ProjectDocument {
             schema_version: PROJECT_SCHEMA_VERSION,
             name: name.to_owned(),
             settings,
+            library_folders: Default::default(),
+            library_colours: Default::default(),
+            library_layer_styles: Default::default(),
         }
     }
 
     /// Whether this build can read the document, and why not if it cannot.
     pub fn check(&self, folder_name: &str) -> Result<(), String> {
-        if self.schema_version != PROJECT_SCHEMA_VERSION {
+        if !matches!(self.schema_version, 1 | PROJECT_SCHEMA_VERSION) {
             return Err(format!(
                 "schema version {} is not the {} this build reads",
                 self.schema_version, PROJECT_SCHEMA_VERSION
@@ -89,7 +107,9 @@ impl ProjectDocument {
                 self.name, folder_name
             ));
         }
-        Ok(())
+        self.library_folders.check()?;
+        self.library_colours.check()?;
+        self.library_layer_styles.check()
     }
 }
 
@@ -161,5 +181,34 @@ mod tests {
         assert!(serde_json::from_value::<ProjectSettings>(newer).is_err());
         let unstated = serde_json::json!({});
         assert!(serde_json::from_value::<ProjectSettings>(unstated).is_err());
+    }
+
+    #[test]
+    fn a_project_nobody_kept_a_library_item_in_is_written_without_any_and_reads_back_the_same() {
+        let document = ProjectDocument::new("show", ProjectSettings::new_project());
+        let wire = serde_json::to_value(&document).unwrap();
+        for key in ["libraryColours", "libraryLayerStyles"] {
+            assert!(wire.get(key).is_none(), "{key} is written for a project that never used it");
+        }
+        assert_eq!(serde_json::from_value::<ProjectDocument>(wire).unwrap(), document);
+    }
+
+    #[test]
+    fn opening_a_project_checks_the_library_items_it_stores() {
+        use crate::effect::{DropShadow, Effect, EffectInstance};
+        let mut document = ProjectDocument::new("show", ProjectSettings::new_project());
+        document.library_layer_styles.create_named("Soft shadow", vec![EffectInstance::new("drop-shadow", Effect::DropShadow(DropShadow::default()))]).unwrap();
+        document.library_colours.create_named("Red", crate::color::Rgba::new(1.0, 0.0, 0.0, 1.0, crate::color::SourceColorSpace::Srgb)).unwrap();
+        document.check("show").unwrap();
+        let wire = serde_json::to_value(&document).unwrap();
+        assert!(wire.get("libraryLayerStyles").is_some() && wire.get("libraryColours").is_some());
+        assert_eq!(serde_json::from_value::<ProjectDocument>(wire.clone()).unwrap(), document);
+
+        let mut bad_style = document.clone();
+        bad_style.library_layer_styles.styles[0].effects.clear();
+        assert!(bad_style.check("show").unwrap_err().contains("Library layer style"));
+        let mut bad_colour = document;
+        bad_colour.library_colours.colours[0].color.a = f64::NAN;
+        assert!(bad_colour.check("show").unwrap_err().contains("Library colour"));
     }
 }

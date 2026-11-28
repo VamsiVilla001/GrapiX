@@ -1,0 +1,29 @@
+Row 11.154, live check, 28 Nov 2026. Debug Editor (separate target dir), real window, driven through DevTools only (no keyboard or mouse input).
+Scratch project FontsLive; recent-projects.json backed up and restored; my Editor stopped by PID.
+
+1. Add text to a blank scene (no fonts):
+   before: 0 fonts, 0 objects, undo depth 0. Panel actions: ingestFiles, ingestLink, ingestInstalled, addDefault, publish.
+   after:  Arial taken in first (4 fonts: Arial 400, Arial Bold 700, Arial Italic, Arial Bold Italic), then text-1 made
+           on the first font (Arial regular). Undo depth 2 (one entry for the fonts, one for the text).
+   Each font: policy restricted, one face stored as WOFF2 (font/woff2): 379,752 / 468,816 / 360,380 / 365,860 bytes
+   (installed TTFs: 773,236 / 980,756 / 717,428 / 721,144 bytes).
+   All four fonts status "ready"; the browser registered Arial 400/700 normal/italic, all "loaded"; Properties shows "Arial · 64".
+   "Add Arial" is then unavailable: "Arial is already in Fonts check".
+   Screenshot: live-text-arial-28-nov.png
+
+2. Installed fonts list (section opened): 539 faces listed in 402 ms; 1,070 files named as not readable (almost all
+   ".55787.otf"-style Adobe Fonts activation files that carry no family name); the reasons are in the summary's tooltip.
+   Search "segoe ui" -> Segoe UI regular; picked, "Store as WOFF", Add selected -> font/woff, 538,124 bytes, restricted, ready.
+   Search "msgothic" -> MS Gothic, face 1 of msgothic.ttc (a collection); "Store as WOFF2" -> a standalone font/woff2,
+   3,676,000 bytes, restricted, ready.
+   Search "times new roman", "Keep as installed" -> font/ttf, restricted, ready.
+   Nothing picked -> "Pick one or more installed fonts first", nothing sent.
+   Clicking Add while a large import (MS Gothic) is still running does nothing visible beyond the "Adding..." line;
+   the first run of this check lost its third import that way and the same import worked on its own.
+   Final: 7 fonts in the scene, all "ready"; undo depth 4 after the three imports (one entry each).
+
+3. Real Windows Arial, unit test (asset-plane, `the_installed_arial_converts_to_woff2_and_woff_and_reads_back`):
+   Arial_0.ttf 773,236 -> WOFF2 379,752 / WOFF 421,820; arialbd.ttf 980,756 -> 468,816 / 510,148;
+   ariali.ttf 717,428 -> 360,380 / 390,228; arialbi.ttf 721,144 -> 365,860 / 396,260 (WOFF2 at Brotli quality 11 was
+   360,752 / 437,064 / 335,628 / 341,496 but took about 40 s for the eight conversions in place of 3 s).
+   Every conversion decodes again with allsorts and matches the sfnt table by table.

@@ -9,15 +9,23 @@
 
 use std::path::{Path, PathBuf};
 
+use gx_asset_plane::fonts::convert::FontConversionTarget;
 use gx_asset_plane::fonts::ingest::{FontDisposition, PreparedFontBatch, PreparedFontSource};
+use gx_asset_plane::fonts::system::{SkippedSystemFont, SystemFontEntry, SystemFontRequest, SystemFontScan};
 use gx_asset_plane::import::{
     AssetDisposition, AssetImportRefusal, PreparedAssetBatch, PreparedAssetSource,
 };
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
+use gx_contracts::animation::colour::{ColourChannel, ColourKeyframe, ColourProperty};
+use gx_contracts::command::{ApplyTextAnimatorPreset, CreateColourKey, MoveColourKey, RemoveColourKey, SetTextAnimator, UpdateColourKey};
 use gx_contracts::animation::{
     ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyRef, KeyframeChannel,
     SceneEasing, SceneKeyframe,
 };
+use gx_contracts::asset_usage::{AssetUsageEntry, AssetUsageReport, SceneUse, UsageProblem};
+use gx_contracts::project::library_colours::LibraryColour;
+use gx_contracts::project::library_layer_styles::LibraryLayerStyle;
+use gx_contracts::project::library_folders::{LibraryFolder, LibraryFolderEntry, LibraryFolderView};
 use gx_contracts::auth::{Role, Scope};
 use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
 use gx_contracts::bindings::BindingIssue;
@@ -88,16 +96,20 @@ use gx_contracts::settings::{
     DefaultInterpolation, LogLevel, MachineSettings, ProcessPriority, SettingsScope,
     StartupBehaviour, UserSettings,
 };
+use gx_contracts::text_animator::{TextAnimator, TextRangeBasis, TextRangeSelector, TextRangeShape};
 use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, PublishedRevision,
     RationalRate, ReferenceState, Refusal, RefusalSeverity, ReviewRequest, ReviewState, Revision,
     StructuredRefusal, TakeId,
 };
-use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
+use gx_control_plane::message::{
+    ClientRequest, EngineEvent, EngineReply, OutputConfig, OutputTarget,
+};
 use gx_control_plane::sequence::{MessageId, MessageKind, Sequence};
 use gx_control_plane::status::{
-    ClockSummary, Degradation, EngineStatus, ProgramState, ReferenceTransition, Severity,
+    ClockSummary, Degradation, EngineStatus, ProgramLayerPhase, ProgramLayerStatus, ProgramState,
+    ReferenceTransition, Severity,
 };
 use gx_control_plane::{
     ClearRequest, CueRequest, EngineCapability, TakeAt, TakeCommitted, TakeRequest,
@@ -208,6 +220,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         AssetKind,
         AssetAvailability,
         AssetLibraryItem,
+        // where each asset is used, across the project's scenes (11.122, task 119)
+        AssetUsageReport,
+        LibraryFolder,
+        LibraryFolderEntry,
+        LibraryFolderView,
+        // named solid colours kept in the project (11.122)
+        LibraryColour,
+        // named effect stacks kept in the project (11.122)
+        LibraryLayerStyle,
+        AssetUsageEntry,
+        SceneUse,
+        UsageProblem,
         // asset provenance (11.39)
         AssetProvenance,
         AssetOrigin,
@@ -219,6 +243,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // gx-contracts: editable scene animation (11.20)
         SceneEasing,
         AnimationSurface,
+        // the text choices of the Properties dock and what the engine draws of them (11.132)
+        gx_contracts::text_choices::TextChoices,
+        gx_contracts::text_choices::TextChoiceField,
+        gx_contracts::text_choices::TextChoiceValue,
+        // the record check: does a record's text fit its layout (11.153)
+        gx_contracts::fit_report::FitRecord,
+        gx_contracts::fit_report::FitRequest,
+        gx_contracts::fit_report::FitAxis,
+        gx_contracts::fit_report::FitResult,
+        gx_contracts::fit_report::ElementFit,
+        gx_contracts::fit_report::RecordFit,
+        gx_contracts::fit_report::FitReport,
         // the effect and preset surface (11.69)
         gx_contracts::effect_catalog::EffectSurface,
         gx_contracts::effect_catalog::EffectListing,
@@ -229,6 +265,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         CubicBezier,
         SceneKeyframe,
         KeyframeChannel,
+        ColourChannel,
+        ColourKeyframe,
+        ColourProperty,
         Vec2,
         Vec3,
         ObjectBase,
@@ -244,6 +283,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TextAlign,
         TextDecoration,
         TextObject,
+        TextAnimator,
+        TextRangeSelector,
+        TextRangeShape,
+        TextRangeBasis,
         RectObject,
         EllipseObject,
         ImageObject,
@@ -328,6 +371,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         UpdateKeyframe,
         MoveKeyframe,
         RemoveKeyframe,
+        CreateColourKey,
+        UpdateColourKey,
+        MoveColourKey,
+        RemoveColourKey,
+        SetTextAnimator,
+        ApplyTextAnimatorPreset,
         ApplyPreset,
         SetPhase,
         RemovePhase,
@@ -406,11 +455,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EngineReply,
         EngineEvent,
         OutputConfig,
+        OutputTarget,
         MessageId,
         MessageKind,
         Sequence,
         // gx-control-plane: status
         EngineStatus,
+        ProgramLayerPhase,
+        ProgramLayerStatus,
         ProgramState,
         Degradation,
         Severity,
@@ -425,6 +477,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PreparedFontBatch,
         PreparedFontSource,
         FontDisposition,
+        // gx-asset-plane: installed fonts and their conversion
+        FontConversionTarget,
+        SystemFontEntry,
+        SkippedSystemFont,
+        SystemFontScan,
+        SystemFontRequest,
         // gx-asset-plane: asset manager import (11.39)
         PreparedAssetBatch,
         PreparedAssetSource,
@@ -922,7 +980,8 @@ fn write_easing_reference(root: &std::path::Path) -> std::io::Result<()> {
     }
     body.push_str("  ],\n} as const;\n\nexport const NAMED_EASING_POINTS = {\n");
     for easing in SceneEasing::ALL {
-        if *easing == SceneEasing::CustomBezier {
+        // Bounce and Elastic are not cubic beziers: they have no control points, only the samples in EASING_REFERENCE.
+        if matches!(*easing, SceneEasing::CustomBezier | SceneEasing::Bounce | SceneEasing::Elastic) {
             continue;
         }
         let points = easing_control_points(*easing);

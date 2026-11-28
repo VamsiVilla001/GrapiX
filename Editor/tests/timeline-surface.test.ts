@@ -22,6 +22,8 @@ import {
 import {
   scrollViewportByWheel,
   TIMELINE_HEADER_WIDTH,
+  headerWidthFor,
+  showsColumns,
   timelineSnapshotFor,
   viewportForBounds,
   watchSurfaceSize,
@@ -236,6 +238,14 @@ describe("the timeline follows its container's size", () => {
     expect(fake.stats.cancelled).toBe(1);
   });
 
+  it("shows the PARENT, BLEND and MATTE columns only where the stage keeps room", () => {
+    expect([showsColumns(1110), showsColumns(899), showsColumns(900), showsColumns(530)]).toEqual([true, false, true, false]);
+    expect(headerWidthFor(1110)).toBe(570);
+    expect(headerWidthFor(530)).toBe(TIMELINE_HEADER_WIDTH);
+    // A side-docked Timeline keeps most of its width for the keys.
+    expect(530 - headerWidthFor(530)).toBeGreaterThan(250);
+  });
+
   it("a resize produces canvases at the new size, backed at CSS size × ratio", () => {
     const model = timelineModel(scene(40, 2_500));
     const ratio = 1.25;
@@ -251,7 +261,7 @@ describe("the timeline follows its container's size", () => {
     let previous: TimelineSnapshot | null = null;
     for (const bounds of sizes) {
       viewport = viewportForBounds(viewport, bounds, model.durationFrames, model.rows.length);
-      expect(viewport.width).toBe(bounds.width - TIMELINE_HEADER_WIDTH);
+      expect(viewport.width).toBe(bounds.width - headerWidthFor(bounds.width));
       expect(viewport.height).toBe(bounds.height);
 
       const parts = renderTimelinePanel(fakeDocument, model, viewport);

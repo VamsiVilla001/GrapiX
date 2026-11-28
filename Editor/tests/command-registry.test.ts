@@ -187,6 +187,7 @@ describe("which key is which command", () => {
 
   it("runs each key command through the menu action that does that job and no other", () => {
     const natives: Record<string, string> = {
+      "motion.add-key": "add-key",
       "motion.easy-ease": "easy-ease",
       "motion.easy-ease-in": "easy-ease-in",
       "motion.easy-ease-out": "easy-ease-out",
@@ -212,6 +213,8 @@ describe("which key is which command", () => {
     expect(shortcutFor(press("F9", { shiftKey: true }))?.command).toBe("motion.easy-ease-in");
     expect(shortcutFor(press("F9", { ctrlKey: true, shiftKey: true }))?.command).toBe("motion.easy-ease-out");
     expect(shortcutFor(press("Backspace"))?.command).toBe("motion.delete-keys");
+    expect(shortcutFor(press("k"))?.command).toBe("motion.add-key");
+    expect(shortcutFor(press("k", { ctrlKey: true }))?.command).toBe("edit.search");
   });
 
   it("does not match with Alt held, or with the wrong modifiers", () => {
@@ -262,10 +265,20 @@ describe("what a key press does", () => {
 
   it("never takes a key from a text field", () => {
     const typing: KeyFocus = { editing: true, control: false };
-    for (const s of SHORTCUTS) {
+    for (const s of SHORTCUTS.filter((entry) => entry.fromFields !== true)) {
       const decision = decideKey(press(s.chord.key, { ctrlKey: s.chord.ctrl, shiftKey: s.chord.shift }), typing, open);
       expect(decision, s.command).toEqual({ kind: "pass" });
     }
+  });
+
+  it("lets Ctrl K open the search from a text field, and nothing else leave one", () => {
+    const typing: KeyFocus = { editing: true, control: false };
+    expect(decideKey(press("k", { ctrlKey: true }), typing, open)).toEqual({ kind: "run", command: "edit.search" });
+    expect(decideKey(press("z", { ctrlKey: true }), typing, open)).toEqual({ kind: "pass" });
+    expect(decideKey(press("k"), typing, open)).toEqual({ kind: "pass" });
+    // Only the one chord says so: a key that another handler already took is still left alone.
+    expect(SHORTCUTS.filter((entry) => entry.fromFields === true).map((entry) => entry.command)).toEqual(["edit.search"]);
+    expect(decideKey(press("k", { ctrlKey: true, defaultPrevented: true }), typing, open)).toEqual({ kind: "pass" });
   });
 
   it("leaves Space to a focused button or slider, but not the other keys", () => {
@@ -336,7 +349,7 @@ describe("commands that change the document", () => {
 describe("the page uses the one list", () => {
   it("decides every key through the registry and keeps no other handler for the shortcuts", () => {
     expect(page).toContain('document.addEventListener("keydown", onCommandKey)');
-    expect(page).toContain("decideKey(event, keyFocus(event), commandContext())");
+    expect(page).toContain("decideKey(event, keyFocus(event), commandContext(), keyTable.shortcuts)");
     for (const gone of ["saveShortcut(", "onTimelineKeyDown", "onPreviewShortcut", 'event.key === "F9"']) {
       expect(page, `${gone} is gone: the table decides`).not.toContain(gone);
     }

@@ -1,0 +1,35 @@
+{
+ "state": {
+  "decision": "What the Editor's Check graphic (cmd_scene_preflight) counts as a blocker, asked while taking over codex's backend task (user, 24 Nov 2026).",
+  "facts": "Check graphic is read only and returns a list of blockers (code, subject, message) for the Editor draft, unsaved edits included. Codex's rules, agreed in topic 16: a font used by a text object (or a fallback of it) is a blocker unless it is enabled, Ready, has at least one face and every face is a packaged File asset in the scene with a content hash (invariant 29: no silent substitution); an asset with no hash, or whose cache entry is missing or altered, is named; a binding to a data path the scene's data context does not hold is named (the binding stays authored); an invalid Scene ID label is named; a Cue ID is not checked because it belongs to the Playout show. Existing publish and MCP behaviour is unchanged: publish still refuses only what it refused before. A graphic whose data arrives at take time may have an empty data context in the Editor.",
+  "proposed": "Count all of these as blockers in Check graphic, show them as a list, and do not change what Publish refuses."
+ },
+ "questions": {
+  "binding": {
+   "type": "choice",
+   "instructions": "A binding to a path the Editor's data context does not hold: how should Check graphic treat it?",
+   "criteria": {
+    "A": "A blocker, named with the object, property and path, because the graphic would show nothing or fail for that field (as agreed).",
+    "B": "A warning only, because the data may arrive at take time.",
+    "C": "Left out of Check graphic."
+   }
+  },
+  "font_rule": {
+   "type": "choice",
+   "instructions": "A used font whose status is Ready but whose faces are not packaged file assets with a content hash: how should Check graphic treat it?",
+   "criteria": {
+    "A": "A blocker named fontMissing, because nothing guarantees the same typeface on the engine (as agreed).",
+    "B": "Accepted, because status Ready is enough.",
+    "C": "A warning only."
+   }
+  },
+  "publish_unchanged": {
+   "type": "choice",
+   "instructions": "Should adding Check graphic change what Publish itself refuses in this slice?",
+   "criteria": {
+    "A": "No: Publish keeps its behaviour, and the Editor shows Check graphic's list beside it until the user decides (as agreed).",
+    "B": "Yes: Publish refuses whenever Check graphic lists a blocker."
+   }
+  }
+ }
+}

@@ -1,0 +1,64 @@
+/* The Settings window's nav and pages (plan row 11.81, Figma E4; src/settings-window-view.ts). Loaded after style.css, which still owns the
+   dialog itself, the rows of the General page and the buttons; this file only widens the dialog for the nav and styles what is new. */
+
+/* The dialog is a column whose middle (the nav and the page) takes what is left and scrolls inside itself, so the lead above it and the
+   Close button below it are always on screen. (style.css scrolled the whole dialog, which put Close below the fold once a page was long.) */
+#settings-dialog { width: min(1160px, calc(100vw - 32px)); overflow: hidden; }
+#settings-dialog[open] { display: flex; flex-direction: column; }
+#settings-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+
+/* A fixed height (it shrinks with a short window), so the dialog is the same size on every page and does not jump when the nav is used. */
+.settings-window { display: grid; grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1 1 auto; height: min(560px, calc(100vh - 210px)); min-height: 160px; margin-top: 8px; border-top: 1px solid var(--sk-border); }
+
+/* The nav */
+.settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 8px 0; border-right: 1px solid var(--sk-border); }
+.settings-tab { text-align: left; padding: 5px 10px; border: 0; border-left: 3px solid transparent; border-radius: var(--sk-radius-control, 2px); background: none; color: var(--text); font: var(--sk-text-body); cursor: pointer; }
+.settings-tab:hover { background: var(--sk-surface); }
+.settings-tab.is-selected { border-left-color: var(--accent); background: var(--accent-quiet); color: var(--sk-ink); font-weight: 600; }
+/* A page that is not built is listed and dimmed; its tooltip and its page say why. */
+.settings-tab.is-soon { color: var(--sk-ink-4); }
+.settings-tab.is-soon.is-selected { color: var(--sk-ink-3); }
+
+/* The page beside it */
+.settings-pages { min-width: 0; min-height: 0; padding-left: 16px; overflow: auto; }
+.settings-page[hidden] { display: none; }
+.settings-page-note { margin: 0 0 8px; max-width: 78ch; color: var(--sk-ink-3); font: var(--sk-text-caption); overflow-wrap: anywhere; }
+
+/* Shortcuts */
+.settings-search { width: 100%; margin: 0 0 8px; }
+.settings-keys { width: 100%; border-collapse: collapse; }
+.settings-keys th { padding: 4px 8px; border-bottom: 1px solid var(--sk-border-strong); font: var(--sk-text-label); letter-spacing: var(--sk-tracking-label); text-align: left; color: var(--sk-ink-4); }
+.settings-keys td { padding: 5px 8px; border-bottom: 1px solid var(--sk-canvas); vertical-align: middle; }
+.settings-keys-label { color: var(--sk-ink-2); }
+.settings-keys-id { margin-left: 8px; font: var(--sk-text-mono-small); color: var(--sk-ink-4); }
+.settings-keys-state { width: 70px; text-align: right; }
+.settings-keys-empty td { color: var(--sk-ink-3); }
+.settings-key { display: inline-block; margin-right: 4px; padding: 1px 6px; border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-tag, 1px); background: var(--sk-canvas); color: var(--sk-ink); font: var(--sk-text-mono); }
+.settings-keys-summary { margin-top: 8px; }
+.settings-clash { padding: 3px 6px; border: 1px solid var(--sk-danger); border-radius: var(--sk-radius-tag, 1px); background: var(--sk-danger-tint); color: var(--sk-danger-ink); font: 800 10px/1 var(--sk-font-mono); letter-spacing: .08em; cursor: help; }
+
+/* A page that is not built */
+.settings-waiting-line { color: var(--sk-warn-ink); font-weight: 600; }
+
+/* Changing a key (row 11.84): the toolbar, a key with its remove button, the buttons and the line under a row that is waiting for a key. */
+.settings-keys-tools { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.settings-keys-tools .settings-search { flex: 1 1 auto; width: auto; margin: 0; }
+.settings-keys-show { flex: 0 0 auto; }
+.settings-keys-reset-all { flex: 0 0 auto; }
+.settings-keys-state { width: auto; white-space: nowrap; }
+.settings-keys-state > * { margin-left: 4px; }
+.settings-keys-none { color: var(--sk-ink-4); font: var(--sk-text-caption); }
+.settings-keycap { display: inline-flex; align-items: center; margin-right: 4px; }
+.settings-keycap .settings-key { margin-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.settings-key-remove { padding: 1px 5px; border: 1px solid var(--sk-border-strong); border-left: 0; border-radius: 0 var(--sk-radius-tag, 1px) var(--sk-radius-tag, 1px) 0; background: var(--sk-canvas); color: var(--sk-ink-3); font: 12px/1.2 var(--mono); cursor: pointer; }
+.settings-key-remove:hover { color: var(--sk-danger-ink); border-color: var(--sk-danger); }
+.settings-key-change, .settings-key-add, .settings-key-reset, .settings-key-take, .settings-key-cancel, .settings-keys-reset-all-button { padding: 2px 8px; font-size: 11px; }
+.settings-key-take { border-color: var(--sk-ember); background: var(--sk-ember-tint); color: var(--sk-ember-deep); }
+.settings-key-add:disabled, .settings-keys-reset-all-button:disabled { opacity: .45; }
+.settings-changed { padding: 3px 6px; border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius-tag, 1px); background: var(--sk-canvas); color: var(--sk-ink-3); font: 800 10px/1 var(--mono); letter-spacing: .04em; }
+.settings-keys-row.is-recording td { background: var(--sk-ember-tint); }
+.settings-keys-status-cell { padding: 6px 8px; background: var(--sk-ember-tint); border-left: 2px solid var(--sk-ember); color: var(--sk-ink-2); font: var(--sk-text-caption); }
+.settings-keys-status-cell > * { margin-right: 8px; }
+.settings-keys-notice[data-tone="bad"] { color: var(--sk-danger-ink); }
+.settings-keys-stale { margin-top: 4px; }
+.settings-keys-unknown button { margin-left: 4px; }

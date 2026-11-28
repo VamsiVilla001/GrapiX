@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>settings harness</title>
+<link rel="stylesheet" href="/skwad.css" /><link rel="stylesheet" href="/style.css" /><link rel="stylesheet" href="/settings-window.css" /></head>
+<body>
+<dialog id="settings-dialog" aria-labelledby="settings-title">
+  <form id="settings-form" method="dialog">
+    <h2 id="settings-title">Settings</h2>
+    <div id="settings-window"></div>
+    <p id="settings-error" class="start-error" role="alert"></p>
+    <div class="dialog-actions">
+      <button id="settings-reset-user" type="button">Reset my settings</button>
+      <button id="settings-reset-machine" type="button">Reset this computer's settings</button>
+      <button id="settings-close" type="submit">Close</button>
+    </div>
+  </form>
+</dialog>
+<script type="module" src="/bundle.js"></script>
+</body></html>

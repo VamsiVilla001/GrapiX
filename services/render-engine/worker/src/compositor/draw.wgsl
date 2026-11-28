@@ -17,6 +17,10 @@ struct Draw {
     row_v: vec4<f32>,
     positions: array<vec4<f32>, 4>,
     colours: array<vec4<f32>, 16>,
+    // 11.61: x, y: the corner of this path's cell in the coverage texture. The
+    // instance paths of a layer share coverage sheets, one cell each; a path
+    // drawn alone has its cell at (0, 0).
+    cell: vec4<u32>,
 }
 
 @group(0) @binding(0) var coverage: texture_2d<f32>;
@@ -76,7 +80,7 @@ fn gradient(i: u32, j: u32) -> vec4<f32> {
 @compute @workgroup_size(16, 16)
 fn compose(@builtin(global_invocation_id) id: vec3<u32>) {
     if (any(id.xy >= draw.window.zw)) { return; }
-    let c = textureLoad(coverage, vec2<i32>(id.xy), 0).a;
+    let c = textureLoad(coverage, vec2<i32>(draw.cell.xy + id.xy), 0).a;
     if (c == 0.0) { return; }
     var paint = draw.paint;
     if (draw.config.y != 0u) {

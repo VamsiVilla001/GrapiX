@@ -1,0 +1,13 @@
+11.51 live check, 27 Nov 2026 (claude). Debug Editor built from this tree (web bundle after the Text indent row).
+Seen in the real window (DevTools 9335): new project, scene, text element, font ingested.
+  - Properties Text section shows Text indent, Underline and Strike-through rows (Underline false before).
+  - Text indent set to 40: row reads 40, log "Set Text indent".
+  - Underline and Strike-through set true: rows read true, log "Set Underline", "Set Strike-through".
+  - Case set to Small caps through the dropdown choice: log "Set Case to Small caps" (the choice is offered, not dimmed).
+  - Every edit also logged "1 object(s) not drawn in the Draft view (see the Engine preview)" (the Draft view draws no text; unchanged).
+NOT seen: the engine drawing it from this Editor. The scratch engine (gx-render-worker on 4400/4401, started after the font was ingested)
+  answered the preview with "refused [assetMissing]: asset missing: <font hash>" (the preview does not upload the font) and "Publish to
+  Playout" to it was refused ("publication refused: package ..."), so no engine frame of the text was produced from the window.
+Engine-drawn proof instead: worker/tests/colour_reference.rs small_caps_and_text_indent_reach_the_pixels (ink extent measured on the CPU path and
+  on DX12 and Vulkan hardware).
+Cleanup: Editor and engine stopped by PID, recent-projects.json restored, settings folder absent.

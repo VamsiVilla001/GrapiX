@@ -65,6 +65,12 @@ export const EDIT_WORDS = {
   setPathKey: "Set path key",
   removePathKey: "Remove path key",
   movePathKey: "Move path key",
+  createColourKey: "Add colour key",
+  updateColourKey: "Change colour key",
+  moveColourKey: "Move colour key",
+  removeColourKey: "Remove colour key",
+  setTextAnimator: "Change text animator",
+  applyTextAnimatorPreset: "Apply text animator preset",
   linkPaths: "Link paths",
   unlinkPath: "Unlink path",
   removeSubpath: "Remove subpath",
@@ -77,7 +83,7 @@ export const EDIT_WORDS = {
 export const MODULE_WORDS = {
   scene: "Scene",
   viewport: "Composition",
-  objectManager: "Objects",
+  objectManager: "Elements",
   inspector: "Properties",
   timeline: "Timeline",
   animation: "Animation",
@@ -86,7 +92,7 @@ export const MODULE_WORDS = {
   textStyles: "Text styles",
   assets: "Assets",
   takePage: "Take page",
-  bindings: "Data bindings",
+  bindings: "Data",
   controlContract: "Template controls",
 } as const satisfies Record<EditorModule, string>;
 

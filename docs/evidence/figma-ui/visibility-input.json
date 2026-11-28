@@ -1,0 +1,63 @@
+{
+ "state": {
+  "decision": "Which Editor tools and panels stay always visible and which are hidden until called (click, hover, shortcut, menu), by comparing the current Editor with the Figma screens B1 Start, B2 main, B3 Timeline, B3d Properties and B13 Library, before anything is removed (owner, 26 Nov 2026). The Figma screens are then updated to match the decision, and only then the Editor.",
+  "facts": "Current Editor (Design layout): menu bar with eight menus; a toolbar with Select, Move, Rotate, Scale, Pivot, Pen, a 'Pen: Auto' mode dropdown, Edit path, Add vertex, Delete vertex, Convert vertex, Hand, Zoom, Rectangle, Ellipse, Text, search (Ctrl K), Layout dropdown, engine chip, Undo, Redo, Publish; left dock: Scenes panel (List, Refresh, Save as, Close project, New scene, Save to project, project path, search, list), Elements (+Box +Text +Image, list), plus folded Assets, Take page, Template controls, Data bindings, Publish; centre: scene tabs, viewport header (Composition name, Scene ID field, DRAFT, View select, backdrop swatches, Guides, size and fps, Rate select, engine message) and footer (Fit, -, zoom %, +, grid, timecode, fps, a Pen hint sentence, Authoring preview); right dock, all stacked or tabbed: Preview (transport, playback settings, engine status), Not drawn by this preview, Properties, Pivot, Masks, Animation (property diamonds and Auto-key), Effect Controls, Text styles, Fonts, Effects & Presets, Materials; bottom: full Timeline with a KEYFRAME bar, a three-group tools row (Keys with easing and Stagger settings, Presets, Phases) and the layer table; an Activity log of several lines. Figma: B2 shows only menu bar, the core tools (Select, Move, Rotate, Scale, Pivot, Pen, Rectangle, Ellipse, Text), search, Layout, engine chip, Undo, Redo, Publish; Elements at left; scene tabs; a plain composition header (name, DRAFT, size and fps); a footer of Fit, zoom %, time and Authoring preview; at right one element card (Style, Motion, Data) or, in B3d, one scrolling Properties list with sections (Character, Fill and stroke, Paragraph and fit, Text animator, Shape, Element) and a diamond on every animatable row; a compact timeline strip with 'Open Timeline'; B3 a full timeline with one bar (Prev, Play, Next, time, easing buttons, Hold, Snap, Markers, Zoom to fit, Auto-key chip) and a keyframe card in the right column; a one-line status bar with More, Logic, Library and the latest message; B13 the Library as its own screen (folders, tabs, grid, details). The owner decided earlier: eight menus, no step chips and no 'Fix next issue' (they are in Figma but not built), modules combine, never pop-out windows; nothing that works is deleted, only moved to where it is called.",
+  "proposed": "ALWAYS VISIBLE: menu bar and context line; the core tools; search, Layout, engine chip, Undo, Redo, Publish; Elements with +Box +Text +Image; scene tabs; the composition header (name, DRAFT, size, fps); footer Fit, zoom %, time; one Properties list on the right with the element card at its top, replaced by the keyframe card while keys are selected; the timeline strip that opens to the full timeline with one bar holding transport, Add key, easing buttons, Hold, Stagger, Zoom to fit and the Auto-key chip; the one-line status bar with Library. ON DEMAND: path tools (Pen mode, Edit path, Add, Delete, Convert vertex) as a context bar shown only while the Pen or path editing is active; Hand and Zoom by shortcut and tooltip only; the Scenes list from File > Open, the Start screen and a '+' on the scene tabs; Scene ID, Rate, View, backdrop and Guides in a Composition popover opened by clicking the composition name, and in the View menu; Preview transport moved into the timeline bar, playback settings in a popover on the timecode, engine detail on hovering the engine chip; Not drawn as a warning chip in the footer that opens the list; Pivot, Masks and Effect Controls as Properties sections that appear when the element has them, added from 'More'; the Animation panel replaced by the diamonds on Properties rows; Text styles, Fonts, Effects & Presets, Materials and Assets in the Library screen, Effects also by shortcut; Take page, Template controls and bindings in the Data block of Properties and the Data screen; Publish as the Publish dialog; Activity as the status bar line that opens the full history; the timeline's Presets and Phases in the Motion menu and the key context menu, and Stagger's settings in a popover on its button."
+ },
+ "questions": {
+  "principle": {
+   "type": "choice",
+   "instructions": "What decides whether a control is always visible?",
+   "criteria": {
+    "A": "It is used in nearly every session of building, animating and sending a graphic; everything else is one click, hover or shortcut away, and nothing that works is deleted.",
+    "B": "Everything the Editor can do stays visible, so nothing has to be found.",
+    "C": "Only what the Figma screens draw exists; the rest is deleted."
+   }
+  },
+  "pathTools": {
+   "type": "choice",
+   "instructions": "Pen mode, Edit path, Add, Delete and Convert vertex:",
+   "criteria": {
+    "A": "A context bar shown only while the Pen or path editing is active, with their shortcuts kept.",
+    "B": "Always in the main toolbar.",
+    "C": "Menu only."
+   }
+  },
+  "rightColumn": {
+   "type": "choice",
+   "instructions": "The right column:",
+   "criteria": {
+    "A": "One Properties list (element card at its top, keyframe card while keys are selected) with Pivot, Masks and Effects as sections that appear when the element has them; Preview, Not drawn, Animation, Text styles, Fonts, Effects and Materials move to the timeline bar, a footer chip, the Properties diamonds and the Library.",
+    "B": "Keep the eleven tabbed and stacked panels.",
+    "C": "Keep the panels but collapse them all by default."
+   }
+  },
+  "composition": {
+   "type": "choice",
+   "instructions": "Scene ID, Rate, View, backdrop and Guides in the viewport header:",
+   "criteria": {
+    "A": "In a Composition popover opened by clicking the composition name, and in the View menu; the header shows name, DRAFT, size and fps.",
+    "B": "Stay in the header as now.",
+    "C": "Only in Settings."
+   }
+  },
+  "activity": {
+   "type": "choice",
+   "instructions": "The Activity log and the Not drawn panel:",
+   "criteria": {
+    "A": "A one-line status bar with the latest message that opens the full history on click, and a warning chip in the viewport footer that opens the Not drawn list.",
+    "B": "Keep the multi-line Activity panel and the Not drawn panel always open.",
+    "C": "Remove them."
+   }
+  },
+  "library": {
+   "type": "choice",
+   "instructions": "Text styles, Fonts, Effects & Presets, Materials and Assets:",
+   "criteria": {
+    "A": "Tabs of the Library screen (B13), opened from the status bar; effects also by a shortcut.",
+    "B": "Docked panels on the right as now.",
+    "C": "Separate windows."
+   }
+  }
+ }
+}

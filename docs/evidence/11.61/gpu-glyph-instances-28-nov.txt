@@ -1,0 +1,109 @@
+Row 11.61, the clause "render on the GPU from per-glyph instance data without per-frame re-shaping". 28 Nov 2026, claude-backend.
+All cargo runs in a private target (D:\Project KK\cargo-target-claude-backend), in the shared worktree, uncommitted, debug build.
+Hardware: this PC's GPU on DX12 and on Vulkan, each named explicitly.
+
+1. What a frame of an animated text cost before (the probe is docs/evidence/11.61/tools/probe_text_frame_cost.rs)
+   320x180, one text layer, 20 frames, milliseconds a frame and GPU resource builds a frame:
+                                        DX12                 Vulkan               builds
+     static text                        2.0                  1.2                  0
+     geometry-only animator, 15 glyphs  3.5                  2.8                  4
+     geometry-only animator, 64 glyphs  5.0                  3.7                  4
+     opacity animator, 15 glyphs        13.9                 12.4                 30
+     opacity animator, 64 glyphs        48.8                 41.1                 112
+   The CPU reference path took 7 to 9 ms a frame in every case.
+   Why: text is shaped once at prepare and its glyph outlines are cached; a frame only places them. But a text whose glyphs each
+   have their own paint (an opacity or fill animator) is one path a glyph, and every path was its own coverage texture, Vello
+   render, draw record, bind group and GPU submission, every frame.
+
+2. The decision, asked before any code (gpu-glyph-instances-input.json, jev-laya-gpu-glyph-instances.json)
+   Jev (jev-1.14.0): draw the paths of a layer into one coverage atlas and composite from one draw record a path
+   (confidence 0.60; the alternatives 0.26 and 0.01); hold it to the same bytes as the path-by-path drawing (confidence 0.85);
+   for every multi-path source (0.53); pack into several atlases when one is too small (0.62). On whether that alone lets the
+   clause be recorded as met: 0.37, leaning no.
+   Laya (laya-multilingual, max_len 8192, not truncated): near-flat on every choice (margins of 0.02 to 0.05) and chose a new
+   instanced triangle pipeline; "yes" at 0.96 on the clause. A second opinion, not a vote. Not built: that pipeline's edge coverage
+   is not Vello's, so the GPU and the CPU reference would stop agreeing within one code value, against the user's 15 Nov decision
+   that Vello gives the coverage.
+
+3. What the first version showed (the GPU alone draws through an atlas)
+   Fast: opacity animator, 64 glyphs, 48.8 -> 5.9 ms on DX12 and 41.1 -> 3.6 ms on Vulkan; 15 glyphs 13.9 -> 4.3 and 12.4 -> 2.6;
+   builds 112 and 30 -> 4 a frame.
+   NOT the same bytes as the path-by-path drawing, so Jev's preferred criterion could not be met: of 15,960 and 20,970 pixels,
+   15 and 79 differed, the worst by 0.0030 of full scale (0.76 of one 8-bit coverage step); with a small atlas (offsets under 64
+   pixels) 3 pixels, worst 0.0020. Cause: a path moved by whole pixels to its cell rounds differently in f32 (a coordinate near
+   1,100 keeps 128 times less of its fraction than one near 10), which flips one coverage code in a few edge pixels.
+   The same measurement showed that path by path the GPU is the CPU backend to 1.2e-7 (a float's last place). So an atlas on the
+   GPU alone would have spent the GPU/CPU gate's whole margin. Put to the user as three options; the user chose the third:
+   the atlas on, with the CPU reference packing its paths the same way.
+
+4. What is built
+   services/render-engine/worker/src/rasterise/mod.rs    PreparedPath::instance (false unless set)
+   .../rasterise/lyon.rs                                 prepare_text marks the per-glyph paths of a text animator
+   .../rasterise/vello.rs                                plan_coverage (one plan for both backends), cell_transform, SHEET_SIDE;
+                                                         VelloCpuRasteriser draws from the plan
+   .../compositor/draw.rs, draw.wgsl                     GpuDrawer draws from the same plan: one Vello render a sheet, one compose
+                                                         dispatch a path from its draw record (cell, window, paint) at a dynamic
+                                                         uniform offset
+   .../render_work.rs, text.rs                           RenderWork::cpu_text_shapings, counted in shape_object
+   Rules of the plan:
+   - Only instance paths (the per-glyph paths of a text animator) share a sheet. Every other path (rects, shapes, strokes, static
+     text, paint) is a sheet of its own, the size of its window, at (0, 0): the drawing as it was, on both backends. So no frame
+     that existed before moves.
+   - An instance path's cell is slot k of a grid: k is its place among the instance paths, counted whether or not it is visible or
+     inside the region; the pitch is the next power of two above the largest of their windows before the region clamps it. So a
+     glyph keeps its cell when a neighbour's paint changes or a neighbour leaves the frame, and the CPU reference drawing onto the
+     canvas and the GPU drawing into a layer of its own give one glyph the same cell.
+   - A path the region cuts keeps its slot and is drawn alone (the edge of its own sheet cuts it).
+   - A shared sheet larger than the device's texture limit refuses by name; it is never packed differently from the CPU's.
+   Still done every frame, and said so: Vello rasterises each visible glyph's coverage again, because a transform changes coverage.
+   What a frame no longer does: shape text; build a texture, a buffer, a bind group and a submission for each glyph.
+   The milliseconds in section 3 are of the first version (a shelf atlas on the GPU alone). The version that is built (grid cells,
+   both backends) has not been timed again; what is asserted of it is the count: the GPU builds the same for 64 glyphs as for 15,
+   at most 6 a frame (the colour_reference test in section 5, green on DX12 and on Vulkan).
+
+5. Tests
+   rasterise::vello::tests::a_cell_depends_on_nothing_a_frame_or_a_region_changes_by_accident   (CPU, always)
+   rasterise::vello::tests::sharing_sheets_moves_no_pixel_by_more_than_one_coverage_step         (CPU, always; and paths that are
+                                                                                                  not instances are drawn equal)
+   compositor::draw::tests::gpu_sheets_are_the_cpu_backends_and_within_one_coverage_step_of_path_by_path   (hardware, DX12 and Vulkan)
+       the GPU is within 1e-5 of the CPU backend with sheets shared, with sheets of 64 pixels a side (four cells each, so many
+       sheets) and with every path alone; sharing is within one coverage step of path by path, in under one pixel in fifty, and
+       is not equal to it
+   tests/colour_reference.rs: a_frame_of_a_text_animator_shapes_no_text_and_its_gpu_work_does_not_grow_with_the_glyphs
+       0 shapings over 10 animator frames on the CPU path and on the GPU, for 15 and for 64 glyphs; a keyed size shapes on every
+       frame (the counter counts); the GPU builds the same for 64 glyphs as for 15, at most 6 a frame
+
+6. What was run after the last edit, and what it gave (28 Nov 2026)
+   cargo test -p gx-render-worker                                          every test file green: lib 290 passed (57 ignored),
+                                                                           main 5, bind 7, colour_reference 14, limits 2,
+                                                                           log_corr 1, log_file 2, stop_request 1
+   cargo test -p gx-render-worker --lib compositor::draw -- --ignored      7 passed, 0 failed
+   GX_TEST_SCALAR_GPU=dx12   cargo test ... --test colour_reference        14 passed, 0 failed (143 s)
+   GX_TEST_SCALAR_GPU=vulkan cargo test ... --test colour_reference        14 passed, 0 failed (7 s)
+   cargo test -p gx-render-worker --lib -- --ignored                       55 passed, 2 failed (413 s). The hardware suite on
+                                                                           parallel threads. The two failures are the two
+                                                                           timing tests the log of 20 Nov names as failing in
+                                                                           parallel and passing alone:
+                                                                           the_ring_delivers_the_frame_it_was_given ("Program
+                                                                           delivered for scene frame 0 is not that frame") and
+                                                                           program_holds_the_frame_budget_on_the_reference_
+                                                                           workloads (stats-page settled p50 20,869 us over
+                                                                           the 20,000 us ceiling).
+   cargo test -p gx-render-worker --lib -- --ignored --test-threads=1      NOT FINISHED. The hardware suite one test at a time
+   (npm run test:gpu)                                                      (the way the 20 Nov log says to run it): 27 of 57
+                                                                           passed, then the test process stopped on "memory
+                                                                           allocation of 655360 bytes failed" in
+                                                                           every_effect_matches_its_cpu_reference_on_the_gpu.
+                                                                           The other Claude session's whole gate was building
+                                                                           at the same time and failed twice on memory too
+                                                                           (a linker out-of-memory, then os error 1455), so
+                                                                           the machine ran out of memory; that test had passed
+                                                                           in the parallel run. To be run again, alone.
+   So the two timing tests have NOT been seen to pass with this change. Until the one-at-a-time run is green, that is open.
+   Not run by me: the whole gate (npm run check), conformance and its pixel gate, clippy, rustfmt, a mutation run, a
+   release-build timing. The contracts crate was not touched by this slice.
+
+7. What is not claimed
+   Whether this meets the clause as the row words it is the user's to say (Jev leaned no at 0.37): the per-frame input is the
+   cached glyph outlines and one draw record a glyph, nothing is shaped, but the glyph coverage is rasterised again every frame.
+   Timings are from a debug build; the 3.21 budget (p99 of 10 ms at 1080p50) is a release-build measure and was not re-run.

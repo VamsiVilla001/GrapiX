@@ -15,6 +15,8 @@
 //! Unknown fields refuse rather than drop (a setting written by a newer build and read by an older
 //! one would vanish on the next save), and a value outside its range refuses by name with the key.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -108,6 +110,12 @@ pub struct UserSettings {
     /// How far, in path pixels, Remove Point Keep Shape may let the curve move from the old shape (11.113). 1 pixel.
     #[serde(default = "default_pen_fit_tolerance")]
     pub pen_fit_tolerance: u32,
+    /// The keys the person changed (11.84): a command id (`file.save`) to the keys that command has now, each written as the
+    /// menus write it (`Ctrl Shift S`). Present for a command means those keys *replace* its defaults entirely; an empty list
+    /// means no key; absent means the defaults. A key has one handler: no key is in two commands' lists. Which command ids
+    /// exist is the Editor's registry, not this contract: an id it does not know is kept, ignored and shown for removal.
+    #[serde(default)]
+    pub shortcuts: BTreeMap<String, Vec<String>>,
 }
 
 fn default_pen_fit_tolerance() -> u32 {
@@ -165,6 +173,7 @@ impl Default for UserSettings {
             pen_double_click_ends: default_pen_double_click_ends(),
             pen_snap: default_pen_snap(),
             pen_fit_tolerance: default_pen_fit_tolerance(),
+            shortcuts: BTreeMap::new(),
         }
     }
 }
@@ -254,8 +263,129 @@ impl UserSettings {
         if self.last_used_folder.len() > 4096 || self.last_used_folder.contains('\0') {
             return Err(problem("lastUsedFolder", "is not a usable folder path"));
         }
+        validate_shortcuts(&self.shortcuts)?;
         Ok(())
     }
+}
+
+/// Most keys one command may have.
+pub const MOST_KEYS_PER_COMMAND: usize = 4;
+/// Most commands whose keys may have been changed.
+pub const MOST_CHANGED_COMMANDS: usize = 400;
+
+/// The keys a chord may end in, named as the menus name them. Escape, Enter and Tab are not here: dialogs and focus own them.
+const NAMED_KEYS: [&str; 11] = [
+    "Space",
+    "Delete",
+    "Backspace",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "Left",
+    "Right",
+    "Up",
+    "Down",
+];
+/// The punctuation keys a chord may end in, besides letters and digits.
+const PUNCTUATION_KEYS: &str = "=-+[],./;'`\\";
+
+/// A key written as the menus write it (`Ctrl Shift S`): an optional `Ctrl`, an optional `Shift` after it, then one key: a capital letter,
+/// a digit, `F1` to `F12`, a name from [`NAMED_KEYS`] or one punctuation key. Alt is not a modifier the Editor reads. Returns the reason
+/// when it is not one, in words ready to show.
+pub fn check_chord(chord: &str) -> Result<(), String> {
+    let mut words: Vec<&str> = chord.split(' ').collect();
+    let key = words.pop().unwrap_or("");
+    let mut expected = ["Ctrl", "Shift"].into_iter();
+    for word in &words {
+        // Each modifier at most once, Ctrl before Shift.
+        loop {
+            match expected.next() {
+                Some(modifier) if modifier == *word => break,
+                Some(_) => continue,
+                None => {
+                    return Err(format!(
+                        "{chord:?} is not written as the menus write a key: Ctrl, then Shift, then the key (Ctrl Shift S)"
+                    ))
+                }
+            }
+        }
+    }
+    if key.is_empty() {
+        return Err(format!("{chord:?} has no key"));
+    }
+    if matches!(key, "Escape" | "Enter" | "Tab") {
+        return Err(format!(
+            "{key} cannot be given to a command: dialogs and the focus order use it"
+        ));
+    }
+    let mut chars = key.chars();
+    let single = match (chars.next(), chars.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
+    };
+    let ok = match single {
+        Some(only) => only.is_ascii_uppercase() || only.is_ascii_digit() || PUNCTUATION_KEYS.contains(only),
+        None => {
+            NAMED_KEYS.contains(&key)
+                || key
+                    .strip_prefix('F')
+                    .and_then(|number| number.parse::<u8>().ok())
+                    .is_some_and(|number| (1..=12).contains(&number) && key == format!("F{number}"))
+        }
+    };
+    if ok {
+        Ok(())
+    } else if single.is_some_and(|only| only.is_ascii_lowercase()) {
+        Err(format!("{chord:?} writes its letter in lower case: use capitals (Ctrl S)"))
+    } else {
+        Err(format!("{key:?} is not a key a command can be given"))
+    }
+}
+
+fn validate_shortcuts(shortcuts: &BTreeMap<String, Vec<String>>) -> Result<(), SettingProblem> {
+    let key = "shortcuts";
+    if shortcuts.len() > MOST_CHANGED_COMMANDS {
+        return Err(problem(
+            key,
+            format!("changes the keys of {} commands; at most {MOST_CHANGED_COMMANDS}", shortcuts.len()),
+        ));
+    }
+    let mut holder: BTreeMap<&str, &str> = BTreeMap::new();
+    for (command, chords) in shortcuts {
+        let id_ok = !command.is_empty()
+            && command.len() <= 64
+            && command.starts_with(|first: char| first.is_ascii_lowercase())
+            && command
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-');
+        if !id_ok {
+            return Err(problem(key, format!("{command:?} is not a command id such as file.save")));
+        }
+        if chords.len() > MOST_KEYS_PER_COMMAND {
+            return Err(problem(
+                key,
+                format!("{command} has {} keys; at most {MOST_KEYS_PER_COMMAND}", chords.len()),
+            ));
+        }
+        for chord in chords {
+            check_chord(chord).map_err(|detail| problem(key, format!("{command}: {detail}")))?;
+            match holder.insert(chord, command) {
+                Some(other) if other == command => {
+                    return Err(problem(key, format!("{command} lists {chord} twice")))
+                }
+                // A key has one handler.
+                Some(other) => {
+                    return Err(problem(
+                        key,
+                        format!("{chord} is given to both {other} and {command}; a key has one handler"),
+                    ))
+                }
+                None => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 impl MachineSettings {
@@ -366,6 +496,106 @@ mod tests {
         assert_eq!(machine.validate().unwrap_err().key, "controlAddress");
         machine.control_address = "::1".into();
         machine.validate().unwrap();
+    }
+
+    fn with_keys(keys: &[(&str, &[&str])]) -> UserSettings {
+        UserSettings {
+            shortcuts: keys
+                .iter()
+                .map(|(command, chords)| ((*command).to_owned(), chords.iter().map(|c| (*c).to_owned()).collect()))
+                .collect(),
+            ..UserSettings::default()
+        }
+    }
+
+    #[test]
+    fn the_keymap_starts_empty_and_an_older_file_reads_without_it() {
+        let user = UserSettings::default();
+        assert!(user.shortcuts.is_empty());
+        // The key is always written, so that resetting it by name has a default to go back to.
+        assert_eq!(serde_json::to_value(&user).unwrap()["shortcuts"], serde_json::json!({}));
+        let old: UserSettings = serde_json::from_str(
+            r#"{"language":"en","confirmDeletes":true,"defaultAnimationFrames":250,"defaultInterpolation":"easeInOut","startup":"showStart","lastUsedFolder":""}"#,
+        )
+        .unwrap();
+        assert!(old.shortcuts.is_empty());
+        old.validate().unwrap();
+    }
+
+    #[test]
+    fn a_key_is_written_as_the_menus_write_it() {
+        for good in [
+            "S", "Ctrl S", "Ctrl Shift S", "Shift F9", "Ctrl Shift F9", "F1", "F12", "Space", "Delete", "Backspace", "Home", "End",
+            "PageUp", "PageDown", "Left", "Right", "Up", "Down", "7", "Ctrl 0", "=", "-", "Ctrl Shift +", "[", "]", ",", ".", "/", ";", "'",
+            "`", "\\",
+        ] {
+            check_chord(good).unwrap_or_else(|why| panic!("{good} should be a key: {why}"));
+        }
+    }
+
+    #[test]
+    fn what_is_not_a_key_is_refused_with_its_reason() {
+        for (bad, part) in [
+            ("", "has no key"),
+            ("Ctrl ", "has no key"),
+            ("Escape", "cannot be given to a command"),
+            ("Ctrl Enter", "cannot be given to a command"),
+            ("Tab", "cannot be given to a command"),
+            ("Shift Ctrl S", "Ctrl, then Shift"),
+            ("Alt S", "Ctrl, then Shift"),
+            ("Ctrl Ctrl S", "Ctrl, then Shift"),
+            ("Ctrl s", "lower case"),
+            ("ctrl S", "Ctrl, then Shift"),
+            ("F13", "not a key"),
+            ("F0", "not a key"),
+            ("F01", "not a key"),
+            ("Ctrl  S", "Ctrl, then Shift"),
+            ("AB", "not a key"),
+            ("!", "not a key"),
+            ("Enterr", "not a key"),
+        ] {
+            let why = check_chord(bad).expect_err(bad);
+            assert!(why.contains(part), "{bad:?}: {why:?} should mention {part:?}");
+        }
+    }
+
+    #[test]
+    fn a_valid_keymap_is_accepted_and_an_empty_list_is_no_key() {
+        with_keys(&[("file.save", &["Ctrl S", "F2"]), ("motion.add-key", &[]), ("edit.redo", &["Ctrl Shift Z", "Ctrl Y"])])
+            .validate()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_key_has_one_handler() {
+        let both = with_keys(&[("file.save", &["Ctrl S"]), ("edit.search", &["Ctrl S"])]);
+        let why = both.validate().unwrap_err();
+        assert_eq!(why.key, "shortcuts");
+        assert!(why.detail.contains("Ctrl S is given to both edit.search and file.save"), "{}", why.detail);
+        let twice = with_keys(&[("file.save", &["Ctrl S", "Ctrl S"])]);
+        assert!(twice.validate().unwrap_err().detail.contains("lists Ctrl S twice"));
+    }
+
+    #[test]
+    fn the_keymap_has_limits_and_a_command_id_has_a_shape() {
+        assert!(with_keys(&[("a.b", &["F1", "F2", "F3", "F4"])]).validate().is_ok());
+        assert!(with_keys(&[("a.b", &["F1", "F2", "F3", "F4", "F5"])]).validate().unwrap_err().detail.contains("at most 4"));
+        let too_long = "a".repeat(65);
+        for bad in ["", "File.save", "file save", "1file", ".x", "file/save", too_long.as_str()] {
+            assert!(with_keys(&[(bad, &["F1"])]).validate().unwrap_err().detail.contains("not a command id"), "{bad:?}");
+        }
+        let longest = "a".repeat(64);
+        assert!(with_keys(&[(longest.as_str(), &["F1"])]).validate().is_ok());
+        let many: Vec<(String, Vec<String>)> = (0..=MOST_CHANGED_COMMANDS).map(|n| (format!("c.n{n}"), Vec::new())).collect();
+        let user = UserSettings { shortcuts: many.into_iter().collect(), ..UserSettings::default() };
+        assert!(user.validate().unwrap_err().detail.contains("at most 400"));
+    }
+
+    #[test]
+    fn a_bad_key_names_the_command_it_was_given_to() {
+        let why = with_keys(&[("file.save", &["Escape"])]).validate().unwrap_err();
+        assert_eq!(why.key, "shortcuts");
+        assert!(why.detail.starts_with("file.save: Escape cannot be given"), "{}", why.detail);
     }
 
     #[test]

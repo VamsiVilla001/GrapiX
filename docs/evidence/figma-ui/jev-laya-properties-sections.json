@@ -1,0 +1,129 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the Editor's Properties becomes one list (owner-approved visibility decision of 26 Nov 2026, Figma B3d v2): Pivot, Masks and Effect Controls as sections inside Properties that appear when the element has them, an Add row to add them, and the Animation panel replaced by the diamonds on Properties rows plus Auto-key.",
+   "facts": "Today Pivot, Masks, Animation and Effect Controls are tabs in the same dock group as Properties; since slice 3 Pivot shows only with the Pivot tool, Masks only when the selection has masks or the Pen will draw one, Effect Controls only when the selection has effects; they show as tabs, so the person has to switch away from Properties to see them. Every Properties row that can be animated already has a keyframe diamond with previous and next arrows. The Animation panel holds the Auto-Key checkbox, a frame field, the list of animated properties with their keys, and the motion preset browser. The KEYFRAME bar under the timeline has transport, + Add, easing buttons, Hold, Stagger and Zoom to fit. Adding an effect is done from the Effects & Presets library; a mask is drawn with the Pen in mask mode; the pivot is moved with the Pivot tool. The dock layout data must not change (29 tests depend on it): visibility is page-level.",
+   "constraints": "Nothing working is deleted; every panel stays reachable from the Panels and Motion menus; agents see the same controls."
+  },
+  "questions": {
+   "sections": {
+    "type": "choice",
+    "instructions": "How do Pivot, Masks and Effect Controls appear while Properties is shown?",
+    "criteria": {
+     "A": "Stacked below the Properties list in the same scrolling column, each with its own header, only while the tool or selection calls for it; their tabs are hidden meanwhile.",
+     "B": "They stay tabs beside Properties, shown only when called for (today's state).",
+     "C": "They open as floating popovers from Properties rows."
+    }
+   },
+   "add_row": {
+    "type": "choice",
+    "instructions": "What does the Add row at the foot of Properties offer?",
+    "criteria": {
+     "A": "+ Effect (opens Effects & Presets), + Mask (the Pen in mask mode) and Pivot (the Pivot tool), each dimmed with its reason when nothing is selected.",
+     "B": "One + Add button opening a menu of everything that can be added to an element.",
+     "C": "No Add row; effects, masks and pivot are reached from their tools and the library only."
+    }
+   },
+   "auto_key": {
+    "type": "choice",
+    "instructions": "Where does Auto-key go, and what happens to the Animation panel?",
+    "criteria": {
+     "A": "Auto-key becomes a toggle at the right end of the KEYFRAME bar (after Zoom to fit, as Figma B3 draws it), kept in step with the Animation panel's checkbox; the Animation panel waits until opened (Motion > Motion controls, Panels menu).",
+     "B": "Auto-key goes into the Properties header; the Animation panel stays a tab.",
+     "C": "Both stay as they are."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "sections": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "add_row": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.83,
+    "probabilities": {
+     "A": 0.89,
+     "B": 0.09,
+     "C": 0.02
+    }
+   },
+   "auto_key": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.77,
+    "probabilities": {
+     "A": 0.85,
+     "B": 0.14,
+     "C": 0.01
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1216,
+   "output_tokens": 0,
+   "state_tokens": 309,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "sections": {
+    "type": "choice",
+    "choice": "B",
+    "probabilities": {
+     "A": 0.1563,
+     "B": 0.5866,
+     "C": 0.2571
+    },
+    "confidence": 0.1332,
+    "answer_confidence": 0.5866,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "add_row": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4199,
+     "B": 0.2368,
+     "C": 0.3433
+    },
+    "confidence": 0.0238,
+    "answer_confidence": 0.4199,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "auto_key": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2518,
+     "B": 0.2266,
+     "C": 0.5216
+    },
+    "confidence": 0.0687,
+    "answer_confidence": 0.5216,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

@@ -584,6 +584,7 @@ impl Workspace {
                     session: None,
                     effects: vec![
                         EditEffect::Stored {
+                            scene_label: outcome.scene.scene_label,
                             origin: SceneOrigin {
                                 project: p.project,
                                 scene_id: p.scene_id,
@@ -646,6 +647,7 @@ impl Workspace {
                     session: None,
                     effects: vec![
                         EditEffect::Stored {
+                            scene_label: outcome.scene.scene_label,
                             origin: SceneOrigin {
                                 project: p.project,
                                 scene_id: p.scene_id,
@@ -892,7 +894,10 @@ impl Workspace {
                 let revision = if document != before {
                     document.revision = Some(next);
                     self.projects()?.write_scene(&origin.project, &document)?;
-                    effects.push(EditEffect::Stored { origin });
+                    effects.push(EditEffect::Stored {
+                        origin,
+                        scene_label: None,
+                    });
                     next
                 } else {
                     current
@@ -1070,7 +1075,10 @@ impl Workspace {
                 session.dirty = false;
                 session.project_dirty = false;
                 saved_revision = Some(next);
-                EditEffect::Stored { origin }
+                EditEffect::Stored {
+                    origin,
+                    scene_label: None,
+                }
             }
             SaveTarget::Project { project } => {
                 let session = &self.sessions[index];
@@ -1090,7 +1098,10 @@ impl Workspace {
                 session.origin = Some(origin.clone());
                 session.dirty = false;
                 session.project_dirty = false;
-                EditEffect::Stored { origin }
+                EditEffect::Stored {
+                    origin,
+                    scene_label: None,
+                }
             }
             SaveTarget::File { path } => {
                 write_scene_file(&path, &self.sessions[index].document)?;
@@ -1140,7 +1151,10 @@ impl Workspace {
                     session.dirty = false;
                     session.project_dirty = false;
                     saved_revision = Some(Revision(0));
-                    EditEffect::Stored { origin }
+                    EditEffect::Stored {
+                        origin,
+                        scene_label: None,
+                    }
                 } else if let Some(path) = session.path.clone() {
                     let next = next_version_path(&path).ok_or_else(|| {
                         CommandError::Store(EditorError::Io {
@@ -1200,11 +1214,13 @@ impl Workspace {
         if scene_exists(projects, &project, &scene_id)? {
             return Err(Refusal::SceneAlreadyExists { project, scene_id }.into());
         }
+        document.scene_label = Some(projects.next_scene_label(&project)?);
         projects.write_scene(&project, &document)?;
         Ok(CommandOutcome {
             session: None,
             effects: vec![EditEffect::Stored {
                 origin: SceneOrigin { project, scene_id },
+                scene_label: document.scene_label,
             }],
             // A new scene is at revision 0; its first edit names that.
             revision: Some(Revision(0)),
@@ -1222,6 +1238,7 @@ impl Workspace {
         name: String,
     ) -> Result<CommandOutcome, CommandError> {
         let projects = self.projects()?;
+        let _write = projects.lock_scenes(&project)?;
         if !scene_exists(projects, &project, &source_scene_id)? {
             return Err(Refusal::SceneNotStored {
                 project,
@@ -1234,15 +1251,16 @@ impl Workspace {
         duplicate.name = name.trim().to_owned();
         duplicate.revision = None;
         require_scene_name(&duplicate)?;
-        let _write = projects.lock_scenes(&project)?;
         if scene_exists(projects, &project, &scene_id)? {
             return Err(Refusal::SceneAlreadyExists { project, scene_id }.into());
         }
+        duplicate.scene_label = Some(projects.next_scene_label(&project)?);
         projects.write_scene(&project, &duplicate)?;
         Ok(CommandOutcome {
             session: None,
             effects: vec![EditEffect::Stored {
                 origin: SceneOrigin { project, scene_id },
+                scene_label: duplicate.scene_label,
             }],
             revision: Some(Revision(0)),
         })
@@ -1302,7 +1320,10 @@ impl Workspace {
         });
         Ok(CommandOutcome {
             session,
-            effects: vec![EditEffect::Stored { origin }],
+            effects: vec![EditEffect::Stored {
+                origin,
+                scene_label: None,
+            }],
             revision: None,
         })
     }
@@ -1641,6 +1662,15 @@ fn store_import(
         }
         .into());
     }
+    let _write = projects.lock_scenes(project)?;
+    if scene_exists(projects, project, scene_id)? {
+        return Err(Refusal::SceneAlreadyExists {
+            project: project.to_owned(),
+            scene_id: scene_id.to_owned(),
+        }
+        .into());
+    }
+    outcome.scene.scene_label = Some(projects.next_scene_label(project)?);
     let source = outcome
         .scene
         .assets
@@ -2846,7 +2876,7 @@ mod tests {
         assert_eq!(outcome.revision, Some(Revision(0)));
         assert!(matches!(
             outcome.effects.as_slice(),
-            [EditEffect::Stored { origin }] if origin.scene_id == "b_v002"
+            [EditEffect::Stored { origin, .. }] if origin.scene_id == "b_v002"
         ));
 
         // The old version is byte for byte what it was last saved as; the new one has the edit.
@@ -3183,7 +3213,13 @@ mod tests {
         };
         assert_eq!(view.origin.as_ref(), Some(&origin));
         assert_eq!((view.dirty, view.project_dirty), (false, false));
-        assert_eq!(outcome.effects, vec![EditEffect::Stored { origin }]);
+        assert_eq!(
+            outcome.effects,
+            vec![EditEffect::Stored {
+                origin,
+                scene_label: None
+            }]
+        );
         assert_eq!(stored_scene(&workspace, "untitled").name, "Strap");
 
         // Create never overwrites; a bound scene's id is stable.
@@ -3446,6 +3482,55 @@ mod tests {
     }
 
     #[test]
+    fn scene_creation_fills_the_first_free_label_without_changing_existing_scenes() {
+        let (scratch, mut workspace) = with_store("scene-labels");
+        let label = |workspace: &Workspace, id| stored_scene(workspace, id).scene_label;
+        assert_eq!(label(&workspace, "b").as_deref(), Some("1"));
+        let original = stored_bytes(&scratch, "b");
+        for (id, expected) in [("second", "2"), ("third", "3")] {
+            let outcome = run(
+                &mut workspace,
+                EditorCommand::CreateScene(CreateScene {
+                    project: "news".into(),
+                    scene_id: id.into(),
+                    name: id.into(),
+                }),
+            );
+            assert_eq!(label(&workspace, id).as_deref(), Some(expected));
+            assert!(matches!(
+                outcome.effects.as_slice(),
+                [EditEffect::Stored { scene_label: Some(label), .. }] if label == expected
+            ));
+        }
+        run(
+            &mut workspace,
+            EditorCommand::DeleteScene(DeleteScene {
+                project: "news".into(),
+                scene_id: "second".into(),
+                if_revision: None,
+            }),
+        );
+        run(
+            &mut workspace,
+            EditorCommand::DuplicateScene(DuplicateScene {
+                project: "news".into(),
+                source_scene_id: "b".into(),
+                scene_id: "copy".into(),
+                name: "Copy".into(),
+            }),
+        );
+        assert_eq!(label(&workspace, "copy").as_deref(), Some("2"));
+        let imported = import_into_project(
+            &scratch.projects(), "news", "svg", Some("SVG"), "fixture.svg",
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>"#,
+        ).unwrap();
+        assert_eq!(imported.scene.scene_label.as_deref(), Some("4"));
+        assert_eq!(label(&workspace, "svg").as_deref(), Some("4"));
+        assert_eq!(label(&workspace, "third").as_deref(), Some("3"));
+        assert_eq!(stored_bytes(&scratch, "b"), original);
+    }
+
+    #[test]
     fn a_duplicate_is_an_unpublished_copy_under_a_new_id() {
         let (scratch, mut workspace) = with_store("duplicate");
         let mut published = card_scene("lower-third");
@@ -3535,6 +3620,7 @@ mod tests {
         );
         assert_eq!(outcome.session, None);
         assert!(outcome.effects.contains(&EditEffect::Stored {
+            scene_label: None,
             origin: SceneOrigin {
                 project: "news".into(),
                 scene_id: "b".into()

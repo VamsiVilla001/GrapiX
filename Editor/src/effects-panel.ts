@@ -104,10 +104,49 @@ export function addEffect(stack: Stack, listing: EffectListing): Stack | Refused
   return [...stack, instance];
 }
 
+/** The id prefix of EffectCraft's text animator presets (category "Text animators"): they are applied to a text, not added to a stack. */
+export const TEXT_ANIMATOR_PRESET_PREFIX = "ec.textanimator.";
+
+export function isTextAnimatorPreset(preset: PresetListing): boolean {
+  return preset.id.startsWith(TEXT_ANIMATOR_PRESET_PREFIX);
+}
+
+/** The one scene edit that applies a text animator preset (11.61): the animator and its keys from `atFrame`, one undo. */
+export interface TextAnimatorPresetEdit {
+  readonly edit: "applyTextAnimatorPreset";
+  readonly objectId: string;
+  readonly presetId: string;
+  readonly atFrame: number;
+}
+
+/**
+ * The edit that applies a text animator preset to `object` at the playhead, or why not: a preset the engine cannot draw yet is refused by
+ * the reason the listing gives, a target that is not a text by name, and a playhead that is not a whole frame from 0.
+ */
+export function textAnimatorPresetEdit(
+  object: { readonly id: string; readonly name: string; readonly type: string },
+  preset: PresetListing,
+  atFrame: number,
+): TextAnimatorPresetEdit | Refused {
+  if (preset.unavailable !== undefined && preset.unavailable !== null) {
+    return { refused: `${preset.name}: ${preset.unavailable}` };
+  }
+  if (object.type !== "text") {
+    return { refused: `${preset.name} animates text: select a text object (${object.name} is ${object.type})` };
+  }
+  if (!Number.isInteger(atFrame) || atFrame < 0) {
+    return { refused: `${preset.name} starts at a whole frame from 0, not ${atFrame}` };
+  }
+  return { edit: "applyTextAnimatorPreset", objectId: object.id, presetId: preset.id, atFrame };
+}
+
 /** Add a preset's effects, in order, each under a fresh id. */
 export function addPreset(stack: Stack, preset: PresetListing): Stack | Refused {
   if (preset.unavailable !== undefined && preset.unavailable !== null) {
     return { refused: `${preset.name}: ${preset.unavailable}` };
+  }
+  if (isTextAnimatorPreset(preset)) {
+    return { refused: `${preset.name} is a text animator: it is applied to a text, not added to the effect stack` };
   }
   if (preset.effects.length === 0) return { refused: `${preset.name} has no effects to add` };
   let next: Stack = stack;
@@ -224,6 +263,8 @@ export interface BrowserInput {
   readonly query: string;
   /** Why nothing can be applied right now (no object selected…), if so. */
   readonly targetBlocker?: string;
+  /** The kind of the one selected object (`text`, `rect`…), so a text animator preset can say it needs a text. */
+  readonly targetType?: string;
   /** Show effects that are catalogued but not yet ported. */
   readonly showUnported: boolean;
   /**
@@ -266,10 +307,17 @@ export function effectsBrowserPanel(input: BrowserInput): UiNode {
     if (!matches(query, preset.name, preset.category, preset.description, preset.source)) continue;
     const blocked = preset.unavailable ?? undefined;
     if (blocked !== undefined && !showUnported) continue;
+    const needsText = isTextAnimatorPreset(preset) && input.targetType !== undefined && input.targetType !== "text";
     const action: UiAction = {
       name: "applyPreset",
       label: "Apply",
-      ...(blocked !== undefined ? { unavailable: blocked } : targetBlocker !== undefined ? { unavailable: targetBlocker } : {}),
+      ...(blocked !== undefined
+        ? { unavailable: blocked }
+        : targetBlocker !== undefined
+          ? { unavailable: targetBlocker }
+          : needsText
+            ? { unavailable: "a text animator is applied to a text object: select one" }
+            : {}),
     };
     const node: UiNode = {
       id: `preset/${preset.id}`,

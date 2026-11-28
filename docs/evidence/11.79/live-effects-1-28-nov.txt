@@ -1,0 +1,7 @@
+Rows 11.69 and 11.79, Effects & Presets, live check, 28 Nov 2026. Debug Editor, real window, DevTools only (no keyboard or mouse input); scratch project EffectsLive; recent-projects.json restored; Editor stopped by PID.
+Panel: "46 of 306 effects render on the GrapiX engine"; "All 306" ticked; 23 category groups: 21 effect categories (3d-channel, audio, blur-sharpen, channel, color-correction, distort, expression-controls, generate, immersive-video, keying, matte, noise-grain, obsolete, paint, perspective, simulation, stylize, text, time, transition, utility) and 2 preset groups (looks, text-animators).
+Start: every group folded. Expand all: all open. Collapse all: all folded.
+Header keys (first group, focused): start folded; Enter -> open; ArrowLeft -> folded; ArrowRight -> open; Space -> folded; tabIndex 0. A click on the header bar -> open.
+Search "glow": open groups presets/looks, immersive-video, stylize; rows Soft glow, VR Glow, Glow. Search "zzzqqq": "No effects or presets match this search".
+Apply on Glow (ec.stylize.glow) with Box rect-1 selected: undo 1 -> 2; effects on the object: glow, enabled, threshold 0.6, radius 10, intensity 1. Effect Controls: On, Up, Down, Duplicate, Remove, parameters with a Key diamond each, Dimensions choice (Horizontal and vertical, Horizontal, Vertical). First control Threshold 0.6.
+Activity line: "Applied Glow to Box". Screenshot: live-effects-panel-28-nov.png (the panel is about three rows high under Properties in the Design layout).

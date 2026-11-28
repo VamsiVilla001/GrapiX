@@ -1,0 +1,120 @@
+{
+ "input": {
+  "state": {
+   "decision": "How to start the Editor Timeline (Figma B3) and what to do with the Presets and Phases toolbar groups, asked before coding (user, 24 Nov 2026: run Jev and Laya while coding).",
+   "facts": "The existing Editor timeline has a head (title, clock, Jump to hold, zoom), a toolbar of three groups (Keys: easing; Presets: motion preset select, duration, Apply in, Apply out, Save selected keys as preset; Phases: phase kind select, Set from selected keys, Play phase, Remove phase), a ruler, and a canvas plus DOM layer rows with a visibility switch, a lock switch, a label colour and the name. The Figma design B3 has a toolbar with keyframe and ease buttons (F9 ease), columns KEYFRAME, ELEMENT, PARENT, BLEND, MATTE per layer row, property child rows each with a keyframe diamond, a right keyframe panel (TIME, VALUE, INTERPOLATION, ELEMENT NAME), and a blend-mode list of 38 EffectCraft modes in eight groups. Owner decision 11.131 (24 Nov 2026): keyframes only, no gallery of template animations, no default phase bands in the UI. Invariant 86 (24 Nov 2026): no EffectCraft effect, preset, port or plugin is ever removed. The scene contract already has per-object blend mode (SetBlendMode), track matte (SetTrackMatte with a source id and a mode) and group children (SetGroupChildren, which is how a parent is set), so the columns need no backend work. Motion presets and phases are GrapiX features stored in the scene and in Rust; they are not EffectCraft effects. The timeline panel is about 2,000 lines of tested TypeScript; the layer rows are described by layers.ts and drawn by panel.ts.",
+   "proposed_slice_1": "Add the PARENT, BLEND and MATTE columns to each layer row, with the 38-mode blend list grouped in eight groups, using the existing commands. Nothing is removed in this slice. The toolbar, the keyframe panel and the property diamonds come in later slices."
+  },
+  "questions": {
+   "first_slice": {
+    "type": "choice",
+    "instructions": "Which should be the first Timeline slice?",
+    "criteria": {
+     "A": "The PARENT, BLEND and MATTE columns on the layer rows with the 38-mode list, using existing commands and removing nothing (as proposed).",
+     "B": "The toolbar rebuild first (keyframe and ease buttons, removing the Presets and Phases groups).",
+     "C": "The right keyframe panel (TIME, VALUE, INTERPOLATION) first.",
+     "D": "The whole Timeline screen in one change."
+    }
+   },
+   "presets_and_phases_ui": {
+    "type": "choice",
+    "instructions": "What should the Presets and Phases toolbar groups do while the new Timeline is built?",
+    "criteria": {
+     "A": "Keep working and visible until the user confirms the owner decision 11.131 applies to the existing preset and phase commands, because they are stored features and invariant 86 forbids removing presets; move them out of the main toolbar only when told.",
+     "B": "Remove them from the toolbar now because 11.131 says keyframes only.",
+     "C": "Hide them behind a More menu now and keep every command, so nothing is removed and the toolbar matches the design."
+    }
+   },
+   "claims_without_backend": {
+    "type": "noul",
+    "instructions": "Is it correct that the PARENT, BLEND and MATTE columns need no new backend command, because blend mode, track matte and group children already have edit commands in the scene contract?",
+    "criteria": {
+     "true": "Yes, the columns can be built on the existing commands.",
+     "false": "No, a new backend command is needed first."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "first_slice": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.88,
+    "probabilities": {
+     "A": 0.91,
+     "B": 0.09,
+     "C": 0,
+     "D": 0
+    }
+   },
+   "presets_and_phases_ui": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.74,
+    "probabilities": {
+     "A": 0.83,
+     "B": 0.11,
+     "C": 0.06
+    }
+   },
+   "claims_without_backend": {
+    "type": "noul",
+    "noul": 0.97
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1715,
+   "output_tokens": 0,
+   "state_tokens": 473,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "first_slice": {
+    "type": "choice",
+    "choice": "D",
+    "probabilities": {
+     "A": 0.2035,
+     "B": 0.2238,
+     "C": 0.1179,
+     "D": 0.4547
+    },
+    "confidence": 0.0843,
+    "answer_confidence": 0.4547,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "presets_and_phases_ui": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.0662,
+     "B": 0.172,
+     "C": 0.7618
+    },
+    "confidence": 0.3722,
+    "answer_confidence": 0.7618,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "claims_without_backend": {
+    "type": "noul",
+    "noul": 0.8562,
+    "confidence": 0.8562,
+    "answer_confidence": 0.8562,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

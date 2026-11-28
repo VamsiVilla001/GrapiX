@@ -20,8 +20,9 @@ use gx_asset_plane::{
     publish_as_package, AssetHandoff, AssetStore, AssetStoreError, AssetTransferClientError,
     DocumentPublishError, PackagePublishError, PublishClientError, PublishRefusal, PublishReply,
 };
+use gx_contracts::font::{FontDefinition, FontLoadStatus, FontSource};
 use gx_contracts::package::package_path_components;
-use gx_contracts::scene::SceneDocument;
+use gx_contracts::scene::{AssetKind, SceneDocument, SceneObject};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 
 /// The largest asset the Editor reads back to find out why a cache entry no
@@ -119,27 +120,7 @@ pub fn package_sources(
         if seen.contains(&key) {
             continue;
         }
-        match store.contains(hash) {
-            Ok(true) => {}
-            // Not verified: read it back to say whether it is missing or
-            // altered. A read that fails some other way is the cache's.
-            Ok(false) => {
-                return Err(match store.read_verified(hash, MOST_CACHED_BYTES) {
-                    Err(error) => cache_failure(error, hash),
-                    // It verified on this read: the entry was repaired in the
-                    // meantime. Offer it.
-                    Ok(_) => {
-                        seen.push(key);
-                        sources.push(PackageSource {
-                            path: item.path.clone(),
-                            source: store.cache_path(hash),
-                        });
-                        continue;
-                    }
-                });
-            }
-            Err(error) => return Err(cache_failure(error, hash)),
-        }
+        verify_cached_asset(store, hash).map_err(|refusal| cache_failure(refusal, hash))?;
         seen.push(key);
         sources.push(PackageSource {
             path: item.path.clone(),
@@ -151,12 +132,148 @@ pub fn package_sources(
 
 /// A cache read that failed: a missing or altered entry keeps its name, any
 /// other failure is the cache's own (never the engine's store).
-fn cache_failure(error: AssetStoreError, hash: &ContentHash) -> PublishFailure {
-    match error.into_refusal(hash) {
+fn cache_failure(refusal: Refusal, hash: &ContentHash) -> PublishFailure {
+    match refusal {
         Refusal::AssetStoreFailed { detail, .. } => PublishFailure::AssetCache {
             detail: format!("{hash}: {detail}"),
         },
         other => PublishFailure::NotSent(other),
+    }
+}
+
+fn verify_cached_asset(store: &AssetStore, hash: &ContentHash) -> Result<(), Refusal> {
+    let check = || -> Result<(), AssetStoreError> {
+        if !hash.is_sha256() || !store.contains(hash)? {
+            // Report the named reason, and accept an entry repaired since contains.
+            store.read_verified(hash, MOST_CACHED_BYTES)?;
+        }
+        Ok(())
+    };
+    check().map_err(|error| error.into_refusal(hash))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GraphicBlocker {
+    pub code: String,
+    pub subject: String,
+    pub message: String,
+}
+
+impl GraphicBlocker {
+    fn refusal(subject: &str, refusal: Refusal) -> Self {
+        Self {
+            code: refusal.code_name().to_owned(),
+            subject: subject.to_owned(),
+            message: refusal.to_string(),
+        }
+    }
+}
+
+/// Counts for the Start and Publish surfaces, from the same preflight as Check graphic.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphicReadiness {
+    pub fonts_missing: usize,
+    pub binding_issues: usize,
+    /// Asset preflight failures, including missing, unpackageable and altered bytes.
+    pub assets_missing: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphicPreflight {
+    pub blockers: Vec<GraphicBlocker>,
+    pub readiness: GraphicReadiness,
+}
+
+pub fn graphic_blockers(scene: &SceneDocument, store: &AssetStore) -> Vec<GraphicBlocker> {
+    graphic_preflight(scene, store).blockers
+}
+
+/// Check what is decidable from the Editor draft and its local asset cache.
+pub fn graphic_preflight(scene: &SceneDocument, store: &AssetStore) -> GraphicPreflight {
+    let mut blockers = Vec::new();
+    let mut checked = std::collections::HashSet::new();
+    let mut verified = std::collections::HashMap::new();
+    for asset in &scene.assets {
+        let check = || {
+            let hash = asset
+                .checksum
+                .as_ref()
+                .ok_or_else(|| Refusal::PackageAssetNotPackaged {
+                    asset_id: asset.asset_id.clone(),
+                    path: asset.path.clone(),
+                })?;
+            package_path_components(&asset.path)?;
+            verified
+                .entry(hash)
+                .or_insert_with(|| verify_cached_asset(store, hash))
+                .clone()
+        };
+        let mut check = check;
+        if let Err(refusal) = check() {
+            blockers.push(GraphicBlocker::refusal(&asset.asset_id, refusal));
+        }
+    }
+    let assets_missing = blockers.len();
+    let mut check_font = |font_id: &str, definition: Option<&FontDefinition>| {
+        if !checked.insert(font_id.to_owned()) {
+            return;
+        }
+        let ready = definition.is_some_and(|font| {
+            font.enabled && font.status == FontLoadStatus::Ready && !font.faces.is_empty()
+                && font.faces.iter().all(|face| {
+                    face.status.is_none_or(|status| status == FontLoadStatus::Ready)
+                        && matches!(&face.source, FontSource::File { asset_id, .. }
+                            if scene.asset(asset_id).is_some_and(|asset| asset.kind == AssetKind::Font && asset.checksum.is_some()))
+                })
+        });
+        if !ready {
+            blockers.push(GraphicBlocker::refusal(
+                font_id,
+                Refusal::FontMissing {
+                    font_id: font_id.to_owned(),
+                },
+            ));
+        }
+    };
+    for object in &scene.objects {
+        let SceneObject::Text(text) = object else {
+            continue;
+        };
+        let font = scene.font(&text.font_id);
+        check_font(&text.font_id, font);
+        if let Some(font) = font {
+            for family in &font.fallback_families {
+                let fallback = scene
+                    .fonts
+                    .iter()
+                    .find(|font| font.enabled && font.family == *family);
+                check_font(
+                    fallback.map_or(family.as_str(), |font| font.font_id.as_str()),
+                    fallback,
+                );
+            }
+        }
+    }
+    let fonts_missing = blockers.len() - assets_missing;
+    let issues = gx_contracts::bindings::binding_issues(scene);
+    let binding_issues = issues.len();
+    blockers.extend(
+        issues.into_iter()
+            .map(|issue| GraphicBlocker {
+                code: "bindingInvalid".into(),
+                subject: format!("{}.{}", issue.object_id, issue.property),
+                message: format!("{} ({})", issue.detail, issue.path),
+            }),
+    );
+    if let Some(label) = &scene.scene_label {
+        if let Err(refusal) = gx_contracts::ids::parse_scene_label(label) {
+            blockers.push(GraphicBlocker::refusal(label, refusal));
+        }
+    }
+    GraphicPreflight {
+        blockers,
+        readiness: GraphicReadiness { fonts_missing, binding_issues, assets_missing },
     }
 }
 
@@ -369,6 +486,187 @@ mod tests {
             item("b", "images/shared.png", Some(hash)),
         ]);
         assert_eq!(package_sources(&scene, &store).unwrap().len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // --- Check graphic: the named blockers of the Editor's draft (topic 16) ----------------------------------------------------------
+
+    use gx_contracts::font::{
+        EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource, FontStyle,
+    };
+
+    fn font_asset(id: &str, hash: Option<ContentHash>) -> AssetLibraryItem {
+        AssetLibraryItem { kind: AssetKind::Font, ..item(id, &format!("fonts/{id}.woff2"), hash) }
+    }
+
+    fn font(id: &str, status: FontLoadStatus, face_asset: Option<&str>) -> FontDefinition {
+        FontDefinition {
+            font_id: id.into(),
+            family: id.into(),
+            display_name: id.into(),
+            faces: face_asset
+                .map(|asset| {
+                    vec![FontFaceDefinition {
+                        face_id: format!("{id}-regular"),
+                        family: id.into(),
+                        weight: 400,
+                        style: FontStyle::Normal,
+                        stretch: None,
+                        unicode_range: None,
+                        source: FontSource::File { asset_id: asset.into(), format: FontFormat::Woff2, original_url: None, stylesheet_url: None },
+                        status: None,
+                        error_message: None,
+                    }]
+                })
+                .unwrap_or_default(),
+            fallback_families: Vec::new(),
+            embedding_policy: EmbeddingPolicy::Package,
+            license: Some("OFL".into()),
+            enabled: true,
+            source_label: None,
+            status,
+            error_message: None,
+        }
+    }
+
+    fn with_text(font: FontDefinition, assets: Vec<AssetLibraryItem>) -> (SceneDocument, String) {
+        let mut scene = scene_with(assets);
+        scene.fonts.push(font);
+        let id = gx_contracts::authoring::create_object(&mut scene, "text", "Name").unwrap();
+        (scene, id)
+    }
+
+    fn codes(blockers: &[GraphicBlocker]) -> Vec<(&str, &str)> {
+        blockers.iter().map(|b| (b.code.as_str(), b.subject.as_str())).collect()
+    }
+
+    #[test]
+    fn readiness_counts_come_from_the_same_preflight_as_named_blockers() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        let (mut scene, _) = with_text(
+            font("anybody", FontLoadStatus::Missing, None),
+            vec![item("pending", "images/pending.png", None)],
+        );
+        scene.scene_label = Some("bad label!".into());
+
+        let report = graphic_preflight(&scene, &store);
+        assert_eq!(report.blockers, graphic_blockers(&scene, &store));
+        assert_eq!(report.blockers.len(), 3);
+        assert_eq!(report.readiness, GraphicReadiness {
+            fonts_missing: 1,
+            binding_issues: 0,
+            assets_missing: 1,
+        });
+        assert_eq!(
+            graphic_preflight(&scene_with(Vec::new()), &store).readiness,
+            GraphicReadiness::default(),
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_graphic_with_nothing_wrong_has_no_blockers() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        let bytes = b"font bytes".to_vec();
+        let hash = gx_asset_plane::content_hash(&bytes);
+        store.promote_verified(&hash, &bytes).unwrap();
+        let (scene, _) = with_text(font("inter", FontLoadStatus::Ready, Some("inter-file")), vec![font_asset("inter-file", Some(hash))]);
+        assert_eq!(graphic_blockers(&scene, &store), Vec::new());
+        assert_eq!(graphic_blockers(&scene_with(Vec::new()), &store), Vec::new());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_asset_that_is_unpackaged_missing_or_altered_is_named() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        let bytes = b"cached image bytes".to_vec();
+        let hash = gx_asset_plane::content_hash(&bytes);
+        let other = gx_asset_plane::content_hash(b"never cached");
+        let scene = scene_with(vec![
+            item("pending", "images/pending.png", None),
+            item("lost", "images/lost.png", Some(other)),
+            item("img", "images/img.png", Some(hash.clone())),
+        ]);
+        store.promote_verified(&hash, &bytes).unwrap();
+        assert_eq!(
+            codes(&graphic_blockers(&scene, &store)),
+            vec![("packageAssetNotPackaged", "pending"), ("assetMissing", "lost")]
+        );
+        let mut altered = bytes.clone();
+        altered[0] ^= 0x01;
+        std::fs::write(store.cache_path(&hash), &altered).unwrap();
+        assert!(codes(&graphic_blockers(&scene, &store)).contains(&("assetHashMismatch", "img")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_font_that_cannot_be_used_is_a_blocker_by_name_and_is_never_replaced() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        // Declared but not ready, with no face: the graphic would draw in another typeface.
+        let (scene, _) = with_text(font("anybody", FontLoadStatus::Missing, None), Vec::new());
+        assert_eq!(codes(&graphic_blockers(&scene, &store)), vec![("fontMissing", "anybody")]);
+        // Ready, but its face points at an asset the scene does not hold.
+        let (unpackaged, _) = with_text(font("inter", FontLoadStatus::Ready, Some("not-there")), Vec::new());
+        assert_eq!(codes(&graphic_blockers(&unpackaged, &store)), vec![("fontMissing", "inter")]);
+        // Ready, packaged by a file asset that has no content hash.
+        let (nohash, _) = with_text(font("inter", FontLoadStatus::Ready, Some("inter-file")), vec![font_asset("inter-file", None)]);
+        assert!(codes(&graphic_blockers(&nohash, &store)).contains(&("fontMissing", "inter")));
+        // A font nothing uses is not a blocker.
+        let mut unused = scene_with(Vec::new());
+        unused.fonts.push(font("unused", FontLoadStatus::Missing, None));
+        assert_eq!(graphic_blockers(&unused, &store), Vec::new());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_font_used_twice_is_named_once() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        let (mut scene, _) = with_text(font("anybody", FontLoadStatus::Missing, None), Vec::new());
+        gx_contracts::authoring::create_object(&mut scene, "text", "Role").unwrap();
+        assert_eq!(codes(&graphic_blockers(&scene, &store)), vec![("fontMissing", "anybody")]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_binding_to_data_the_graphic_does_not_hold_is_named_with_its_path() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        let bytes = b"font bytes".to_vec();
+        let hash = gx_asset_plane::content_hash(&bytes);
+        store.promote_verified(&hash, &bytes).unwrap();
+        let (mut scene, id) = with_text(font("inter", FontLoadStatus::Ready, Some("inter-file")), vec![font_asset("inter-file", Some(hash))]);
+        scene.data_context.insert("title".into(), serde_json::json!("Hello"));
+        gx_contracts::bindings::set_binding(&mut scene, &id, "text", Some("title")).unwrap();
+        assert_eq!(graphic_blockers(&scene, &store), Vec::new());
+        scene.data_context.clear();
+        let report = graphic_preflight(&scene, &store);
+        assert_eq!(report.readiness.binding_issues, 1);
+        let blockers = report.blockers;
+        assert_eq!(blockers.len(), 1, "{blockers:?}");
+        assert_eq!(blockers[0].code, "bindingInvalid");
+        assert_eq!(blockers[0].subject, format!("{id}.text"));
+        assert!(blockers[0].message.contains("title"), "{}", blockers[0].message);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_scene_id_that_is_not_valid_is_a_blocker_and_no_cue_id_is_asked_for() {
+        let root = scratch();
+        let store = AssetStore::at_root(root.join("cache"));
+        let mut scene = scene_with(Vec::new());
+        scene.scene_label = Some("bad label!".into());
+        let blockers = graphic_blockers(&scene, &store);
+        assert_eq!(blockers.len(), 1, "{blockers:?}");
+        assert_eq!((blockers[0].code.as_str(), blockers[0].subject.as_str()), ("sceneLabelInvalid", "bad label!"));
+        scene.scene_label = Some("12".into());
+        assert_eq!(graphic_blockers(&scene, &store), Vec::new());
+        scene.scene_label = None;
+        assert_eq!(graphic_blockers(&scene, &store), Vec::new());
         std::fs::remove_dir_all(root).unwrap();
     }
 

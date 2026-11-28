@@ -1,0 +1,6 @@
+1 detail not trimmed CAUGHT
+2 blank detail shown CAUGHT
+3 negative time shown CAUGHT
+4 NaN time shown CAUGHT
+5 time not rounded CAUGHT
+5 of 5 caught

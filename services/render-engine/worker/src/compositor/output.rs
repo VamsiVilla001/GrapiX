@@ -22,7 +22,7 @@ use gx_contracts::color::{OutputTransform, WorkingColorSpace};
 use super::{CompositorError, TileResources};
 use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
-use crate::tiling::Stage;
+use crate::tiling::{Stage, Tile};
 
 /// Ring slots. Three gives one frame being written by the GPU, one in
 /// transfer and one being collected, without the frame loop waiting.
@@ -220,6 +220,7 @@ pub struct OutputRing {
 }
 
 impl OutputRing {
+    /// The ring over a compositor's finished tiles (the parity of the target it ends on).
     pub(super) fn prepare(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -227,6 +228,18 @@ impl OutputRing {
         space: WorkingColorSpace,
         tiles: &[TileResources],
         final_target: usize,
+    ) -> Result<Self, CompositorError> {
+        let textures: Vec<(Tile, wgpu::Texture)> = tiles.iter().map(|t| (t.tile, t.targets[final_target].clone())).collect();
+        Self::prepare_textures(device, queue, stage, space, &textures)
+    }
+
+    /// The ring over working-space tile textures of any origin: a compositor's, or a layer stack's accumulation (task 112).
+    pub(super) fn prepare_textures(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        stage: Stage,
+        space: WorkingColorSpace,
+        tiles: &[(Tile, wgpu::Texture)],
     ) -> Result<Self, CompositorError> {
         let bytes = u64::from(stage.width) * u64::from(stage.height) * 4;
         let limits = device.limits();
@@ -307,9 +320,9 @@ impl OutputRing {
         let preview_out = surface("gx-output-preview");
         let tiles = tiles
             .iter()
-            .map(|t| {
-                let core = t.tile.core;
-                let bounds = t.tile.render_bounds;
+            .map(|(tile, texture)| {
+                let core = tile.core;
+                let bounds = tile.render_bounds;
                 let words = [
                     core.x,
                     core.y,
@@ -328,7 +341,7 @@ impl OutputRing {
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
                 crate::render_work::gpu_build();
-                let view = t.targets[final_target].create_view(&Default::default());
+                let view = texture.create_view(&Default::default());
                 crate::render_work::gpu_build();
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("gx-output"),

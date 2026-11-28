@@ -40,10 +40,6 @@ pub const CATALOG_ATTRIBUTION: &str =
 pub const NOT_PORTED: &str =
     "catalogued from EffectCraft, not yet ported to the GrapiX engine (build plan 3.25)";
 
-/// Why EffectCraft's text-animator presets cannot be applied yet.
-pub const NEEDS_TEXT_ANIMATORS: &str =
-    "needs text animators, which the GrapiX engine does not have yet (build plan 11.61)";
-
 /// The EffectCraft id of each effect this engine renders, with the contract tag.
 pub const PORTED: &[(&str, &str)] = &[
     ("ec.generate.fill", "fill"),
@@ -239,7 +235,8 @@ pub struct EffectSurface {
 
 /// EffectCraft's 8 original text-animator presets (`crates/engine/presets/
 /// text_animators.json`, original work of the EffectCraft contributors, MIT OR
-/// Apache-2.0): id, name, description. Listed; they apply once 11.61 exists.
+/// Apache-2.0): id, name, description. Four apply through the `applyTextAnimatorPreset` edit
+/// (`text_animator_presets`); the other four are listed with the reason they cannot (11.61).
 pub const EFFECTCRAFT_PRESETS: &[(&str, &str, &str)] = &[
     (
         "typewriter",
@@ -457,14 +454,18 @@ pub fn effect_surface() -> EffectSurface {
     presets.extend(
         EFFECTCRAFT_PRESETS
             .iter()
-            .map(|(id, name, description)| PresetListing {
-                id: format!("ec.textanimator.{id}"),
-                name: (*name).to_owned(),
-                category: "Text animators".to_owned(),
-                description: (*description).to_owned(),
-                source: PresetSource::EffectCraft,
-                effects: Vec::new(),
-                unavailable: Some(NEEDS_TEXT_ANIMATORS.to_owned()),
+            .map(|(id, name, description)| {
+                let id = format!("{}{id}", crate::text_animator_presets::ID_PREFIX);
+                PresetListing {
+                    name: (*name).to_owned(),
+                    category: "Text animators".to_owned(),
+                    description: (*description).to_owned(),
+                    source: PresetSource::EffectCraft,
+                    effects: Vec::new(),
+                    unavailable: crate::text_animator_presets::unavailable_reason(&id)
+                        .map(|reason| format!("{reason} (build plan 11.61)")),
+                    id,
+                }
             }),
     );
     EffectSurface {
@@ -499,6 +500,45 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), 306, "ids are unique");
+    }
+
+    /// Invariant 86 (user, 24 Nov 2026): no EffectCraft effect, preset or port is ever removed. `fixtures/effect-catalogue-floor.json` lists
+    /// every effect id, preset id and ported (id, tag) the product has shipped; each must still be here. Writing the fixture
+    /// (`GX_WRITE_FIXTURES=1`) only adds what is new, so a removal cannot be hidden by rewriting it.
+    #[test]
+    fn no_effect_preset_or_port_ever_leaves_the_catalogue() {
+        use std::collections::BTreeSet;
+        let surface = effect_surface();
+        let current_effects: BTreeSet<String> = surface.effects.iter().map(|e| e.id.clone()).collect();
+        let current_presets: BTreeSet<String> = EFFECTCRAFT_PRESETS.iter().map(|(id, _, _)| (*id).to_owned()).collect();
+        let current_ported: BTreeSet<String> = PORTED.iter().map(|(id, tag)| format!("{id} {tag}")).collect();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/effect-catalogue-floor.json");
+        let read = |key: &str, value: &serde_json::Value| -> BTreeSet<String> {
+            value[key].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+        };
+        let floor: serde_json::Value = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if std::env::var("GX_WRITE_FIXTURES").is_ok() {
+            let union = |key: &str, now: &BTreeSet<String>| -> Vec<String> { read(key, &floor).union(now).cloned().collect() };
+            let next = serde_json::json!({
+                "note": "Invariant 86: this list only grows. Regenerate with GX_WRITE_FIXTURES=1; it adds, never removes.",
+                "effects": union("effects", &current_effects),
+                "presets": union("presets", &current_presets),
+                "ported": union("ported", &current_ported),
+            });
+            std::fs::write(&path, serde_json::to_string_pretty(&next).unwrap() + "
+").unwrap();
+            return;
+        }
+        for (key, now) in [("effects", &current_effects), ("presets", &current_presets), ("ported", &current_ported)] {
+            let missing: Vec<String> = read(key, &floor).difference(now).cloned().collect();
+            assert!(missing.is_empty(), "invariant 86: {key} left the catalogue: {missing:?}");
+        }
+        assert!(read("effects", &floor).len() >= 306, "the floor lists at least the 306 catalogued effects");
+        assert!(read("ported", &floor).len() >= 46, "the floor lists at least the 46 ported effects");
+        assert!(!read("presets", &floor).is_empty(), "the floor lists the EffectCraft presets");
     }
 
     #[test]
@@ -616,10 +656,27 @@ mod tests {
             .filter(|p| p.source == PresetSource::EffectCraft)
             .collect();
         assert_eq!(ported.len(), 8);
+        let mut available = Vec::new();
         for preset in ported {
-            assert_eq!(preset.unavailable.as_deref(), Some(NEEDS_TEXT_ANIMATORS));
             assert!(preset.effects.is_empty());
+            assert!(preset.id.starts_with("ec.textanimator."), "{}", preset.id);
+            match preset.unavailable.as_deref() {
+                None => available.push(preset.id.as_str()),
+                Some(reason) => assert!(reason.contains("(build plan 11.61)"), "{}: {reason}", preset.id),
+            }
         }
+        // Applying is what makes a preset available: the four listed as available
+        // are exactly the four the edit applies.
+        available.sort_unstable();
+        assert_eq!(
+            available,
+            [
+                "ec.textanimator.dropInLines",
+                "ec.textanimator.fadeUpCharacters",
+                "ec.textanimator.trackingIn",
+                "ec.textanimator.typewriter",
+            ]
+        );
     }
 
     #[test]

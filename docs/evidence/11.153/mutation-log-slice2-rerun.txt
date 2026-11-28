@@ -1,0 +1,3 @@
+caught   C7 a reorder alone is no change  [a_different_order_of_the_columns_kept_is_reordered_and_nothi]
+caught   S15 the words of an unreadable file lose the file  [a_file_that_is_held_open_by_another_program_is_unreadable_an]
+{"mutants":28,"caught":2,"survivors":[],"restoredByteForByte":true}

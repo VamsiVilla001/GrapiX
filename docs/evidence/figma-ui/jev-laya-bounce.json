@@ -1,0 +1,129 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the Bounce and Elastic easings are added to the contract (plan row 11.134; the owner said 'yes, build bounce and elastic', 25 Nov 2026), asked before coding.",
+   "facts": "SceneEasing is a closed list (linear, hold, ease-in, ease-out, ease-in-out, custom-bezier); the Rust function ease_at is the one authority, the engine rasterises from it, the Editor's graph draws from a TypeScript mirror pinned by a generated reference table (t -> y at 15 sample points per easing) so a change on one side fails the gate. Bounce (rebounds that shrink) and Elastic (a decaying oscillation) are not cubic beziers. The widely shared definitions are Robert Penner's: easeOutBounce (four parabolic arcs, ends at 1, never exceeds 1) and easeOutElastic (amplitude 1, period 0.3 in thirds, 2^(-10t) decay, overshoots past 1 by about 37 percent and dips under 1 in later swings). A property with a range (opacity 0 to 1; width and height not negative) must not leave it: for a custom bezier that is already checked along the whole curve; an easing is one curve between two keys, so an overshooting easing needs the same check. Adding a variant changes every saved scene's vocabulary (a scene written with it cannot be read by an older reader), so the vocabulary should stay small and each name must mean one curve forever. Rule: a substituted curve is a visual change no one named (invariant 18).",
+   "proposed": "Add exactly two named easings, `bounce` and `elastic`, each the 'out' form (the motion arrives at the second key with rebounds or oscillation) defined by Penner's easeOutBounce and easeOutElastic, evaluated in ease_at, mirrored in TypeScript, and pinned by the reference table. A property with a range refuses an easing whose curve would leave the range, naming the property (Bounce never exceeds 1 so it is always allowed; Elastic is refused on opacity and on a size that would go negative). In and in-out forms are not added; a designer who wants a reversed bounce swaps the keys or uses Hold and keys."
+  },
+  "questions": {
+   "variants": {
+    "type": "choice",
+    "instructions": "Which variants should be added?",
+    "criteria": {
+     "A": "Two: bounce and elastic, each the out form (as proposed).",
+     "B": "Six: in, out and in-out of each.",
+     "C": "Four: in and out of each."
+    }
+   },
+   "range": {
+    "type": "choice",
+    "instructions": "What should happen when Elastic is chosen on opacity or a size where its overshoot leaves the allowed range?",
+    "criteria": {
+     "A": "Refuse by name, saying which property and between which frames (as proposed).",
+     "B": "Clamp the value to the range silently.",
+     "C": "Allow it; the renderer clamps."
+    }
+   },
+   "definition": {
+    "type": "choice",
+    "instructions": "Which definition should fix the curves for good?",
+    "criteria": {
+     "A": "Penner's easeOutBounce and easeOutElastic (period 0.3, amplitude 1), the shared standard (as proposed).",
+     "B": "A new parametrised definition with amplitude and period stored per key.",
+     "C": "CSS linear() piecewise approximations with stored points."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "variants": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "range": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "definition": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1675,
+   "output_tokens": 0,
+   "state_tokens": 492,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "variants": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5815,
+     "B": 0.2606,
+     "C": 0.1578
+    },
+    "confidence": 0.1288,
+    "answer_confidence": 0.5815,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "range": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.1123,
+     "B": 0.1103,
+     "C": 0.7774
+    },
+    "confidence": 0.377,
+    "answer_confidence": 0.7774,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "definition": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5165,
+     "B": 0.1956,
+     "C": 0.2879
+    },
+    "confidence": 0.0726,
+    "answer_confidence": 0.5165,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

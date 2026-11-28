@@ -7,17 +7,25 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 
+use gx_contracts::cue_suggest::{
+    CueNaming, CuePlan, DiffKind, SuggestRequest, SuggestTarget, MOST_BULK_CUES,
+};
+use gx_contracts::ids::{CueEntry, CueId, CueTable};
 use gx_contracts::scene::scene_content_hash;
 use gx_contracts::{ContentHash, Refusal, ReviewState, Revision, TakeId};
 use gx_control_plane::capability::live_allowed;
-use gx_control_plane::intent::{ClearRequest, CueRequest, TakeAt, TakeCommitted, TakeRequest};
-use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
+use gx_control_plane::intent::{ClearRequest, CueRequest, ExpectedProgram, TakeAt, TakeCommitted, TakeRequest};
+use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig, MAIN_LAYER};
 use gx_control_plane::peer::EnginePeer;
+use gx_control_plane::status::EngineStatus;
 use serde::{Deserialize, Serialize};
+
+mod rundown_cues;
+pub use rundown_cues::{RundownCue, RundownCueView};
 
 /// One immutable scene version a take may pin.
 ///
@@ -195,13 +203,25 @@ where
 
     /// Cue a pinned revision using engine-time intent.
     pub fn cue(&mut self, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
+        self.cue_on(MAIN_LAYER, scene, at)
+    }
+
+    /// Cue a pinned revision onto Program layer `layer` (12.10, 12.13). A peer with one Program scene refuses another layer by
+    /// name; it never lands on layer zero.
+    pub fn cue_on(&mut self, layer: i32, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
         let content_hash = Some(pinned(scene)?);
-        let reply = self.peer.handle(ClientRequest::Cue(CueRequest {
-            take_id: scene.take_id.clone(),
-            revision: scene.revision,
-            content_hash,
-            at,
-        }));
+        let reply = self
+            .peer
+            .handle_on_layer(
+                ClientRequest::Cue(CueRequest {
+                    take_id: scene.take_id.clone(),
+                    revision: scene.revision,
+                    content_hash,
+                    at,
+                }),
+                layer,
+            )
+            .finish();
         committed_reply(reply, "cue", |reply| match reply {
             EngineReply::Cued(committed) => Some(*committed),
             _ => None,
@@ -210,13 +230,24 @@ where
 
     /// Take a pinned revision using engine-time intent.
     pub fn take(&mut self, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
+        self.take_on(MAIN_LAYER, scene, at)
+    }
+
+    /// Take a pinned revision to Program layer `layer`; the scene already there leaves through its Out, and the other layers stay.
+    pub fn take_on(&mut self, layer: i32, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
         let content_hash = Some(pinned(scene)?);
-        let reply = self.peer.handle(ClientRequest::Take(TakeRequest {
-            take_id: scene.take_id.clone(),
-            revision: scene.revision,
-            content_hash,
-            at,
-        }));
+        let reply = self
+            .peer
+            .handle_on_layer(
+                ClientRequest::Take(TakeRequest {
+                    take_id: scene.take_id.clone(),
+                    revision: scene.revision,
+                    content_hash,
+                    at,
+                }),
+                layer,
+            )
+            .finish();
         committed_reply(reply, "take", |reply| match reply {
             EngineReply::Taken(committed) => Some(*committed),
             _ => None,
@@ -225,7 +256,17 @@ where
 
     /// Clear Program using engine-time intent.
     pub fn clear(&mut self, at: TakeAt) -> Result<TakeCommitted, Refusal> {
-        let reply = self.peer.handle(ClientRequest::Clear(ClearRequest { at }));
+        self.clear_on(MAIN_LAYER, at, None)
+    }
+
+    /// Clear Program layer `layer` only. With `expected` (the take and revision the operator saw) the clear removes the layer's
+    /// scene only if that is what is on it, and otherwise refuses by name and changes nothing (12.10, decision Q8).
+    pub fn clear_on(&mut self, layer: i32, at: TakeAt, expected: Option<(TakeId, Revision)>) -> Result<TakeCommitted, Refusal> {
+        let expected = expected.map(|(take_id, revision)| ExpectedProgram { take_id, revision });
+        let reply = self
+            .peer
+            .handle_on_layer(ClientRequest::Clear(ClearRequest { at, expected }), layer)
+            .finish();
         committed_reply(reply, "clear", |reply| match reply {
             EngineReply::Cleared(committed) => Some(*committed),
             _ => None,
@@ -297,6 +338,8 @@ fn unexpected_reply(operation: &str, reply: EngineReply) -> Refusal {
 pub struct RundownEntry {
     pub id: String,
     pub scene: PublishedScene,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cue_id: Option<CueId>,
 }
 
 /// The ordered, operator-owned sequence state.
@@ -342,6 +385,67 @@ impl Rundown {
             })
     }
 
+    fn cue_table(&self, status: &EngineStatus) -> Result<CueTable, Refusal> {
+        let table = CueTable {
+            entries: self
+                .entries
+                .iter()
+                .filter_map(|entry| {
+                    Some(CueEntry {
+                        cue_id: entry.cue_id.clone()?,
+                        scene: entry.scene.take_id.clone(),
+                        on_air: rundown_cues::on_air(&entry.scene, status),
+                    })
+                })
+                .collect(),
+        };
+        table.check()?;
+        Ok(table)
+    }
+
+    fn cue_targets(
+        &self,
+        entry_ids: &[String],
+        naming: CueNaming,
+    ) -> Result<(Vec<usize>, SuggestRequest), Refusal> {
+        if entry_ids.len() > MOST_BULK_CUES {
+            return Err(Refusal::SceneParseFailed {
+                detail: format!("a bulk suggestion covers at most {MOST_BULK_CUES} entries"),
+            });
+        }
+        let mut seen = HashSet::new();
+        let mut positions = Vec::with_capacity(entry_ids.len());
+        let mut targets = Vec::with_capacity(entry_ids.len());
+        for id in entry_ids {
+            let mut matches = self
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.id == *id);
+            let (position, entry) = matches.next().ok_or_else(|| Refusal::RundownEntryUnknown {
+                entry_id: id.clone(),
+            })?;
+            if matches.next().is_some() || !seen.insert(id) {
+                return Err(Refusal::SceneParseFailed {
+                    detail: format!("ambiguous or repeated rundown entry {id:?}"),
+                });
+            }
+            positions.push(position);
+            targets.push(SuggestTarget {
+                scene: entry.scene.take_id.clone(),
+                name: entry
+                    .scene
+                    .document
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(&entry.id)
+                    .to_owned(),
+                cue: entry.cue_id.as_ref().map(ToString::to_string),
+            });
+        }
+        Ok((positions, SuggestRequest { targets, naming }))
+    }
+
     pub fn current(&self) -> Result<&RundownEntry, Refusal> {
         self.at(self.cursor)
     }
@@ -368,6 +472,13 @@ pub enum RundownStoreError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    Lock {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Stale {
+        path: PathBuf,
+    },
     Encode {
         source: serde_json::Error,
     },
@@ -375,6 +486,12 @@ pub enum RundownStoreError {
         path: PathBuf,
         source: gx_fs::AtomicWriteError,
     },
+}
+
+impl From<Refusal> for RundownStoreError {
+    fn from(refusal: Refusal) -> Self {
+        Self::Refused { refusal }
+    }
 }
 
 impl fmt::Display for RundownStoreError {
@@ -387,6 +504,10 @@ impl fmt::Display for RundownStoreError {
             Self::Decode { path, source } => {
                 write!(f, "cannot decode rundown {}: {source}", path.display())
             }
+            Self::Lock { path, source } => {
+                write!(f, "cannot lock rundown {}: {source}", path.display())
+            }
+            Self::Stale { path } => write!(f, "rundown {} changed on disk", path.display()),
             Self::Encode { source } => write!(f, "cannot encode rundown: {source}"),
             Self::Write { path, source } => {
                 write!(f, "cannot save rundown {}: {source}", path.display())
@@ -401,6 +522,8 @@ impl std::error::Error for RundownStoreError {
             Self::Refused { refusal } => Some(refusal),
             Self::Read { source, .. } => Some(source),
             Self::Decode { source, .. } => Some(source),
+            Self::Lock { source, .. } => Some(source),
+            Self::Stale { .. } => None,
             Self::Encode { source } => Some(source),
             Self::Write { source, .. } => Some(source),
         }
@@ -420,7 +543,8 @@ impl RundownStore {
             path: path.into(),
             rundown,
         };
-        store.save()?;
+        let _lock = store.lock()?;
+        store.persist(&store.rundown)?;
         Ok(store)
     }
 
@@ -445,7 +569,13 @@ impl RundownStore {
     /// Advance and replace the durable document before reporting success, so a
     /// restart cannot replay the entry an operator has already continued past.
     pub fn advance(&mut self) -> Result<RundownEntry, RundownStoreError> {
-        let mut proposed = self.rundown.clone();
+        let _lock = self.lock()?;
+        let mut proposed = Self::load(&self.path)?.rundown;
+        if proposed != self.rundown {
+            return Err(RundownStoreError::Stale {
+                path: self.path.clone(),
+            });
+        }
         let entry = proposed
             .advance()
             .map_err(|refusal| RundownStoreError::Refused { refusal })?;
@@ -454,8 +584,67 @@ impl RundownStore {
         Ok(entry)
     }
 
+    /// Preview against the current durable show. No file is written.
+    pub fn suggest_cue_ids(
+        &self,
+        entry_ids: &[String],
+        naming: CueNaming,
+        status: &EngineStatus,
+    ) -> Result<CuePlan, RundownStoreError> {
+        let current = Self::load(&self.path)?;
+        let (_, request) = current.rundown.cue_targets(entry_ids, naming)?;
+        Ok(current.rundown.cue_table(status)?.suggest(&request)?)
+    }
+
+    /// Rebuild a preview against the current show inside the write lock.
+    pub fn apply_cue_plan(
+        &mut self,
+        entry_ids: &[String],
+        plan: &CuePlan,
+        status: &EngineStatus,
+    ) -> Result<usize, RundownStoreError> {
+        let _lock = self.lock()?;
+        let mut proposed = Self::load(&self.path)?.rundown;
+        let (positions, request) = proposed
+            .cue_targets(entry_ids, plan.request.naming.clone())
+            .map_err(|_| Refusal::CuePlanStale)?;
+        if request != plan.request {
+            return Err(Refusal::CuePlanStale.into());
+        }
+        let changed = proposed.cue_table(status)?.apply_plan(plan)?;
+        for (position, line) in positions.into_iter().zip(&plan.lines) {
+            if matches!(line.kind, DiffKind::Add | DiffKind::Rename) {
+                proposed.entries[position].cue_id = Some(CueId::parse(&line.to)?);
+            }
+        }
+        if changed != 0 {
+            self.persist(&proposed)?;
+        }
+        self.rundown = proposed;
+        Ok(changed)
+    }
+
     pub fn save(&self) -> Result<(), RundownStoreError> {
+        let _lock = self.lock()?;
+        match Self::load(&self.path) {
+            Ok(current) if current.rundown == self.rundown => {}
+            Ok(_) => {
+                return Err(RundownStoreError::Stale {
+                    path: self.path.clone(),
+                })
+            }
+            Err(RundownStoreError::Read { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         self.persist(&self.rundown)
+    }
+
+    fn lock(&self) -> Result<gx_fs::FileLock, RundownStoreError> {
+        let mut lock_name = self.path.as_os_str().to_os_string();
+        lock_name.push(".lock");
+        let path = PathBuf::from(lock_name);
+        gx_fs::FileLock::exclusive(&path).map_err(|source| RundownStoreError::Lock { path, source })
     }
 
     fn persist(&self, rundown: &Rundown) -> Result<(), RundownStoreError> {
@@ -558,6 +747,7 @@ mod tests {
         fn committed() -> TakeCommitted {
             TakeCommitted {
                 frame: 73,
+                start_frame: None,
                 timebase: RationalRate::P50,
                 clock: ClockSource::FreeRun,
             }
@@ -591,6 +781,7 @@ mod tests {
                     device_tier: self.capability.device_tier,
                     live_allowed: self.capability.live_allowed,
                     program: self.program.clone(),
+                    layers: None,
                     degradations: Vec::new(),
                 }),
                 ClientRequest::Cue(request) => match self.check(
@@ -722,6 +913,7 @@ mod tests {
         RundownEntry {
             id: id.into(),
             scene: scene(&format!("scene/{id}"), 1),
+            cue_id: None,
         }
     }
 
@@ -803,12 +995,42 @@ mod tests {
                     ..
                 }),
                 ClientRequest::Clear(ClearRequest {
-                    at: TakeAt::NextOpportunity
+                    at: TakeAt::NextOpportunity,
+                    expected: None,
                 }),
             ]
         ));
         let wire = serde_json::to_string(&playout.peer().requests).unwrap();
         assert!(!wire.contains("now") && !wire.contains("wallClock"));
+    }
+
+    #[test]
+    fn a_command_on_another_layer_is_refused_by_a_one_layer_peer_and_never_lands_on_layer_zero() {
+        let published = scene("opening", 1);
+        let mut peer = TestPeer::new(DeviceTier::T0);
+        peer.publish(&published);
+        let mut playout = Playout::new(peer);
+
+        for refusal in [
+            playout.cue_on(60, &published, TakeAt::NextOpportunity).unwrap_err(),
+            playout.take_on(60, &published, TakeAt::NextOpportunity).unwrap_err(),
+            playout.clear_on(-5, TakeAt::NextOpportunity, None).unwrap_err(),
+        ] {
+            assert!(matches!(refusal, Refusal::LayerNotSupported { .. }), "{refusal:?}");
+        }
+        assert!(playout.peer().requests.is_empty(), "a request for another layer reached layer zero: {:?}", playout.peer().requests);
+        assert_eq!(playout.peer().program, None);
+
+        // Layer zero by the same route is the ordinary command, and a Clear carries the page the operator expects.
+        playout.take_on(MAIN_LAYER, &published, TakeAt::NextOpportunity).unwrap();
+        playout.clear_on(MAIN_LAYER, TakeAt::NextOpportunity, Some((published.take_id.clone(), published.revision))).unwrap();
+        assert!(matches!(
+            playout.peer().requests.as_slice(),
+            [
+                ClientRequest::Take(_),
+                ClientRequest::Clear(ClearRequest { expected: Some(ExpectedProgram { take_id, revision }), .. }),
+            ] if *take_id == published.take_id && *revision == published.revision
+        ));
     }
 
     #[test]
@@ -844,6 +1066,92 @@ mod tests {
     }
 
     #[test]
+    fn cue_plan_is_read_only_until_confirmed_and_stale_confirmation_preserves_the_show() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "gx-playout-cues-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = root.join("show.json");
+        let first = entry("first");
+        let second = RundownEntry {
+            id: "second".into(),
+            ..first.clone()
+        };
+        let mut store = RundownStore::create(&path, Rundown::new(vec![first, second])).unwrap();
+        let mut other = RundownStore::load(&path).unwrap();
+        let status = TestPeer::new(DeviceTier::T0).status().unwrap();
+        let ids = ["first".to_owned(), "second".to_owned()];
+        let numbering = |start| CueNaming::Numbered {
+            prefix: "C-".into(),
+            start,
+            step: 1,
+            pad: 2,
+        };
+        let before = std::fs::read(&path).unwrap();
+        let plan = store.suggest_cue_ids(&ids, numbering(1), &status).unwrap();
+        let alternative = other.suggest_cue_ids(&ids, numbering(5), &status).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(store.apply_cue_plan(&ids, &plan, &status).unwrap(), 2);
+        let committed = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            other.apply_cue_plan(&ids, &alternative, &status),
+            Err(RundownStoreError::Refused {
+                refusal: Refusal::CuePlanStale
+            })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), committed);
+        let rename = store.suggest_cue_ids(&ids, numbering(9), &status).unwrap();
+        let mut live = status.clone();
+        live.program = Some(ProgramState {
+            take_id: plan.request.targets[0].scene.clone(),
+            revision: Revision(1),
+            committed_frame: 72,
+            scene_frame: 0,
+            playing: true,
+            phase: None,
+            stop_frame: None,
+        });
+        let locked = store.suggest_cue_ids(&ids, numbering(9), &live).unwrap();
+        assert!(locked
+            .lines
+            .iter()
+            .all(|line| matches!(line.refusal, Some(Refusal::CueIdLockedOnAir { .. }))));
+        assert!(matches!(
+            store.apply_cue_plan(&ids, &rename, &live),
+            Err(RundownStoreError::Refused {
+                refusal: Refusal::CuePlanStale
+            })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), committed);
+        let loaded = RundownStore::load(&path).unwrap();
+        assert_eq!(
+            loaded
+                .rundown()
+                .entry("first")
+                .unwrap()
+                .cue_id
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "C-01"
+        );
+        assert_eq!(
+            loaded
+                .rundown()
+                .entry("second")
+                .unwrap()
+                .cue_id
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "C-02"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn rundown_cursor_is_written_atomically_and_survives_reload() {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
@@ -855,8 +1163,14 @@ mod tests {
         let path = root.join("rundown.json");
         let rundown = Rundown::new(vec![entry("opening"), entry("weather")]);
         let mut store = RundownStore::create(&path, rundown).unwrap();
+        let mut stale = RundownStore::load(&path).unwrap();
 
         assert_eq!(store.advance().unwrap().id, "opening");
+        assert!(matches!(
+            stale.advance(),
+            Err(RundownStoreError::Stale { .. })
+        ));
+        assert!(matches!(stale.save(), Err(RundownStoreError::Stale { .. })));
         drop(store);
         let reloaded = RundownStore::load(&path).unwrap();
 

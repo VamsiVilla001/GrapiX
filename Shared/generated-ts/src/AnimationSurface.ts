@@ -6,4 +6,12 @@ import type { SceneEasing } from "./SceneEasing";
  * this from Rust rather than maintaining a second list of properties or
  * easing names that can drift from the contract.
  */
-export type AnimationSurface = { properties: Array<string>, objectKinds: Array<string>, easings: Array<SceneEasing>, };
+export type AnimationSurface = { properties: Array<string>, objectKinds: Array<string>,
+/**
+ * Exact kind allowlist by scalar property. Older clients can use the flat lists.
+ */
+propertyKinds?: { [key in string]?: Array<string> },
+/**
+ * Solid colour tracks and the object kinds that may own them.
+ */
+colourPropertyKinds?: { [key in string]?: Array<string> }, easings: Array<SceneEasing>, };

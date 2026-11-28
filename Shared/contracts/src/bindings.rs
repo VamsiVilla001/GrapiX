@@ -238,6 +238,7 @@ pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Re
         if bindings.is_empty() {
             continue;
         }
+        let mut emptied = false;
         let mut wire =
             serde_json::to_value(&*object).map_err(|error| Refusal::BindingPathInvalid {
                 path: object.base().id.clone(),
@@ -260,11 +261,22 @@ pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Re
                     property: property.clone(),
                 });
             };
-            let value = resolve_path(&scene.data_context, path).map_err(|detail| {
+            let hides = object.base().hide_when_empty == Some(true)
+                && EMPTINESS_PROPERTIES.contains(&property.as_str());
+            let found = lookup_path(&scene.data_context, path).map_err(|detail| {
                 Refusal::BindingPathInvalid {
                     path: path.to_owned(),
                     detail,
                 }
+            })?;
+            // Hide when empty (11.153): an empty value is the point, not a fault. The object is not drawn and keeps its authored value.
+            if hides && is_empty_value(&found) {
+                emptied = true;
+                continue;
+            }
+            let value = found.map_err(|detail| Refusal::BindingPathInvalid {
+                path: path.to_owned(),
+                detail,
             })?;
             validate_value(scene, object, spec, path, value)?;
             if let Some(fields) = wire.as_object_mut() {
@@ -275,6 +287,9 @@ pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Re
             path: object.base().id.clone(),
             detail: error.to_string(),
         })?;
+        if emptied {
+            object.base_mut().visible = false;
+        }
     }
     Ok(resolved)
 }
@@ -319,7 +334,15 @@ pub fn binding_issues(scene: &SceneDocument) -> Vec<BindingIssue> {
                 });
                 continue;
             };
-            let value = match resolve_path(&scene.data_context, path) {
+            let found = lookup_path(&scene.data_context, path);
+            // Hide when empty (11.153): an empty value of such an object is what it is for, not an issue.
+            if object.base().hide_when_empty == Some(true)
+                && EMPTINESS_PROPERTIES.contains(&property.as_str())
+                && found.as_ref().is_ok_and(is_empty_value)
+            {
+                continue;
+            }
+            let value = match found.and_then(|inner| inner) {
                 Ok(value) => value,
                 Err(detail) => {
                     issues.push(BindingIssue {
@@ -442,10 +465,19 @@ fn satisfies_constraint(key: &str, value: f64) -> bool {
 }
 
 fn resolve_path<'a>(data: &'a DataContext, path: &str) -> Result<&'a Value, String> {
+    lookup_path(data, path)?
+}
+
+/// A path's value: `Err(detail)` when the path itself is wrong (empty, malformed, continuing through a
+/// scalar), `Ok(Err(detail))` when the path is fine and the data simply has nothing there (a key or an
+/// index that is absent), `Ok(Ok(value))` otherwise. Hide when empty (11.153) treats the middle case as
+/// an empty value; every other binding refuses it as before.
+fn lookup_path<'a>(data: &'a DataContext, path: &str) -> Result<Result<&'a Value, String>, String> {
     let segments = parse_path(path)?;
-    let mut value = data
-        .get(segments[0])
-        .ok_or_else(|| format!("{path} is absent from the scene data context"))?;
+    let Some(first) = data.get(segments[0]) else {
+        return Ok(Err(format!("{path} is absent from the scene data context")));
+    };
+    let mut value = first;
     for segment in &segments[1..] {
         value = match value {
             Value::Array(values) => {
@@ -453,13 +485,15 @@ fn resolve_path<'a>(data: &'a DataContext, path: &str) -> Result<&'a Value, Stri
                     return Err(format!("{path} addresses array {segment} by a non-index"));
                 }
                 let index = segment.parse::<usize>().expect("binding index is decimal");
-                values
-                    .get(index)
-                    .ok_or_else(|| format!("{path} has no value at index {segment}"))?
+                match values.get(index) {
+                    Some(found) => found,
+                    None => return Ok(Err(format!("{path} has no value at index {segment}"))),
+                }
             }
-            Value::Object(values) => values
-                .get(*segment)
-                .ok_or_else(|| format!("{path} is absent from the scene data context"))?,
+            Value::Object(values) => match values.get(*segment) {
+                Some(found) => found,
+                None => return Ok(Err(format!("{path} is absent from the scene data context"))),
+            },
             // `typeof null` is "object" in the TS rule this ports.
             other => {
                 let kind = if other.is_null() {
@@ -471,7 +505,61 @@ fn resolve_path<'a>(data: &'a DataContext, path: &str) -> Result<&'a Value, Stri
             }
         };
     }
-    Ok(value)
+    Ok(Ok(value))
+}
+
+/// Whether a binding's value counts as empty for Hide when empty: nothing at the path, null, or a string of
+/// only whitespace. Only the string-valued bindings (`text`, `assetId`) can be empty in this sense.
+fn is_empty_value(found: &Result<&Value, String>) -> bool {
+    match found {
+        Err(_) => true,
+        Ok(Value::Null) => true,
+        Ok(Value::String(text)) => text.trim().is_empty(),
+        Ok(_) => false,
+    }
+}
+
+/// What a text binding holds for one record (11.153): the value, nothing at the path, or an empty value. The record check reports these
+/// apart, and an element that hides when empty treats the last two alike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextBinding {
+    /// The record has no field at the path.
+    Missing,
+    /// The field is there and is null or only whitespace.
+    Empty,
+    Text(String),
+}
+
+/// The state of a text binding's value in `data`: `Err(detail)` when the path itself is wrong or the value is not a string (a fault, as
+/// everywhere else in this module), otherwise what is there.
+pub fn text_binding(data: &DataContext, path: &str) -> Result<TextBinding, String> {
+    match lookup_path(data, path)? {
+        Err(_) => Ok(TextBinding::Missing),
+        Ok(Value::Null) => Ok(TextBinding::Empty),
+        Ok(Value::String(text)) if text.trim().is_empty() => Ok(TextBinding::Empty),
+        Ok(Value::String(text)) => Ok(TextBinding::Text(text.clone())),
+        Ok(other) => Err(format!("{path} is {}; Text requires string", json_type(other))),
+    }
+}
+
+/// The bound properties Hide when empty looks at.
+const EMPTINESS_PROPERTIES: [&str; 2] = ["text", "assetId"];
+
+/// Whether this object hides itself now: it asks to, and one of its text or image bindings is empty.
+pub fn hidden_by_emptiness(scene: &SceneDocument, object: &SceneObject) -> bool {
+    if object.base().hide_when_empty != Some(true) {
+        return false;
+    }
+    let Some(bindings) = &object.base().bindings else {
+        return false;
+    };
+    EMPTINESS_PROPERTIES.iter().any(|property| {
+        bindings
+            .get(*property)
+            .and_then(Value::as_str)
+            .and_then(|path| lookup_path(&scene.data_context, path).ok())
+            .is_some_and(|found| is_empty_value(&found))
+    })
 }
 
 fn parse_path(path: &str) -> Result<Vec<&str>, String> {
@@ -666,5 +754,109 @@ mod tests {
             replace_data_context(&mut scene, unchanged),
             Err(Refusal::DataContextUnchanged)
         ));
+    }
+
+    fn name_plate(hide: Option<bool>) -> SceneObject {
+        let mut plate: SceneObject = serde_json::from_value(serde_json::json!({
+            "type": "text", "id": "plate", "name": "plate", "text": "Authored", "fontId": "inter", "size": 40, "width": 300, "height": 60
+        }))
+        .unwrap();
+        plate.base_mut().hide_when_empty = hide;
+        plate.base_mut().bindings = Some(serde_json::Map::from_iter([("text".to_string(), serde_json::json!("p.name"))]));
+        plate
+    }
+
+    /// Hide when empty (11.153): which values count as empty, what a hidden element keeps, and what it never covers.
+    #[test]
+    fn hide_when_empty_hides_on_missing_null_and_blank_and_only_then() {
+        let scene_with = |data: serde_json::Value, plate: SceneObject| {
+            let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+            scene.data_context = serde_json::from_value(data).unwrap();
+            scene.objects.push(plate);
+            scene
+        };
+        let hidden = |data: serde_json::Value| {
+            let scene = scene_with(data, name_plate(Some(true)));
+            let resolved = resolve_scene_bindings(&scene).expect("an empty value is not a refusal");
+            assert!(binding_issues(&scene).is_empty(), "an empty value of a hiding element is not an issue");
+            assert_eq!(hidden_by_emptiness(&scene, &scene.objects[0]), !resolved.objects[0].base().visible);
+            !resolved.objects[0].base().visible
+        };
+        for empty in [
+            serde_json::json!({"p": {"name": ""}}),
+            serde_json::json!({"p": {"name": " \t\n "}}),
+            serde_json::json!({"p": {"name": null}}),
+            serde_json::json!({"p": {}}),
+            serde_json::json!({"q": 1}),
+            serde_json::json!({"p": {"name": "Soul"}, "x": 1, "list": []}),
+        ].into_iter().take(5) {
+            assert!(hidden(empty.clone()), "{empty} should hide");
+        }
+        for shown in [serde_json::json!({"p": {"name": "Soul"}}), serde_json::json!({"p": {"name": " Soul "}})] {
+            assert!(!hidden(shown.clone()), "{shown} should show");
+        }
+
+        // A hidden element keeps what was authored (the resolver put nothing on it), and a shown one gets the value.
+        let scene = scene_with(serde_json::json!({"p": {"name": ""}}), name_plate(Some(true)));
+        let resolved = resolve_scene_bindings(&scene).unwrap();
+        assert!(!resolved.objects[0].base().visible);
+        assert!(scene.objects[0].base().visible, "the authored document is untouched");
+
+        // Off, or absent: a blank string binds as a value, and a missing path is a refusal as it always was.
+        for off in [None, Some(false)] {
+            let scene = scene_with(serde_json::json!({"p": {"name": ""}}), name_plate(off));
+            assert!(resolve_scene_bindings(&scene).unwrap().objects[0].base().visible);
+            assert!(!hidden_by_emptiness(&scene, &scene.objects[0]));
+            let gone = scene_with(serde_json::json!({"p": {}}), name_plate(off));
+            assert!(matches!(resolve_scene_bindings(&gone), Err(Refusal::BindingPathInvalid { .. })));
+            assert_eq!(binding_issues(&gone).len(), 1);
+        }
+
+        // A path that runs through a scalar is a fault even for a hiding element, and a number binding is never "empty".
+        let fault = scene_with(serde_json::json!({"p": {"name": "Soul"}}), {
+            let mut plate = name_plate(Some(true));
+            plate.base_mut().bindings = Some(serde_json::Map::from_iter([("text".to_string(), serde_json::json!("p.name.first"))]));
+            plate
+        });
+        assert!(matches!(resolve_scene_bindings(&fault), Err(Refusal::BindingPathInvalid { .. })));
+        let number = scene_with(serde_json::json!({"p": {}}), {
+            let mut plate = name_plate(Some(true));
+            plate.base_mut().bindings = Some(serde_json::Map::from_iter([("x".to_string(), serde_json::json!("p.x"))]));
+            plate
+        });
+        assert!(matches!(resolve_scene_bindings(&number), Err(Refusal::BindingPathInvalid { .. })));
+        assert!(!hidden_by_emptiness(&number, &number.objects[0]));
+    }
+
+    /// Hide when empty (11.153) covers an image's asset binding as well as a text binding: no logo in the record, no logo drawn.
+    #[test]
+    fn hide_when_empty_covers_an_image_asset_binding() {
+        let image = |hide: Option<bool>| {
+            let mut logo = SceneObject::Image(ImageObject {
+                base: ObjectBase::new("logo", "Logo"),
+                asset_id: "crest".into(),
+                fit: Default::default(),
+                slice: None,
+            });
+            logo.base_mut().hide_when_empty = hide;
+            logo.base_mut().bindings = Some(serde_json::Map::from_iter([("assetId".to_string(), serde_json::json!("team.logo"))]));
+            logo
+        };
+        let scene_with = |data: serde_json::Value, hide: Option<bool>| {
+            let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+            scene.data_context = serde_json::from_value(data).unwrap();
+            scene.objects.push(image(hide));
+            scene
+        };
+        for empty in [serde_json::json!({"team": {"logo": ""}}), serde_json::json!({"team": {"logo": null}}), serde_json::json!({"team": {}})] {
+            let scene = scene_with(empty.clone(), Some(true));
+            assert!(!resolve_scene_bindings(&scene).expect("empty is allowed").objects[0].base().visible, "{empty}");
+            assert!(binding_issues(&scene).is_empty(), "{empty}");
+            assert!(hidden_by_emptiness(&scene, &scene.objects[0]));
+        }
+        // A name that is there is still checked against the scene's assets, hiding or not: that is a fault, not emptiness.
+        let unknown = scene_with(serde_json::json!({"team": {"logo": "nope"}}), Some(true));
+        assert!(matches!(resolve_scene_bindings(&unknown), Err(Refusal::BindingAssetUnknown { .. })));
+        assert!(!hidden_by_emptiness(&unknown, &unknown.objects[0]));
     }
 }

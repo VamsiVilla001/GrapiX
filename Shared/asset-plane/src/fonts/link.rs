@@ -47,7 +47,7 @@ use super::ingest::{
     FontIngestRefusal, PreparedFontBatch, SceneFontLibrary,
 };
 use super::manager::{
-    canonical_link_source, normalize_fallbacks, normalize_family, normalize_weight, short_hash,
+    canonical_link_source, normalize_family, normalize_weight, short_hash,
     LinkedSource,
 };
 use crate::store::{content_hash, AssetStore};
@@ -439,7 +439,7 @@ pub fn prepare_font_link(
             family: draft.family.clone(),
             display_name: draft.family,
             faces: draft.faces,
-            fallback_families: normalize_fallbacks(&[]),
+            fallback_families: Vec::new(),
             embedding_policy: EmbeddingPolicy::Package,
             license: Some(draft.licences.join("; ")),
             enabled: true,

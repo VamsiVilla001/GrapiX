@@ -1,0 +1,7 @@
+Row 11.72, Scene Manager Rename (F2) and Change ID (F7), live check, 28 Nov 2026. Debug Editor, real window, DevTools only; scratch projects SceneRename and SceneRename2; recent-projects.json restored; Editor stopped by PID.
+Save to project: scene/untitled listed. Row buttons: open, rename, changeId, duplicate, publish, delete.
+F2 on the row: Composition popover opens, #scene-name focused, selection 0..8 of "Untitled". Typed "Renamed by F2", Save to project: the row reads "Renamed by F2".
+F7 on the row: popover opens, #scene-label focused. Shift+F7: nothing.
+Row context menu: Editing, Rename, Change ID, Duplicate, Publish, Delete.
+Menu Change ID (first build): popover closed at once (the choosing click reached the close-on-outside-click). After the fix (open one tick later): Change ID -> popover open, #scene-label focused; Rename -> popover open, #scene-name focused.
+Screenshot: live-rename-change-id-28-nov.png.

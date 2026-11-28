@@ -32,6 +32,8 @@ pub struct SourceTrace {
 struct AnimatedSource {
     object_index: usize,
     plan: crate::layer_source::SourceRedraw,
+    text: Option<gx_contracts::scene::TextObject>,
+    reshaped: Option<crate::text::PreparedTexts>,
 }
 
 struct MappedLayer {
@@ -74,6 +76,7 @@ pub struct GpuScene {
     animated: Vec<AnimatedSource>,
     draw: Option<crate::gpu::DrawHandle>,
     texts: crate::text::PreparedTexts,
+    animated_font_bytes: std::sync::Arc<crate::mesh::AssetBytes>,
 }
 
 impl GpuScene {
@@ -120,15 +123,25 @@ impl GpuScene {
                 limit,
                 Some(gpu),
                 scene.images(),
+                Some(scene.animated_font_bytes()),
             )?;
             let (width, height) = (source.width, source.height);
             if let Some(plan) = source.redraw.clone() {
-                animated.push(AnimatedSource { object_index: index, plan });
-            } else if crate::layer_source::animates_a_path(doc, &id) {
+                let text = match object {
+                    SceneObject::Text(text) => Some(text.clone()),
+                    _ => None,
+                };
+                animated.push(AnimatedSource {
+                    object_index: index,
+                    plan,
+                    text,
+                    reshaped: None,
+                });
+            } else if crate::layer_source::animates_source(doc, &id) {
                 return Err(mapping_refusal(
                     &id,
                     &path,
-                    "an animated path needs its source drawn on the GPU every frame, and this one was not",
+                    "animated geometry needs its source drawn on the GPU every frame",
                 ));
             }
             let route = match (source.drawn.is_some(), object) {
@@ -283,6 +296,7 @@ impl GpuScene {
             animated,
             draw: gpu.draw_handle(),
             texts: scene.texts().clone(),
+            animated_font_bytes: scene.animated_font_bytes().clone(),
         })
     }
 
@@ -300,6 +314,12 @@ impl GpuScene {
             self.ring.note_ring_full();
             return Ok(Submitted::RingFull);
         }
+        self.compose_at(scene_frame)?;
+        Ok(self.ring.submit(tag))
+    }
+
+    /// Draw into the working-space GPU tiles without encoding the output.
+    fn compose_at(&mut self, scene_frame: u64) -> Result<(), Refusal> {
         for channel in &self.channels {
             if let Some(value) = evaluate_channel(channel, scene_frame)? {
                 set_base_property(
@@ -314,12 +334,24 @@ impl GpuScene {
         // mismatch is the reference's answer too. Each animated source is drawn
         // again, into the texture it was prepared with, before the frame is composed.
         if !self.animated.is_empty() {
+            gx_contracts::animation::colour::apply(&mut self.evaluated, scene_frame)?;
             gx_contracts::path_anim::apply_path_channels(&mut self.evaluated, scene_frame)?;
             let draw = self.draw.as_ref().ok_or(Refusal::TierTooLow { actual: gx_contracts::DeviceTier::T2 })?;
-            for animated in &self.animated {
+            for animated in &mut self.animated {
+                if let (Some(previous), SceneObject::Text(text)) =
+                    (&mut animated.text, &self.evaluated.objects[animated.object_index])
+                {
+                    if crate::prepared::text_layout_changed(previous, text) {
+                        let shaped = crate::text::prepare_text_object(
+                            &self.evaluated, text, &self.animated_font_bytes,
+                        )?;
+                        animated.reshaped = Some(crate::text::PreparedTexts { objects: vec![shaped] });
+                        previous.clone_from(text);
+                    }
+                }
                 crate::layer_source::redraw_layer_source(
                     &mut self.evaluated,
-                    &self.texts,
+                    animated.reshaped.as_ref().unwrap_or(&self.texts),
                     animated.object_index,
                     draw,
                     &animated.plan,
@@ -361,7 +393,29 @@ impl GpuScene {
         self.compositor
             .composite_with_effects(&self.states, Some(&self.effects))
             .map_err(compositor_refusal)?;
-        Ok(self.ring.submit(tag))
+        Ok(())
+    }
+
+    /// Draw this scene at `scene_frame` into its working-space tiles and stop there: no output encode, no readback. A layer stack takes
+    /// the tiles from here (task 112); the scene's own output ring is not used for it.
+    pub fn compose(&mut self, scene_frame: u64) -> Result<(), Refusal> {
+        self.compose_at(scene_frame)
+    }
+
+    /// The tiles `compose` just drew, for a layer stack to take.
+    pub fn composed_tiles(&self) -> Option<impl ExactSizeIterator<Item = (crate::tiling::Tile, &wgpu::Texture)>> {
+        self.compositor.output_tiles()
+    }
+
+    /// The stage, working space and colour depth a stack of scenes like this one needs, and a stack built for them.
+    pub fn new_stack(&self) -> Result<super::stack::LayerStack, Refusal> {
+        self.compositor.new_stack().map_err(compositor_refusal)
+    }
+
+    /// The canvas size, working space and colour depth: what scenes on one stack must share.
+    pub fn stack_key(&self) -> (u32, u32, gx_contracts::color::WorkingColorSpace, gx_contracts::color::ColorDepth) {
+        let (stage, space, depth, _) = self.compositor.stack_shape();
+        (stage.width, stage.height, space, depth)
     }
 
     /// The newest frame whose readback completed, without waiting.

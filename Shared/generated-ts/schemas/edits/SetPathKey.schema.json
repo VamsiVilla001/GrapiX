@@ -140,15 +140,29 @@
     },
     "SceneEasing": {
       "description": "The easing between two keys. Closed and finite: the curve an author chooses\nmust be one every evaluator knows by name, because a substituted curve is a\nvisual change no one named (invariant 18).",
-      "enum": [
-        "linear",
-        "hold",
-        "ease-in",
-        "ease-out",
-        "ease-in-out",
-        "custom-bezier"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "linear",
+            "hold",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "custom-bezier"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "bounce",
+          "description": "Robert Penner's easeOutBounce: the value arrives at the second key and rebounds with shrinking height, ending exactly on\nit. Never leaves the range between the two keys' values. Not a cubic bezier (11.134).",
+          "type": "string"
+        },
+        {
+          "const": "elastic",
+          "description": "Robert Penner's easeOutElastic (amplitude 1, period 0.3): the value overshoots the second key and settles through a\ndecaying oscillation. It leaves the range between the keys' values by about 37 percent of their distance, so a property\nwith a range refuses it where that would break the range. Not a cubic bezier (11.134).",
+          "type": "string"
+        }
+      ]
     },
     "Vec2": {
       "description": "A 2D point in scene coordinates.",

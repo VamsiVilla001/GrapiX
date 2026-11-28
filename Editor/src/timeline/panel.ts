@@ -128,6 +128,14 @@ function layerHeader(
     );
   }
 
+  // The three cells sit in one box so the row's gap does not come between them and they line up with their headings.
+  const cells = document.createElement("span");
+  cells.className = "timeline-layer-cells";
+  cells.append(
+    layerCell(document, "parent", entry.objectId, layer.columns.parent.label, `Parent of ${entry.label}: ${layer.columns.parent.label}`),
+    layerCell(document, "blend", entry.objectId, layer.columns.blend.label, `Blend mode of ${entry.label}: ${layer.columns.blend.label}`, !layer.columns.blend.applies),
+    layerCell(document, "matte", entry.objectId, layer.columns.matte.label, layer.columns.matte.warning ?? `Track matte of ${entry.label}: ${layer.columns.matte.label}`, false, layer.columns.matte.warning !== undefined),
+  );
   element.append(
     layerSwitch(document, "toggleVisibility", entry.objectId, layer.visible, layer.visibility),
     layerSwitch(document, "toggleLock", entry.objectId, layer.locked, layer.lock),
@@ -135,7 +143,32 @@ function layerHeader(
     index,
     caret,
     name,
+    cells,
   );
+}
+
+/// One of the PARENT, BLEND and MATTE cells. It opens its menu; `layer-columns.ts` says what the menu offers.
+function layerCell(
+  document: Document,
+  column: "parent" | "blend" | "matte",
+  objectId: string,
+  text: string,
+  described: string,
+  inert = false,
+  warn = false,
+): HTMLElement {
+  const button = document.createElement("button");
+  button.setAttribute("type", "button");
+  button.className = "timeline-layer-cell";
+  button.dataset.layerColumn = column;
+  button.dataset.objectId = objectId;
+  button.textContent = text;
+  button.setAttribute("aria-label", described);
+  button.setAttribute("aria-haspopup", "menu");
+  button.setAttribute("title", described);
+  if (inert) button.dataset.inert = "";
+  if (warn) button.dataset.warn = "";
+  return button;
 }
 
 /// Build the panel's DOM for one viewport.

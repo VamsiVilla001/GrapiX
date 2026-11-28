@@ -1,0 +1,36 @@
+{
+ "state": {
+  "decision": "The Publish panel (Figma B6) built from Check graphic, asked AFTER the first build (claude, 25 Nov 2026; the rule is to ask before: this is a recorded lapse).",
+  "facts": "The design shows Destinations (Playout ready, AI models MCP, Prism planned), a list of checks (Style, Motion, Data, Test, Fields, Engine, Format) each OK or FIX, a Fix next issue button, a Publish to Playout button that is off until the checks pass, and a Package card (Scene ID, Default stack, Fields, Motion, Formats, Fingerprint, Who can do what). The owner decided on 24 Nov 2026 that there are no journey step chips and no Fix next issue. The shell's cmd_scene_preflight can fail on fonts, bindings, pictures kept in the project and the Scene ID; the font manager can also block. Nothing in the backend can fail a Motion, Test, Fields, Engine or Format check. Publishing reaches the asset plane (the engine does not take part). Rule: never show a control that does nothing; a value shown must be one the scene holds.",
+  "built": "Four check rows only, those the shell or font manager can fail (Style, Data, Assets, Scene), each OK, FIX with its reasons, or checking; Publish is off until the shell has answered and none says FIX, and Publish asks the shell again at click time. Motion, Fields, Format and the fingerprint are facts on the package card, not checks. The engine is a chip (ready or not) and does not block Publish. The design's Test row and Fix next issue are not drawn. Destinations are not drawn as a list."
+ },
+ "questions": {
+  "rows": {
+   "type": "choice",
+   "instructions": "Which check rows should the panel have?",
+   "criteria": {
+    "A": "Only rows a rule can fail (Style, Data, Assets, Scene); the other facts go on the package card (as built).",
+    "B": "All the design's rows, with the ones that have no rule always showing OK.",
+    "C": "All the design's rows, with the ones that have no rule showing 'not checked yet'."
+   }
+  },
+  "engine": {
+   "type": "choice",
+   "instructions": "Should an engine that is not ready keep Publish off?",
+   "criteria": {
+    "A": "No: show it as a chip only, because publishing goes to the asset plane (as built).",
+    "B": "Yes: Publish is off until the engine is ready.",
+    "C": "Ask the operator to confirm when it is not ready."
+   }
+  },
+  "recheck": {
+   "type": "choice",
+   "instructions": "When the operator clicks Publish, what should happen?",
+   "criteria": {
+    "A": "Ask Check graphic again at that moment and refuse naming the reasons if anything is wrong (as built).",
+    "B": "Trust the last check shown on the panel.",
+    "C": "Publish and let the shell refuse."
+   }
+  }
+ }
+}

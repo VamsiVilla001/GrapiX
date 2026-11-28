@@ -172,3 +172,17 @@ export function pngSize(bytes: Uint8Array): { readonly width: number; readonly h
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
+
+/**
+ * The lines of the engine hover card (visibility decision of 26 Nov 2026, Figma B2v2): the status in words, what the engine said when it
+ * is not current, and the last frame's draw time. The chip stays one word; the rest is on hover or focus.
+ */
+export function engineHoverLines(state: PreviewState): string[] {
+  const lines = [statusWords(state).word];
+  const detail = state.detail?.trim() ?? "";
+  if (detail !== "") lines.push(detail);
+  if (state.renderMs !== undefined && Number.isFinite(state.renderMs) && state.renderMs >= 0) {
+    lines.push(`Last frame drawn in ${Math.round(state.renderMs)} ms`);
+  }
+  return lines;
+}

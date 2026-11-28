@@ -1,0 +1,11 @@
+11.153 slice C, seen in a real Editor window (27 Nov 2026)
+
+Setup: debug Editor shell (DevTools port 9335, built after codex released its claim 804), the real engine (gx-render-worker as the engine, asset plane on 4411, package directory set, its own recovery journal), a project CsvLive, one text bound to the column `name` (width 300, size 48, Manrope with the Arial fallback cleared), fixture players48.csv: 48 records, columns name and team, record 17 a 35 letter name, record 33 blank.
+
+1. Before import: the Data screen listed Sample data only, `CSV file...` enabled, and no delimiter box was drawn (the row had no edit action). Fixed in data-panel.ts with a test that draws the node; after the fix the box read "comma".
+2. CSV file... opened the native Open dialog (the focused window, File name box focused); the fixture path was typed there and confirmed. Result: log "CSV import: players48.csv, 48 records, 2 columns"; sources "CSV file" then "Sample data"; Data description "48 records from players48.csv"; button now "Replace CSV file...".
+3. Check records after publishing to the engine: "46 FIT - 2 NEED FIXING"; 48 record rows drawn; record 1 FITS, record 17 OVERFLOWS 685.5 PX, record 33 EMPTY; checks "Record 17 overflows Text by 685.5 px, in width (1 line)" and "Record 33 leaves Text empty, and it does not hide when empty".
+4. Publish screen: the Test row is FIX with "46 FIT - 2 NEED FIXING", the other four rows OK.
+
+Not captured: a screenshot of the Data or Publish screen after the import (the screenshot tool showed the main window while the screen's own state was read from the page: its rows and labels above are what the page held). Not tried: a second import over the first (the replace prompt), a cancelled picker, a reopened project's `cmd_project_csv_source` restore.
+Engine problems met on the way (not 11.153): the worker refused an old recovery journal written under scene schema 3, so the engine was started with its own journal path; a scene whose font carries the Arial fallback is refused as fontMissing (raised with codex before).

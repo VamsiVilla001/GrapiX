@@ -1,0 +1,129 @@
+{
+ "input": {
+  "state": {
+   "decision": "How the Editor lets a person animate a solid fill or stroke colour (row 11.132, frontend), on top of codex's released contract: timeline.colourChannels[] with createColourKey / updateColourKey / moveColourKey / removeColourKey, cmd_animation_surface.colourPropertyKinds (fill: rect, ellipse, text, shape; stroke: those plus line), interpolation in linear light, setPaint stays the static paint and never keys.",
+   "facts": "Properties has no Fill or Stroke rows today: the colour shows only on the element card (Style: Colour #808080 · 100%) and is changed from the Library's colours (Apply as fill / stroke) or the Pen. Number rows in Properties have a keyframe diamond with previous and next arrows, and Auto-key decides whether a changed number gets a key. Timeline tracks are rows of diamonds; path keys (11.112) already ride the same rows with their own move, delete and easing edits. A colour has a source space (srgb, linear, display-p3, rec709) and every key of one track must share it. Gradients are not animatable by this contract.",
+   "constraints": "One undoable command per gesture; the person and agents read the same rows (invariant 27); a value the contract refuses is not offered, it is dimmed with its reason."
+  },
+  "questions": {
+   "rows": {
+    "type": "choice",
+    "instructions": "What do the Fill and Stroke rows in Properties look like?",
+    "criteria": {
+     "A": "A swatch and its hex (a colour picker on click), with the same keyframe diamond and previous / next arrows the number rows have; shown only for kinds the surface lists, dimmed with the reason when the paint is a gradient or none.",
+     "B": "A hex text field only, no diamond; keys are made from the timeline.",
+     "C": "Separate R, G, B and A number rows, each with its own diamond."
+    }
+   },
+   "edit": {
+    "type": "choice",
+    "instructions": "What does changing the colour in the row do?",
+    "criteria": {
+     "A": "When the property already has colour keys, or Auto-key is on, it writes a key at the playhead (createColourKey, or updateColourKey when a key is there); otherwise it sets the static paint (setPaint). Same rule as the number rows.",
+     "B": "Always sets the static paint; only the diamond makes keys.",
+     "C": "Always writes a key at the playhead."
+    }
+   },
+   "timeline": {
+    "type": "choice",
+    "instructions": "How do colour keys appear and behave in the timeline?",
+    "criteria": {
+     "A": "A track per keyed colour, labelled Fill colour / Stroke colour, its diamonds moved, deleted, staggered and eased with the same gestures as other keys (moveColourKey, removeColourKey, updateColourKey); the speed graph is not offered for them, with its reason.",
+     "B": "Shown, read only.",
+     "C": "Not shown in the timeline; only in Properties."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "rows": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.97,
+    "probabilities": {
+     "A": 0.98,
+     "B": 0,
+     "C": 0.02
+    }
+   },
+   "edit": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.97,
+    "probabilities": {
+     "A": 0.98,
+     "B": 0.02,
+     "C": 0
+    }
+   },
+   "timeline": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.97,
+    "probabilities": {
+     "A": 0.98,
+     "B": 0.01,
+     "C": 0.01
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 1197,
+   "output_tokens": 0,
+   "state_tokens": 303,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "rows": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2294,
+     "B": 0.2997,
+     "C": 0.4709
+    },
+    "confidence": 0.0411,
+    "answer_confidence": 0.4709,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "edit": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.4257,
+     "B": 0.3154,
+     "C": 0.2589
+    },
+    "confidence": 0.0193,
+    "answer_confidence": 0.4257,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "timeline": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.2495,
+     "B": 0.2913,
+     "C": 0.4592
+    },
+    "confidence": 0.0324,
+    "answer_confidence": 0.4592,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

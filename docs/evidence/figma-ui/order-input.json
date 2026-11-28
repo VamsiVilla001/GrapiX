@@ -1,0 +1,34 @@
+{
+ "state": {
+  "decision": "The order in which to implement the new Figma UI design in the GrapiX Editor and Playout (frontend only; the backend is another agent's), and two token choices, asked before coding (user, 24 Nov 2026).",
+  "facts": "Thirty screen exports. Colours, radii and spacing in Figma already equal the shared skwad.css. The type scale differs: Figma uses Manrope 12/16 with ten named styles, the apps use 13px with a dozen ad hoc sizes. Editor: the menu bar, ribbon, layout dropdown, panel frames and the main Make screen are UI work; the named-layout models and shell commands exist but are not wired. Playout: almost all new UI; the commands cue, take, phase and clear exist, and a show's Cue ID table exists in the contract, but the scene bank (12.2), saving a show (12.3), stacks (12.10/12.13), the live preview player (12.5), Airview (12.17) and remote control (6.7) are unbuilt backends. Several screens (Logic, Formats, Charts, Ask, live data) wait on unbuilt rows. Some naming conflicts are open with the user (six or eight menus; CUE versus TAKE words).",
+  "proposed_order": "A foundation (tokens and type styles, the terms table, shared pieces: panel header, field row, chips, armed and hold-to-confirm buttons, band), then B Editor (menu bar, ribbon, layout dropdown and layouts dialog, bottom bar, the Make screen and its card and empty states, timeline and graph and properties, search, start, publish, effects, settings, data with local CSV, library), then C Playout (shell, Playline on the existing commands, monitors, engine-lost and empty states, diagnostics, typed inputs), then D the screens that wait on backend rows."
+ },
+ "questions": {
+  "order": {
+   "type": "choice",
+   "instructions": "Which order should the frontend implementation follow?",
+   "criteria": {
+    "A": "Foundation first (tokens, type, terms, shared pieces), then the Editor screens, then Playout, then the screens that wait on the backend (as proposed).",
+    "B": "Foundation first, then Playout (the live application), then the Editor, then the backend-dependent screens.",
+    "C": "Screen by screen in the export order, without a shared foundation first."
+   }
+  },
+  "info_blue": {
+   "type": "choice",
+   "instructions": "Two blues are used for the information colour: the Figma design's #5aa9e6 (with tint #112130) and Playout's current hard-coded #6fb3d9. Which becomes the shared token?",
+   "criteria": {
+    "A": "The Figma design's #5aa9e6 with its tint, because the design is the source being implemented.",
+    "B": "Playout's #6fb3d9, because it is already in use."
+   }
+  },
+  "unresolved_names": {
+   "type": "noul",
+   "instructions": "May the foundation slice (tokens, type styles, shared pieces) start before the user answers the open naming conflicts (six or eight menus; CUE versus TAKE), since it does not depend on them?",
+   "criteria": {
+    "true": "Yes: the foundation does not depend on those names; start it and ask the user in parallel.",
+    "false": "No: wait for the user's answers before any UI work."
+   }
+  }
+ }
+}

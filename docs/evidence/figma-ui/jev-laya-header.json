@@ -1,0 +1,96 @@
+{
+ "input": {
+  "state": {
+   "decision": "Two choices made while rebuilding the Editor header to the new Figma design (24 Nov 2026), put to Jev and Laya after the fact.",
+   "facts": "The old header had a brand, two scene identity inputs, eight file and edit buttons (New, Open, Import SVG, Save, Undo, Redo, History, Reset layout) and a tool ribbon. The design has a 28 px menu bar with a context line at its right, and a 40 px ribbon with tools, an engine chip, undo, redo and a Publish button; it has no file buttons in the bar. Every one of those file buttons already has a menu item (File and Edit menus) that runs the very same element by clicking it, so the elements must stay in the page. The scene has no field saying whether a project is progressive or interlaced (that is plan row 7.8, not built); the design's context line reads 1080p50.",
+   "built": "The file buttons stay in the page, hidden; their jobs are the menu items. Undo and redo move to the ribbon. The context line reads the size and the rate (1920x1080 . 50 fps) and says no scan."
+  },
+  "questions": {
+   "file_buttons": {
+    "type": "choice",
+    "instructions": "What should happen to the file buttons that every menu item already duplicates?",
+    "criteria": {
+     "A": "Hide them from the bar and keep the elements so the menu items still run them; the design has no such buttons.",
+     "B": "Keep them visible in the bar beside the new ribbon controls.",
+     "C": "Delete the elements and rewrite the menu items to call the code directly."
+    }
+   },
+   "scan": {
+    "type": "choice",
+    "instructions": "The design's context line says 1080p50, but the contract does not yet record whether a project is progressive or interlaced. What should the line say?",
+    "criteria": {
+     "A": "The size and the rate without a scan letter: 1920x1080, 50 fps; add the letter when the contract records it.",
+     "B": "1080p50 as designed, assuming progressive.",
+     "C": "Leave the format out of the line."
+    }
+   }
+  }
+ },
+ "jev": {
+  "model": "jev-1.14.0",
+  "answers": {
+   "file_buttons": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 1,
+    "probabilities": {
+     "A": 1,
+     "B": 0,
+     "C": 0
+    }
+   },
+   "scan": {
+    "type": "choice",
+    "choice": "A",
+    "confidence": 0.96,
+    "probabilities": {
+     "A": 0.97,
+     "B": 0.02,
+     "C": 0.01
+    }
+   }
+  }
+ },
+ "laya": {
+  "model": "convaiinnovations/laya-multilingual",
+  "max_len": 8192,
+  "usage": {
+   "input_tokens": 737,
+   "output_tokens": 0,
+   "state_tokens": 273,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  },
+  "answers": {
+   "file_buttons": {
+    "type": "choice",
+    "choice": "A",
+    "probabilities": {
+     "A": 0.5732,
+     "B": 0.3045,
+     "C": 0.1223
+    },
+    "confidence": 0.1461,
+    "answer_confidence": 0.5732,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "scan": {
+    "type": "choice",
+    "choice": "C",
+    "probabilities": {
+     "A": 0.3154,
+     "B": 0.2282,
+     "C": 0.4564
+    },
+    "confidence": 0.036,
+    "answer_confidence": 0.4564,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  }
+ }
+}

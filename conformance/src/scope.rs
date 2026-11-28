@@ -85,6 +85,7 @@ fn every_request() -> Vec<ClientRequest> {
         }),
         ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
+            expected: None,
         }),
         ClientRequest::ConfigureOutput(OutputConfig {
             adapter: "null".into(),

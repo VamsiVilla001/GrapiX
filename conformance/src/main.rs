@@ -19,8 +19,8 @@ use gx_conformance::{
     Report, RestartableWorker,
 };
 use gx_conformance::{
-    diag_bundle_suite, engine_log_suite, host_log_suite, mcp_log_suite, protected_engine_log_suite,
-    run_log_suite,
+    diag_bundle_suite, engine_log_suite, host_log_suite, mcp_log_suite, mcp_scope_suite,
+    protected_engine_log_suite, run_log_suite,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -70,6 +70,9 @@ fn main() {
     // 5.7: the transport checks every request's scope before the engine sees it.
     report.set_peer("recording mock behind the protected control transport (5.7)");
     scope_enforcement_suite(&mut report);
+    // 8.14: what the MCP crates serve, behind their scopes, with a recording engine behind the Program tools (invariant 65).
+    report.set_peer("every MCP tool the crates serve, Program tools on a recording mock (8.14)");
+    mcp_scope_suite(&mut report);
 
     // The real engine, as a peer. The same control-plane suite that runs
     // against the mock runs against the actual render worker, which is the

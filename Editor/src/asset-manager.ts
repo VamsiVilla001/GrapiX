@@ -157,7 +157,7 @@ export function storageStatement(
   return `not in project ${state.project} yet`;
 }
 
-function previewNodes(asset: AssetLibraryItem, state: AssetManagerState): { image?: UiNode["image"]; cells: UiNode[] } {
+export function previewNodes(asset: AssetLibraryItem, state: AssetManagerState): { image?: UiNode["image"]; cells: UiNode[] } {
   const preview = asset.checksum === undefined ? undefined : state.previews?.get(asset.checksum);
   const label = "Preview";
   const id = `asset/${asset.assetId}/preview`;
@@ -173,7 +173,7 @@ function previewNodes(asset: AssetLibraryItem, state: AssetManagerState): { imag
   return { image: { src: preview.src, alt: `Preview of ${asset.name}` }, cells: [] };
 }
 
-function availability(asset: SceneDocument["assets"][number]): string {
+export function availability(asset: SceneDocument["assets"][number]): string {
   switch (asset.status) {
     case "ready":
       return "ready — bytes are available";
@@ -192,7 +192,7 @@ function availability(asset: SceneDocument["assets"][number]): string {
 
 const NOT_RECORDED = "not recorded";
 
-function provenanceCells(asset: AssetLibraryItem): UiNode[] {
+export function provenanceCells(asset: AssetLibraryItem): UiNode[] {
   const record = asset.provenance;
   const tool = record.tool === undefined
     ? NOT_RECORDED
@@ -219,142 +219,4 @@ function provenanceCells(asset: AssetLibraryItem): UiNode[] {
     label,
     value,
   }));
-}
-
-export function assetManagerPanel(
-  document: SceneDocument,
-  state: AssetManagerState = {},
-): UiNode {
-  const items: UiNode[] = document.assets.map((asset) => {
-    const users = assetUsers(document, asset.assetId);
-    const preview = previewNodes(asset, state);
-
-    return {
-      id: `asset/${asset.assetId}`,
-      role: "listitem",
-      label: asset.name,
-      description: `${asset.kind} · ${availability(asset)} · origin ${asset.provenance.origin ?? NOT_RECORDED}`,
-      selected: state.selectedAssetId === asset.assetId,
-      ...(preview.image === undefined ? {} : { image: preview.image }),
-      actions: [
-        // Points the asset at another file of the same kind; every object
-        // using it follows, because they name the asset, not the file.
-        {
-          name: "relink",
-          label: "Relink",
-          ...(asset.kind === "font"
-            ? { unavailable: FONT_ASSET_RELINK_UNAVAILABLE }
-            : state.importing
-              ? { unavailable: "an import is already running" }
-              : {}),
-        },
-      ],
-      children: [
-        ...preview.cells,
-        {
-          id: `asset/${asset.assetId}/storage`,
-          role: "gridcell",
-          label: "Stored",
-          value: storageStatement(asset, state),
-        },
-        {
-          id: `asset/${asset.assetId}/kind`,
-          role: "gridcell",
-          label: "Kind",
-          value: asset.kind,
-        },
-        {
-          id: `asset/${asset.assetId}/content-hash`,
-          role: "gridcell",
-          label: "Content hash (store address)",
-          value: asset.checksum ?? "not available — no content hash has arrived",
-        },
-        {
-          id: `asset/${asset.assetId}/path`,
-          role: "gridcell",
-          label: "Project-relative path (library address)",
-          value: asset.path,
-        },
-        {
-          id: `asset/${asset.assetId}/availability`,
-          role: "gridcell",
-          label: "Availability",
-          value: availability(asset),
-        },
-        {
-          id: `asset/${asset.assetId}/usage`,
-          role: "gridcell",
-          label: "Used by",
-          value:
-            users.length === 0
-              ? "used by no objects"
-              : `used by ${users.length} object(s): ${users.join(", ")}`,
-        },
-        ...provenanceCells(asset),
-      ],
-    };
-  });
-
-  const children: UiNode[] = [];
-  if (state.notice !== undefined) {
-    children.push({ id: "asset-manager/notice", role: "status", label: "Asset manager", value: state.notice });
-  }
-  for (const [index, problem] of (state.projectProblems ?? []).entries()) {
-    children.push({ id: `asset-manager/problem/${index}`, role: "alert", label: "Asset not in project", value: problem });
-  }
-  children.push({ id: "asset-manager/list", role: "list", label: "Assets", children: items });
-
-  // What the project already holds and this graphic does not use: reusing one
-  // is one action, so the same file is never imported into a project twice.
-  const inScene = new Set(document.assets.map((asset) => asset.checksum).filter((hash) => hash !== undefined));
-  const reusable = (state.projectLibrary ?? []).filter(
-    (asset) => asset.checksum === undefined || !inScene.has(asset.checksum),
-  );
-  if (state.project !== undefined) {
-    children.push({
-      id: "asset-manager/project-library",
-      role: "list",
-      label: `Project library · ${state.project}`,
-      description:
-        reusable.length === 0
-          ? "every asset in this project is already in this scene"
-          : `${reusable.length} asset(s) in the project not used by this scene`,
-      children: reusable.map((asset): UiNode => {
-        const preview = previewNodes(asset, state);
-        const clash = document.assets.find((candidate) => candidate.assetId === asset.assetId);
-        return {
-          id: `project-asset/${asset.assetId}`,
-          role: "listitem",
-          label: asset.name,
-          description: `${asset.kind} · in project ${state.project}`,
-          ...(preview.image === undefined ? {} : { image: preview.image }),
-          actions: [
-            {
-              name: "addToScene",
-              label: "Add to scene",
-              ...(clash === undefined ? {} : { unavailable: `this scene already has an asset with id ${asset.assetId}` }),
-            },
-          ],
-          children: preview.cells,
-        };
-      }),
-    });
-  }
-  return {
-    id: "asset-manager",
-    role: "region",
-    label: "Assets",
-    description:
-      state.project === undefined
-        ? `${document.assets.length} asset(s) in ${document.name} · independent scene, not in a project`
-        : `${document.assets.length} asset(s) in ${document.name} · kept in project ${state.project}`,
-    actions: [
-      {
-        name: "importFiles",
-        label: "Import files",
-        ...(state.importing ? { unavailable: "an asset import is already running" } : {}),
-      },
-    ],
-    children,
-  };
 }

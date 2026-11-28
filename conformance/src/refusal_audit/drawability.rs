@@ -290,8 +290,8 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
             serde_json::json!({ "type": "rect", "id": "sheared", "name": "sheared", "rotation": 30 }),
         ),
     ];
-    let mut text = empty_scene("wire-decoration");
-    text.objects.push(object(serde_json::json!({ "type": "text", "id": "title", "name": "title", "text": "Hello", "fontId": "font_inter", "size": 40, "decoration": { "underline": true, "strikethrough": false } })));
+    let mut text = empty_scene("wire-text-indent");
+    text.objects.push(object(serde_json::json!({ "type": "text", "id": "title", "name": "title", "text": "Hello", "fontId": "font_inter", "size": 40, "textIndent": -12 })));
     text.fonts.push(gx_contracts::font::FontDefinition {
         font_id: "font_inter".into(),
         family: "Inter".into(),
@@ -414,9 +414,9 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
             ),
         ),
         (
-            "text decoration refuses identically in validator and publication wire",
+            "text indent refuses identically in validator and publication wire",
             text,
-            property("title", "decoration", "11.51"),
+            property("title", "textIndent", "11.51"),
         ),
         (
             "opacity range refuses identically in validator and publication wire",

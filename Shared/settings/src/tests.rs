@@ -304,3 +304,34 @@ fn reset_puts_back_one_setting_or_the_whole_scope_and_says_when_nothing_changed(
     assert_eq!(changes[0].key, None, "a whole-scope reset names no key");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+
+#[test]
+fn the_keymap_is_set_whole_survives_a_restart_refuses_a_clash_and_resets_by_name() {
+    let dir = scratch("keymap");
+    let (store, _) = open(&dir);
+    let keys = json!({ "file.save": ["F2"], "motion.add-key": [], "edit.redo": ["Ctrl Shift Z", "Ctrl Y"] });
+    assert!(store.set(SettingsScope::User, "shortcuts", keys.clone()).unwrap());
+    assert!(!store.set(SettingsScope::User, "shortcuts", keys.clone()).unwrap(), "the same map again is not a change");
+
+    // Two commands may not hold one key; the refusal names the key and nothing is written.
+    let clash = json!({ "file.save": ["Ctrl K"], "edit.search": ["Ctrl K"] });
+    assert!(is_refusal_for(store.set(SettingsScope::User, "shortcuts", clash), "shortcuts"));
+    assert_eq!(serde_json::to_value(store.user().shortcuts).unwrap(), keys);
+    // A key that is not written as the menus write it is refused the same way.
+    assert!(is_refusal_for(store.set(SettingsScope::User, "shortcuts", json!({ "file.save": ["Ctrl s"] })), "shortcuts"));
+    assert!(is_refusal_for(store.set(SettingsScope::User, "shortcuts", json!({ "file.save": "Ctrl S" })), "shortcuts"));
+
+    // Reopened from disk, the keymap is the one that was set.
+    drop(store);
+    let (again, _) = open(&dir);
+    assert_eq!(serde_json::to_value(again.user().shortcuts).unwrap(), keys);
+
+    // Resetting the key puts back an empty keymap, and leaves the other settings alone.
+    again.set(SettingsScope::User, "language", json!("hi")).unwrap();
+    assert!(again.reset(SettingsScope::User, Some("shortcuts")).unwrap());
+    assert!(again.user().shortcuts.is_empty());
+    assert_eq!(again.user().language, "hi");
+    assert!(!again.reset(SettingsScope::User, Some("shortcuts")).unwrap());
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -3,7 +3,9 @@ import type { AddAssets } from "./AddAssets";
 import type { AddFonts } from "./AddFonts";
 import type { AddGuide } from "./AddGuide";
 import type { ApplyPreset } from "./ApplyPreset";
+import type { ApplyTextAnimatorPreset } from "./ApplyTextAnimatorPreset";
 import type { ApplyTextStyle } from "./ApplyTextStyle";
+import type { CreateColourKey } from "./CreateColourKey";
 import type { CreateKeyframe } from "./CreateKeyframe";
 import type { CreateObject } from "./CreateObject";
 import type { CreateShape } from "./CreateShape";
@@ -14,11 +16,13 @@ import type { DuplicateObject } from "./DuplicateObject";
 import type { EditPath } from "./EditPath";
 import type { EditProperty } from "./EditProperty";
 import type { LinkPaths } from "./LinkPaths";
+import type { MoveColourKey } from "./MoveColourKey";
 import type { MoveGuide } from "./MoveGuide";
 import type { MoveKeyframe } from "./MoveKeyframe";
 import type { MovePathKey } from "./MovePathKey";
 import type { RelinkAsset } from "./RelinkAsset";
 import type { RelinkMaterial } from "./RelinkMaterial";
+import type { RemoveColourKey } from "./RemoveColourKey";
 import type { RemoveControl } from "./RemoveControl";
 import type { RemoveFont } from "./RemoveFont";
 import type { RemoveGuide } from "./RemoveGuide";
@@ -52,9 +56,11 @@ import type { SetSceneLabel } from "./SetSceneLabel";
 import type { SetSceneName } from "./SetSceneName";
 import type { SetShapePath } from "./SetShapePath";
 import type { SetStroke } from "./SetStroke";
+import type { SetTextAnimator } from "./SetTextAnimator";
 import type { SetTrackMatte } from "./SetTrackMatte";
 import type { SetTrim } from "./SetTrim";
 import type { UnlinkPath } from "./UnlinkPath";
+import type { UpdateColourKey } from "./UpdateColourKey";
 import type { UpdateFont } from "./UpdateFont";
 import type { UpdateKeyframe } from "./UpdateKeyframe";
 
@@ -62,4 +68,4 @@ import type { UpdateKeyframe } from "./UpdateKeyframe";
  * One change to one scene document. Only carried inside
  * `EditorCommand::EditScene` and only applied through [`apply_edits`].
  */
-export type SceneEdit = { "edit": "createObject" } & CreateObject | { "edit": "deleteObject" } & DeleteObject | { "edit": "duplicateObject" } & DuplicateObject | { "edit": "renameObject" } & RenameObject | { "edit": "setObjectField" } & SetObjectField | { "edit": "setObjectVisible" } & SetObjectVisible | { "edit": "setObjectLocked" } & SetObjectLocked | { "edit": "editProperty" } & EditProperty | { "edit": "createKeyframe" } & CreateKeyframe | { "edit": "updateKeyframe" } & UpdateKeyframe | { "edit": "moveKeyframe" } & MoveKeyframe | { "edit": "removeKeyframe" } & RemoveKeyframe | { "edit": "applyPreset" } & ApplyPreset | { "edit": "setPhase" } & SetPhase | { "edit": "removePhase" } & RemovePhase | { "edit": "declareControl" } & DeclareControl | { "edit": "removeControl" } & RemoveControl | { "edit": "replaceControl" } & ReplaceControl | { "edit": "saveTextStyle" } & SaveTextStyle | { "edit": "applyTextStyle" } & ApplyTextStyle | { "edit": "setBinding" } & SetBinding | { "edit": "replaceDataContext" } & ReplaceDataContext | { "edit": "relinkMaterial" } & RelinkMaterial | { "edit": "deleteMaterial" } & DeleteMaterial | { "edit": "relinkAsset" } & RelinkAsset | { "edit": "setAssetColorSpace" } & SetAssetColorSpace | { "edit": "setSceneName" } & SetSceneName | { "edit": "setSceneLabel" } & SetSceneLabel | { "edit": "setSceneId" } & SetSceneId | { "edit": "addFonts" } & AddFonts | { "edit": "removeFont" } & RemoveFont | { "edit": "updateFont" } & UpdateFont | { "edit": "replaceFont" } & ReplaceFont | { "edit": "addAssets" } & AddAssets | { "edit": "setCanvas" } & SetCanvas | { "edit": "createShape" } & CreateShape | { "edit": "setGroupChildren" } & SetGroupChildren | { "edit": "setObjectMasks" } & SetObjectMasks | { "edit": "setClipChild" } & SetClipChild | { "edit": "setTrackMatte" } & SetTrackMatte | { "edit": "setPreserveTransparency" } & SetPreserveTransparency | { "edit": "setTrim" } & SetTrim | { "edit": "setPaint" } & SetPaint | { "edit": "setStroke" } & SetStroke | { "edit": "setBlendMode" } & SetBlendMode | { "edit": "setAnchor" } & SetAnchor | { "edit": "setEffects" } & SetEffects | { "edit": "setShapePath" } & SetShapePath | { "edit": "editPath" } & EditPath | { "edit": "linkPaths" } & LinkPaths | { "edit": "unlinkPath" } & UnlinkPath | { "edit": "addGuide" } & AddGuide | { "edit": "moveGuide" } & MoveGuide | { "edit": "removeGuide" } & RemoveGuide | { "edit": "removeSubpath" } & RemoveSubpath | { "edit": "setPathKey" } & SetPathKey | { "edit": "removePathKey" } & RemovePathKey | { "edit": "movePathKey" } & MovePathKey;
+export type SceneEdit = { "edit": "createObject" } & CreateObject | { "edit": "deleteObject" } & DeleteObject | { "edit": "duplicateObject" } & DuplicateObject | { "edit": "renameObject" } & RenameObject | { "edit": "setObjectField" } & SetObjectField | { "edit": "setObjectVisible" } & SetObjectVisible | { "edit": "setObjectLocked" } & SetObjectLocked | { "edit": "editProperty" } & EditProperty | { "edit": "createKeyframe" } & CreateKeyframe | { "edit": "updateKeyframe" } & UpdateKeyframe | { "edit": "moveKeyframe" } & MoveKeyframe | { "edit": "removeKeyframe" } & RemoveKeyframe | { "edit": "applyPreset" } & ApplyPreset | { "edit": "setPhase" } & SetPhase | { "edit": "removePhase" } & RemovePhase | { "edit": "declareControl" } & DeclareControl | { "edit": "removeControl" } & RemoveControl | { "edit": "replaceControl" } & ReplaceControl | { "edit": "saveTextStyle" } & SaveTextStyle | { "edit": "applyTextStyle" } & ApplyTextStyle | { "edit": "setBinding" } & SetBinding | { "edit": "replaceDataContext" } & ReplaceDataContext | { "edit": "relinkMaterial" } & RelinkMaterial | { "edit": "deleteMaterial" } & DeleteMaterial | { "edit": "relinkAsset" } & RelinkAsset | { "edit": "setAssetColorSpace" } & SetAssetColorSpace | { "edit": "setSceneName" } & SetSceneName | { "edit": "setSceneLabel" } & SetSceneLabel | { "edit": "setSceneId" } & SetSceneId | { "edit": "addFonts" } & AddFonts | { "edit": "removeFont" } & RemoveFont | { "edit": "updateFont" } & UpdateFont | { "edit": "replaceFont" } & ReplaceFont | { "edit": "addAssets" } & AddAssets | { "edit": "setCanvas" } & SetCanvas | { "edit": "createShape" } & CreateShape | { "edit": "setGroupChildren" } & SetGroupChildren | { "edit": "setObjectMasks" } & SetObjectMasks | { "edit": "setClipChild" } & SetClipChild | { "edit": "setTrackMatte" } & SetTrackMatte | { "edit": "setPreserveTransparency" } & SetPreserveTransparency | { "edit": "setTrim" } & SetTrim | { "edit": "setPaint" } & SetPaint | { "edit": "setStroke" } & SetStroke | { "edit": "setBlendMode" } & SetBlendMode | { "edit": "setAnchor" } & SetAnchor | { "edit": "setEffects" } & SetEffects | { "edit": "setShapePath" } & SetShapePath | { "edit": "editPath" } & EditPath | { "edit": "linkPaths" } & LinkPaths | { "edit": "unlinkPath" } & UnlinkPath | { "edit": "addGuide" } & AddGuide | { "edit": "moveGuide" } & MoveGuide | { "edit": "removeGuide" } & RemoveGuide | { "edit": "removeSubpath" } & RemoveSubpath | { "edit": "setPathKey" } & SetPathKey | { "edit": "removePathKey" } & RemovePathKey | { "edit": "movePathKey" } & MovePathKey | { "edit": "createColourKey" } & CreateColourKey | { "edit": "updateColourKey" } & UpdateColourKey | { "edit": "moveColourKey" } & MoveColourKey | { "edit": "removeColourKey" } & RemoveColourKey | { "edit": "setTextAnimator" } & SetTextAnimator | { "edit": "applyTextAnimatorPreset" } & ApplyTextAnimatorPreset;

@@ -60,7 +60,7 @@ fn an_svg_is_imported_with_every_tier_named_and_its_source_kept() {
     let outcome = &replies[0]["result"];
     assert_eq!(
         outcome["effects"][0],
-        serde_json::json!({ "effect": "stored", "origin": { "project": "news", "sceneId": "brand" } }),
+        serde_json::json!({ "effect": "stored", "sceneLabel": "1", "origin": { "project": "news", "sceneId": "brand" } }),
         "{outcome}"
     );
     let report = &outcome["effects"][1]["report"];
@@ -108,6 +108,10 @@ fn an_svg_is_imported_with_every_tier_named_and_its_source_kept() {
         .read_scene("news", "brand")
         .expect("the import is stored");
     assert_eq!(stored.name, "brand", "named after its source file");
+    assert_eq!(
+        stored.scene_label.as_deref(),
+        outcome["effects"][0]["sceneLabel"].as_str()
+    );
     let ids: Vec<&str> = stored
         .objects
         .iter()

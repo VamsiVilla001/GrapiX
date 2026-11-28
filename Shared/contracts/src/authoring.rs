@@ -132,12 +132,16 @@ fn build_object(scene: &SceneDocument, kind: &str, id: String, name: String) -> 
                 text_case: Default::default(),
                 decoration: Default::default(),
                 overflow: Default::default(),
+                max_lines: None,
+                kerning: None,
                 align: Default::default(),
                 line_height: None,
                 letter_spacing: 0.0,
                 word_spacing: 0.0,
                 paragraph_spacing: 0.0,
                 text_indent: 0.0,
+                baseline_shift: None,
+                text_animator: None,
             })
         }
         "line" => {
@@ -302,8 +306,18 @@ pub fn delete_object(
         .timeline
         .path_channels
         .retain(|channel| !removed_set.contains(channel.object_id.as_str()));
-    let removed_channel_count =
-        channels_before - scene.timeline.channels.len() + path_channels_before - scene.timeline.path_channels.len();
+    let mut removed_colour_channels = 0;
+    if let Some(channels) = &mut scene.timeline.colour_channels {
+        let before = channels.len();
+        channels.retain(|channel| !removed_set.contains(channel.object_id.as_str()));
+        removed_colour_channels = before - channels.len();
+        if channels.is_empty() {
+            scene.timeline.colour_channels = None;
+        }
+    }
+    let removed_channel_count = channels_before - scene.timeline.channels.len()
+        + path_channels_before - scene.timeline.path_channels.len()
+        + removed_colour_channels;
 
     let cleared_active_camera = scene
         .active_camera_id
@@ -415,7 +429,18 @@ pub fn duplicate_object(
             copied_path_channels.push(copy);
         }
     }
-    let copied_channel_count = copied_channels.len() + copied_path_channels.len();
+    let mut copied_colour_count = 0;
+    if let Some(channels) = &mut scene.timeline.colour_channels {
+        let copies: Vec<_> = channels.iter().filter_map(|channel| {
+            let id = remap.get(&channel.object_id)?;
+            let mut copy = channel.clone();
+            copy.object_id.clone_from(id);
+            Some(copy)
+        }).collect();
+        copied_colour_count = copies.len();
+        channels.extend(copies);
+    }
+    let copied_channel_count = copied_channels.len() + copied_path_channels.len() + copied_colour_count;
     scene.timeline.channels.extend(copied_channels);
     scene.timeline.path_channels.extend(copied_path_channels);
 

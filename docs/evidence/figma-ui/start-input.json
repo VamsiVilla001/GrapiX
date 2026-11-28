@@ -1,0 +1,45 @@
+{
+ "state": {
+  "decision": "The Start screen (Figma B1: Start a graphic tiles, Recent graphics with state chips) in the Editor, asked BEFORE coding (claude, 25 Nov 2026). The owner decided it fills the empty-graphic view (S1) rather than being a tab.",
+  "facts": "The design shows four tiles (Blank graphic, From a Figma frame, From a PSD, From an SVG), an Event style block (Event BGIS 2026, Format 1080p50 32 bit sRGB), a note that GrapiX starts from no preset layout and that colours, fonts and logos come from the event style, buttons New blank graphic / Bring in Figma frame / PSD, and a list of Recent graphics each with a chip: READY TO SEND, DATA STALE, SENT v2, FONT MISSING. What the Editor has behind each: a blank graphic (Add a box) and SVG import work; there is no Editor button for a Figma frame (Figma comes in through an approved agent's MCP, row 18.2) and PSD import is row 11.59, not built; there is no event-style or Event concept in the contracts; nothing in the Editor knows a graphic's data is stale (no Data Hub, row 19.14 undecided); font state is resolved only for the graphic that is open, not for the others; the project's scene list gives each graphic its name, its published revision when it has one, and a reason when its file will not open; it carries no time of last opening. Rules the owner set: a control that does nothing is not drawn as if it worked (menu items that wait for a row are shown dimmed with the row named); a value shown must be one the app holds. The empty view today lets the pointer through so a person can draw on an empty stage.",
+  "proposed": "A card over the empty stage, drawn only while the graphic has no elements and no drawing tool is armed. Tiles: Blank graphic (adds a box) and From an SVG (brings in a drawing) work; From a Figma frame and From a PSD are drawn dimmed with the row that owns them in the tooltip. A Format line shows the open graphic's own canvas, rate, depth and space; there is no Event row. The list is titled Graphics in this project (not Recent, since there is no recency), in the scene list's order, open graphic left out, each with SENT vN, NOT SENT or WILL NOT OPEN. No READY TO SEND, DATA STALE or FONT MISSING chip, and no step chips or Fix next issue (owner, 24 Nov). A row opens its graphic."
+ },
+ "questions": {
+  "dimmed_tiles": {
+   "type": "choice",
+   "instructions": "How should the Figma frame and PSD tiles be drawn, since the Editor cannot do either yet?",
+   "criteria": {
+    "A": "Dimmed, not clickable, with the owning plan row (18.2, 11.59) in the tooltip (as proposed).",
+    "B": "Left out until they work.",
+    "C": "Drawn as normal tiles that open a message saying it is not built."
+   }
+  },
+  "list_title": {
+   "type": "choice",
+   "instructions": "What should the list of the project's graphics be called, given the Editor has no record of when each was last opened?",
+   "criteria": {
+    "A": "Graphics in this project, in the scene list's order (as proposed).",
+    "B": "Recent graphics, as in the design, in the scene list's order.",
+    "C": "Recent graphics, with a new record of last-opened times kept by the page."
+   }
+  },
+  "chips": {
+   "type": "choice",
+   "instructions": "Which state chips should each listed graphic carry?",
+   "criteria": {
+    "A": "Only those the project's scene list can state: SENT vN, NOT SENT, WILL NOT OPEN (as proposed).",
+    "B": "All four of the design (READY TO SEND, DATA STALE, SENT vN, FONT MISSING), computing the missing ones by reading every graphic.",
+    "C": "No chips."
+   }
+  },
+  "pointer": {
+   "type": "choice",
+   "instructions": "The empty view lets the pointer through so a person can draw on an empty stage. How should the larger Start card treat that?",
+   "criteria": {
+    "A": "The card takes the pointer only where it sits and is hidden while a drawing tool is armed (as proposed).",
+    "B": "The card covers the whole stage and takes the pointer; drawing starts after the first element is added.",
+    "C": "The card is never drawn; the Start content lives only in a panel."
+   }
+  }
+ }
+}
